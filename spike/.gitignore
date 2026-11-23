@@ -1,4 +1,5 @@
 node_modules/
 *.whl
 *.snapshot
+01-build123d-wasm/wheels/
 .venv/

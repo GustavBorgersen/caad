@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>CAAD spike 5 — build123d in the browser</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:2rem;max-width:46rem;background:#fafafa;color:#222}
+pre{background:#111;color:#e8e8e8;padding:1rem;border-radius:6px;min-height:9rem}
+.note{color:#555}</style></head>
+<body>
+<h1>build123d in the browser</h1>
+<p class="note">Lean build123d (no texture/sympy/sklearn/IPython/ezdxf/scipy) in a Web Worker. Reload the page after it finishes to measure a repeat visit (cached downloads).</p>
+<pre id="out">starting…</pre>
+<p id="ui" class="note">This line updates every 100 ms while Python loads, to show the page stays responsive: <b id="tick">0</b></p>
+<script>
+const out = document.getElementById("out");
+const lines = [`visit: ${performance.getEntriesByType("navigation")[0]?.type || "?"}  ·  ${navigator.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] || ""}`];
+const w = new Worker("worker.js", { type: "module" });
+w.onerror = (e) => { lines.push("WORKER ERROR: " + (e.message || "failed to start (see console)")); out.textContent = lines.join("\n"); };
+w.onmessage = (e) => { if (e.data !== "DONE") lines.push(e.data); out.textContent = lines.join("\n"); };
+let n = 0; setInterval(() => document.getElementById("tick").textContent = ++n, 100);
+</script>
+</body></html>
