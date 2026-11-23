@@ -1,6 +1,6 @@
 # CAAD app
 
-The browser app: a static site (Vite + TypeScript). build123d runs in a Web Worker (Pyodide + OCP.wasm); `public/caad_kernel.py` turns a part file into a timeline, runs it up to a feature and tessellates the result per face and edge.
+The browser app: a static site (Vite + TypeScript). build123d runs in a Web Worker (Pyodide + OCP.wasm); `public/caad_kernel.py` turns a part file into a timeline, runs it up to a feature, tessellates the result per face and edge, and finds verified build123d selectors for selected geometry.
 
 ```bash
 npm install
@@ -19,4 +19,5 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | `src/viewer.ts` | three.js view, Z up, face/edge picking and highlighting |
 | `src/editor.ts` | CodeMirror code panel with error and feature line marks |
 | `src/timeline.ts` | Timeline panel with rollback bar |
+| `src/selection.ts` | Selection panel: properties and verified build123d selectors |
 | `src/project.ts` | Local folder (File System Access API) or the bundled examples |

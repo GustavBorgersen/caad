@@ -38,7 +38,9 @@ class _Stub(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 sys.meta_path.insert(0, _Stub())
 `;
 
-type RunRequest = { id: number; type: "run"; src: string; filename: string; upto: number | null };
+type RunRequest =
+  | { id: number; type: "run"; src: string; filename: string; upto: number | null }
+  | { id: number; type: "call"; fn: "select" | "resolve"; args: unknown[] };
 
 const t0 = performance.now();
 const seconds = () => ((performance.now() - t0) / 1000).toFixed(1);
@@ -65,8 +67,18 @@ async function boot() {
   drain();
 }
 
+let gen = 0; // number of builds done: lets the page ignore answers about an older model
+
 function handle(req: RunRequest) {
+  if (req.type === "call") {
+    const r = py.globals.get(req.fn)(...req.args.map((a) => py.toPy(a)));
+    const result = r?.toJs ? r.toJs({ dict_converter: Object.fromEntries }) : r;
+    r?.destroy?.();
+    postMessage({ type: "result", id: req.id, gen, result });
+    return;
+  }
   const r = run!(req.src, req.filename, req.upto ?? undefined); // undefined becomes None (null would be JsNull)
+  gen++;
   const result = r.toJs({ dict_converter: Object.fromEntries });
   r.destroy();
   const transfer: Transferable[] = [];
@@ -77,7 +89,7 @@ function handle(req: RunRequest) {
     transfer.push(m.positions.buffer, m.indices.buffer);
     for (const e of m.edges) { e.points = new Float32Array(e.points); transfer.push(e.points.buffer); }
   }
-  postMessage({ type: "result", id: req.id, result }, transfer);
+  postMessage({ type: "result", id: req.id, gen, result }, transfer);
 }
 
 function drain() {

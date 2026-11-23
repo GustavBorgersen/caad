@@ -61,8 +61,7 @@ export class Viewer {
     this.data = mesh;
     this.hovered = null;
     this.selection = [];
-    this.agent = [];
-    this.onSelect(this.selection);
+    this.agent = []; // the page restores the selection after a rebuild (see setSelection)
     if (!mesh) { this.render(); return; }
 
     const geo = new THREE.BufferGeometry();
@@ -100,6 +99,17 @@ export class Viewer {
     this.scene.add(this.faces, this.edges);
     this.recolor();
     if (fit) this.fit(mesh.bbox);
+    this.render();
+  }
+
+  /** Set the selection from face/edge indices (e.g. restored after a rebuild) without firing onSelect. */
+  setSelection(items: { kind: "face" | "edge"; index: number }[]) {
+    if (!this.data) return;
+    const d = this.data;
+    this.selection = items
+      .filter((i) => i.index < (i.kind === "face" ? d.faces.length : d.edges.length))
+      .map((i) => ({ ...i, type: i.kind === "face" ? d.face_types[i.index] : d.edges[i.index].type, point: [0, 0, 0] }));
+    this.recolor();
     this.render();
   }
 

@@ -1,9 +1,10 @@
 import "./style.css";
 import { Editor } from "./editor";
-import { Kernel, type BuildResult } from "./kernel";
+import { Kernel, type BuildResult, type Kind, type SelectInfo } from "./kernel";
 import { canOpenFolders, examples, lastFolder, openFolder, reopen, type Project } from "./project";
+import { renderSelection } from "./selection";
 import { renderTimeline } from "./timeline";
-import { Viewer } from "./viewer";
+import { Viewer, type Pick } from "./viewer";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const POLL_MS = 1000;
@@ -20,6 +21,8 @@ const state = {
   modified: 0, // last-modified time of the open file as we last saw or wrote it
   result: null as BuildResult | null,
   fitNext: true,
+  // The current selection, as the best selector per kind: re-resolved after every rebuild.
+  selection: [] as SelectInfo[],
 };
 
 // --- Status -----------------------------------------------------------------------------------
@@ -45,6 +48,7 @@ async function rebuild() {
   state.result = r;
   viewer.setMesh(r.mesh, state.fitNext && !!r.mesh);
   if (r.mesh) state.fitNext = false;
+  restoreSelection(r.gen);
   renderTimeline($("timeline"), r, {
     rollback: (upto) => { state.upto = upto; rebuild(); },
     hover: (f) => editor.markFeature(f ? [f.line, f.end] : null, !!f),
@@ -55,6 +59,41 @@ async function rebuild() {
   err.textContent = r.error ? `Line ${r.error.line ?? "?"}: ${r.error.message}` : "";
   const ms = (performance.now() - t).toFixed(0);
   status(`${r.ok ? "Built" : "Failed"} in ${ms} ms (Python ${r.times.build} s, mesh ${r.times.mesh} s)`);
+}
+
+// --- Selection ------------------------------------------------------------------------------
+
+async function describeSelection(picks: { kind: Kind; index: number }[]) {
+  const gen = state.result?.gen;
+  const infos: SelectInfo[] = [];
+  for (const kind of ["face", "edge"] as Kind[]) {
+    const idx = picks.filter((p) => p.kind === kind).map((p) => p.index);
+    if (idx.length) infos.push(await kernel.select(kind, idx));
+  }
+  if (gen !== state.result?.gen || infos.some((i) => i.gen !== gen)) return; // the model changed meanwhile
+  state.selection = infos;
+  renderSelection($("selection"), infos);
+}
+
+viewer.onSelect = (picks: Pick[]) => {
+  if (!picks.length) { state.selection = []; renderSelection($("selection"), []); return; }
+  describeSelection(picks);
+};
+
+/** After a rebuild, find the selected geometry again through its selectors. */
+async function restoreSelection(gen: number) {
+  const keep = state.selection.filter((i) => i.selectors.length);
+  if (!keep.length) { renderSelection($("selection"), []); return; }
+  const picks: { kind: Kind; index: number }[] = [];
+  for (const info of keep) {
+    const kind = info.items[0].kind;
+    const r = await kernel.resolve(kind, info.selectors[0].expr);
+    if (r.gen !== gen) return; // another rebuild already happened
+    picks.push(...r.value.map((index) => ({ kind, index })));
+  }
+  viewer.setSelection(picks);
+  if (picks.length) describeSelection(picks);
+  else { state.selection = []; renderSelection($("selection"), []); }
 }
 
 // --- Files ------------------------------------------------------------------------------------
@@ -80,6 +119,7 @@ async function openPart(path: string) {
   state.path = path;
   state.upto = null;
   state.fitNext = true;
+  state.selection = [];
   for (const li of $("parts").children) li.classList.toggle("active", li.textContent === path);
   $("file-name").textContent = path;
   editor.setText(await state.project.read(path));

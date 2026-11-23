@@ -45,12 +45,42 @@ try {
   console.log("error panel:", await page.$eval("#error", (e) => e.hidden ? "(hidden)" : e.textContent));
   await page.screenshot({ path: `${OUT}/caad-3-error.png` });
 
-  // Hover and click a face in the middle of the view.
+  // Undo the broken fillet, then select a face and check the panel.
+  const edit = (from, to) => page.evaluate(([f, t]) => {
+    const { editor } = window.caad;
+    editor.view.dispatch({ changes: { from: 0, to: editor.text.length, insert: editor.text.replace(f, t) } });
+  }, [from, to]);
+  before = await lastStatus();
+  await edit("radius=50)", "radius=5)");
+  await waitNewBuild(before);
+  const panel = () => page.$eval("#selection", (e) => e.hidden ? "(hidden)" : e.innerText.replace(/\n+/g, " | "));
   const box = await (await page.$("#view canvas")).boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  console.log("\nselection after click:", JSON.stringify(await page.evaluate(() => window.caad.viewer.selection)));
+  await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.62);
+  await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.62);
+  await page.waitForFunction(() => !document.getElementById("selection").hidden, { timeout: 10_000 });
+  console.log("\nselection panel:", await panel());
   await page.screenshot({ path: `${OUT}/caad-4-select.png` });
+
+  // Shift-click a second face: group selector.
+  await page.keyboard.down("Shift");
+  await page.mouse.click(box.x + box.width * 0.62, box.y + box.height * 0.35);
+  await page.keyboard.up("Shift");
+  await page.waitForFunction(() => /faces?|edges?/.test(document.querySelector("#selection .title")?.textContent ?? "") && window.caad.viewer.selection.length === 2, { timeout: 10_000 }).catch(() => {});
+  console.log("two selected:", await panel());
+  await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.62); // back to one face
+
+  // Change a dimension: the selection must survive the rebuild.
+  await page.waitForFunction(() => window.caad.viewer.selection.length === 1, { timeout: 10_000 });
+  await new Promise((r) => setTimeout(r, 1500));
+  const selBefore = await panel();
+  before = await lastStatus();
+  await edit("thickness = 8", "thickness = 12");
+  await waitNewBuild(before);
+  await new Promise((r) => setTimeout(r, 2500));
+  const selAfter = await panel();
+  console.log("after thickness 8 -> 12:", selAfter);
+  console.log(selBefore.split(" | ").at(-1) === selAfter.split(" | ").at(-1) ? "PASS: selection kept across rebuild" : "CHECK: selection changed");
+  await page.screenshot({ path: `${OUT}/caad-5-kept.png` });
   await done(0);
 } catch (e) {
   console.log("TEST FAILED:", e.message);

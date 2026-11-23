@@ -62,7 +62,7 @@ with BuildPart() as bracket:                    # the part
 | :-- | :-- |
 | M1 | **Done** (2026-11-23): `CAAD/app`, kernel in a worker, examples built in; headless smoke test passes |
 | M2 | **Done** (2026-11-23): timeline, rollback, errors per feature, editing with save and rebuild; outside edits (the agent) show up in ~2 s — confirmed in Chrome with a real folder |
-| M3 | Started: face/edge hover and click selection work; info panel and selectors next |
+| M3 | **Done** (2026-11-23): hover/click/Shift-click selection; panel with type, area/length, radius, centre, normal/axis; up to three **verified** selectors (each is evaluated and must return exactly the selection; position-based ones are labelled); the selection is found again after every rebuild |
 | M4–M5 | Not started |
 
 ## Not in the MVP

@@ -8,8 +8,8 @@ import ast
 import time
 import traceback
 
-from build123d import BuildPart, GeomType, Part
-from OCP.BRepAdaptor import BRepAdaptor_Curve
+from build123d import Axis, BuildPart, CenterOf, GeomType, Part
+from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRep import BRep_Tool
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.GCPnts import GCPnts_TangentialDeflection
@@ -194,3 +194,165 @@ def tessellate(shape, tol=0.05, angular=0.2):
     return {"positions": positions, "indices": indices,
             "faces": face_ranges, "face_types": face_types, "edges": edges,
             "bbox": [bb.min.X, bb.min.Y, bb.min.Z, bb.max.X, bb.max.Y, bb.max.Z]}
+
+
+# --- Selection -------------------------------------------------------------------------------
+
+def _r(v, n=3):
+    return round(float(v), n)
+
+
+def _vec(v):
+    return [_r(v.X), _r(v.Y), _r(v.Z)]
+
+
+def _face_info(face):
+    info = {"type": face.geom_type.name, "area": _r(face.area), "center": _vec(face.center(CenterOf.MASS))}
+    surf = BRepAdaptor_Surface(face.wrapped)
+    if face.geom_type == GeomType.PLANE:
+        info["normal"] = _vec(face.normal_at())
+    elif face.geom_type == GeomType.CYLINDER:
+        cyl = surf.Cylinder()
+        d, o = cyl.Axis().Direction(), cyl.Axis().Location()
+        info.update(radius=_r(cyl.Radius()), axis=[_r(d.X()), _r(d.Y()), _r(d.Z())], axis_point=[_r(o.X()), _r(o.Y()), _r(o.Z())])
+    elif face.geom_type == GeomType.SPHERE:
+        info["radius"] = _r(surf.Sphere().Radius())
+    return info
+
+
+def _edge_info(edge):
+    info = {"type": edge.geom_type.name, "length": _r(edge.length),
+            "start": _vec(edge.position_at(0)), "end": _vec(edge.position_at(1))}
+    if edge.geom_type == GeomType.CIRCLE:
+        info.update(radius=_r(edge.radius), center=_vec(edge.arc_center))
+    elif edge.geom_type == GeomType.LINE:
+        d = edge.tangent_at(0)
+        info["direction"] = _vec(d)
+    return info
+
+
+def _same_set(a, b):
+    return len(a) == len(b) and all(any(x.is_same(y) for y in b) for x in a)
+
+
+def _env():
+    import build123d
+    cur = globals().get("_current") or {}
+    return {**vars(build123d), **cur.get("ns", {})}
+
+
+def _base_name():
+    """Name to start selectors from: the BuildPart builder, or the variable holding the shown part."""
+    cur = globals()["_current"]
+    if cur["part"]:
+        return cur["part"]
+    for k, v in cur["ns"].items():
+        if v is cur["shape"] and not k.startswith("_"):
+            return k
+    return None
+
+
+def _candidates(kind, targets, objs, base):
+    """Readable selector expressions that might pick exactly `targets` from `objs`."""
+    coll = [(f"{base}.{kind}s()", objs)]
+    types = {t.geom_type for t in targets}
+    if len(types) == 1:
+        gt = types.pop()
+        coll.append((f"{base}.{kind}s().filter_by(GeomType.{gt.name})", objs.filter_by(gt)))
+        # Lines along an axis, or flat faces facing along an axis: build123d's filter_by(Axis.*)
+        if gt == GeomType.LINE or gt == GeomType.PLANE:
+            direction = (lambda t: t.tangent_at(0)) if gt == GeomType.LINE else (lambda t: t.normal_at())
+            for ax in ("X", "Y", "Z"):
+                axis = getattr(Axis, ax)
+                if all(abs(abs(direction(t).dot(axis.direction)) - 1) < 1e-6 for t in targets):
+                    coll.append((f"{base}.{kind}s().filter_by(Axis.{ax})", objs.filter_by(axis)))
+    keys = ["Axis.Z", "Axis.X", "Axis.Y", "SortBy.AREA" if kind == "face" else "SortBy.LENGTH"]
+    if any(t.geom_type in (GeomType.CIRCLE, GeomType.CYLINDER, GeomType.SPHERE) for t in targets):
+        keys.append("SortBy.RADIUS")
+    env = _env()
+    single = len(targets) == 1
+
+    out = []
+    for cexpr, cobjs in coll:
+        if not single and _same_set(cobjs, targets):
+            out.append((cexpr, False))
+        for key in keys:
+            try:  # some keys don't apply to every collection (e.g. radius of a plane)
+                groups = cobjs.group_by(eval(key, env))
+            except Exception:  # noqa: BLE001
+                continue
+            for i, g in enumerate(groups):
+                if _same_set(g, targets):
+                    if single:
+                        end = 0 if i == 0 else -1 if i == len(groups) - 1 else None
+                        out.append((f"{cexpr}.sort_by({key})[{end}]", False) if end is not None
+                                   else (f"{cexpr}.group_by({key})[{i}][0]", True))
+                    else:
+                        end = 0 if i == 0 else -1 if i == len(groups) - 1 else i
+                        out.append((f"{cexpr}.group_by({key})[{end}]", end not in (0, -1)))
+                elif len(g) > len(targets) and all(any(t.is_same(x) for x in g) for t in targets):
+                    gi = 0 if i == 0 else -1 if i == len(groups) - 1 else i
+                    for key2 in keys:
+                        if key2 == key:
+                            continue
+                        try:
+                            sub = g.group_by(eval(key2, env))
+                        except Exception:  # noqa: BLE001
+                            continue
+                        for j, h in enumerate(sub):
+                            if _same_set(h, targets) and j in (0, len(sub) - 1):
+                                je = 0 if j == 0 else -1
+                                tail = f".sort_by({key2})[{je}]" if single else f".group_by({key2})[{je}]"
+                                out.append((f"{cexpr}.group_by({key})[{gi}]{tail}", gi not in (0, -1)))
+    return out
+
+
+def select(kind, indices):
+    """Describe the selected faces/edges and suggest verified build123d selectors for them."""
+    cur = globals().get("_current")
+    if not cur or cur["shape"] is None:
+        return {"items": [], "selectors": []}
+    objs = cur["shape"].faces() if kind == "face" else cur["shape"].edges()
+    targets = [objs[i] for i in indices]
+    items = [{"kind": kind, "index": i, **(_face_info(t) if kind == "face" else _edge_info(t))} for i, t in zip(indices, targets)]
+    base = _base_name()
+    selectors = []
+    if base:
+        env = _env()
+        seen = set()
+        for expr, fragile in _candidates(kind, targets, objs, base):
+            if expr in seen:
+                continue
+            seen.add(expr)
+            try:  # verify: the expression must give exactly the selection
+                got = eval(expr, env)
+            except Exception:  # noqa: BLE001
+                continue
+            got = got if isinstance(got, list) else [got]
+            if _same_set(got, targets):
+                selectors.append({"expr": expr, "fragile": fragile})
+        selectors.sort(key=lambda s: (s["fragile"], len(s["expr"])))
+        robust = [s for s in selectors if not s["fragile"]]
+        selectors = (robust or selectors)[:3]  # show fragile ones only when nothing better exists
+        if not selectors and len(indices) > 1:
+            # No common selector: a list of each item's own best selector.
+            singles = [select(kind, [i])["selectors"][0] for i in indices]
+            selectors.append({"expr": "[" + ", ".join(x["expr"] for x in singles) + "]",
+                              "fragile": any(x["fragile"] for x in singles)})
+        if not selectors:
+            selectors.append({"expr": f"{base}.{kind}s()[{indices[0]}]", "fragile": True})
+    return {"items": items, "selectors": selectors}
+
+
+def resolve(kind, expr):
+    """Indices that a selector picks in the current shape (to keep a selection across rebuilds)."""
+    cur = globals().get("_current")
+    if not cur or cur["shape"] is None:
+        return []
+    try:
+        got = eval(expr, _env())
+    except Exception:  # noqa: BLE001
+        return []
+    got = got if isinstance(got, list) else [got]
+    objs = cur["shape"].faces() if kind == "face" else cur["shape"].edges()
+    return [i for i, o in enumerate(objs) if any(o.is_same(g) for g in got)]
