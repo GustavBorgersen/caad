@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CAAD</title>
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <header>
+    <strong class="brand">CAAD</strong>
+    <button id="open-folder">Open folder…</button>
+    <button id="reopen" hidden></button>
+    <button id="examples">Examples</button>
+    <span id="project-name" class="muted"></span>
+    <span class="spacer"></span>
+    <span id="status" class="muted"></span>
+  </header>
+  <main>
+    <aside id="left">
+      <section>
+        <h2>Parts</h2>
+        <ul id="parts" class="list"></ul>
+      </section>
+      <section class="grow">
+        <h2>Timeline</h2>
+        <ol id="timeline" class="list"></ol>
+      </section>
+    </aside>
+    <div id="view">
+      <div id="overlay">Loading CAD kernel…</div>
+    </div>
+    <div id="right">
+      <div id="file-name" class="muted"></div>
+      <div id="editor"></div>
+      <div id="error" hidden></div>
+    </div>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
