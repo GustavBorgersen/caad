@@ -73,6 +73,7 @@ with BuildPart() as bracket:                    # the part
 | # | Milestone | Notes |
 | :-- | :-- | :-- |
 | **M6** | **GitHub mode.** Open a repo and branch on GitHub directly in the page (or create a branch); a working copy in browser storage; commit (by you, or by the agent through a `commit` tool) as one atomic commit via GitHub's Git Data API | No server needed: GitHub's REST API allows browser requests. Sign-in with a fine-grained personal access token first. Because the agent writes through the page, it then needs no local repo at all. Local folders remain an option |
+| soon | **Visual design pass** | A proper look and layout: toolbar and icons, panel layout and resizing, dark mode, a view cube / standard views, better shading and edge rendering. A first round of space-saving is done (collapsible code panel, compact timeline, slim sketch toolbar) |
 | later | **Hosted relay** instead of the local bridge: the page shows an MCP URL (`claude mcp add --transport http caad https://…`) | Zero install; works with claude.ai on the web, Claude Desktop and any remote-MCP client. Needs a small always-on service (e.g. Cloudflare Durable Objects) and sends model data through it, so self-hostable and optional |
 | later | **Sign in with GitHub** (OAuth) | Needs a tiny serverless function for the token exchange |
 | later | **Native kernel via the bridge** | If build123d is installed locally, run models natively (fast start, ~10× faster), with the browser kernel as fallback |

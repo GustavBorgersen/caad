@@ -140,7 +140,7 @@ export class Sketcher implements PointerTool {
       new THREE.LineBasicMaterial({ color: COLOR.axis, depthTest: false }));
     this.gridGroup.add(grid, axes);
     const info = this.panel.querySelector(".grid-step");
-    if (info) info.textContent = `grid ${num(step)} mm`;
+    if (info) info.textContent = `grid ${num(step)}`;
   }
 
   private outline(s: Shape): [number, number][] {
@@ -183,69 +183,72 @@ export class Sketcher implements PointerTool {
   private renderPanel() {
     const p = this.panel;
     p.hidden = false;
+    const el = <T extends HTMLElement = HTMLElement>(tag: string, props: Record<string, unknown> = {}) => Object.assign(document.createElement(tag), props) as T;
     const field = (label: string, value: number, set: (v: number) => void, min?: number) => {
-      const l = document.createElement("label");
-      l.textContent = label + " ";
-      const i = Object.assign(document.createElement("input"), { type: "number", value: num(value), step: "any" });
+      const l = el("label", { textContent: label + " " });
+      const i = el<HTMLInputElement>("input", { type: "number", value: num(value), step: "any" });
       if (min !== undefined) i.min = String(min);
       i.onchange = () => { const v = parseFloat(i.value); if (Number.isFinite(v) && (min === undefined || v > min)) { set(v); this.redraw(); } };
       l.append(i);
       return l;
     };
-    p.innerHTML = `
-      <div class="row head"><b>Sketch</b> <span class="muted">on ${this.label}</span><span class="spacer"></span><span class="muted grid-step">grid ${num(this.step)} mm</span> <span class="muted cursor"></span></div>
-      <div class="row tools"></div>
-      <div class="hint muted">${HINTS[this.tool]}</div>
-      <div class="shapes"></div>
-      <div class="row op"></div>
-      <div class="row actions"></div>`;
-    const tools = p.querySelector(".tools")!;
-    for (const [t, label] of [["rect", "▭ Rectangle"], ["circle", "◯ Circle"], ["poly", "⬠ Polygon"]] as [Tool, string][]) {
-      const b = Object.assign(document.createElement("button"), { textContent: label });
+    const check = (label: string, key: "both" | "through") => {
+      const l = el("label");
+      const c = el<HTMLInputElement>("input", { type: "checkbox", checked: this.op[key] });
+      c.onchange = () => { this.op[key] = c.checked; this.renderPanel(); };
+      l.append(c, " " + label);
+      return l;
+    };
+    const sep = () => el("span", { className: "sep" });
+
+    // Row 1: where, tools, operation, actions
+    const row = el("div", { className: "row" });
+    const title = el("b", { textContent: "Sketch", title: `Sketching on ${this.label}` });
+    const tools = el("span", { className: "group tools" });
+    tools.append(title);
+    for (const [t, icon, name] of [["rect", "▭", "Rectangle"], ["circle", "◯", "Circle"], ["poly", "⬠", "Polygon"]] as [Tool, string, string][]) {
+      const b = el("button", { textContent: icon, title: name });
       b.classList.toggle("on", this.tool === t);
       b.onclick = () => { this.tool = t; this.pending = []; this.renderPanel(); this.redraw(); };
       tools.append(b);
     }
-    const list = p.querySelector(".shapes")!;
-    this.shapes.forEach((s, i) => {
-      const row = document.createElement("div");
-      row.className = "row shape";
-      row.append(Object.assign(document.createElement("span"), { textContent: s.kind === "rect" ? "▭" : s.kind === "circle" ? "◯" : "⬠" }));
-      if (s.kind === "rect") row.append(field("x", s.x, (v) => (s.x = v)), field("y", s.y, (v) => (s.y = v)), field("w", s.w, (v) => (s.w = v), 0), field("h", s.h, (v) => (s.h = v), 0));
-      else if (s.kind === "circle") row.append(field("x", s.x, (v) => (s.x = v)), field("y", s.y, (v) => (s.y = v)), field("r", s.r, (v) => (s.r = v), 0));
-      else row.append(Object.assign(document.createElement("span"), { className: "muted", textContent: `${s.pts.length} corners` }));
-      const del = Object.assign(document.createElement("button"), { textContent: "×", title: "Remove" });
-      del.onclick = () => { this.shapes.splice(i, 1); this.renderPanel(); this.redraw(); };
-      row.append(del);
-      list.append(row);
-    });
-    if (!this.shapes.length) list.innerHTML = `<div class="muted">No shapes yet.</div>`;
-
-    const op = p.querySelector(".op")!;
+    row.append(tools);
+    const op = el("span", { className: "group op" });
+    op.append(sep());
     for (const [value, label] of [["extrude", "Extrude"], ["cut", "Cut"]] as const) {
-      const b = Object.assign(document.createElement("button"), { textContent: label });
+      const b = el("button", { textContent: label });
       b.classList.toggle("on", this.op.op === value);
       b.onclick = () => { this.op.op = value; this.renderPanel(); };
       op.append(b);
     }
     if (!(this.op.op === "cut" && this.op.through)) op.append(field("depth", this.op.amount, (v) => (this.op.amount = v), 0));
-    const check = (label: string, key: "both" | "through") => {
-      const l = document.createElement("label");
-      const c = Object.assign(document.createElement("input"), { type: "checkbox", checked: this.op[key] });
-      c.onchange = () => { this.op[key] = c.checked; this.renderPanel(); };
-      l.append(c, " " + label);
-      return l;
-    };
-    op.append(check("both directions", "both"));
+    op.append(check("both ways", "both"));
     if (this.op.op === "cut") op.append(check("through all", "through"));
-
-    const actions = p.querySelector(".actions")!;
-    const apply = Object.assign(document.createElement("button"), { textContent: this.op.op === "cut" ? "Cut" : "Extrude", className: "primary" });
-    apply.disabled = !this.shapes.length;
+    row.append(op);
+    const actions = el("span", { className: "group actions" });
+    const apply = el("button", { textContent: this.op.op === "cut" ? "Cut" : "Extrude", className: "primary", disabled: !this.shapes.length, title: "Add the sketch and the operation to the part" });
     apply.onclick = () => { const shapes = this.shapes; const o = { ...this.op }; this.stop(); this.onDone(shapes, o); };
-    const cancel = Object.assign(document.createElement("button"), { textContent: "Cancel" });
+    const cancel = el("button", { textContent: "Cancel", title: "Leave the sketch (Esc)" });
     cancel.onclick = () => this.cancel();
     actions.append(apply, cancel);
+    row.append(actions);
+
+    // Row 2: hint and the drawn shapes as small editable chips
+    const sub = el("div", { className: "sub" });
+    sub.append(el("span", { className: "hint muted", textContent: HINTS[this.tool] }));
+    this.shapes.forEach((sh, i) => {
+      const chip = el("span", { className: "shape" });
+      chip.append(el("span", { textContent: sh.kind === "rect" ? "▭" : sh.kind === "circle" ? "◯" : "⬠" }));
+      if (sh.kind === "rect") chip.append(field("x", sh.x, (v) => (sh.x = v)), field("y", sh.y, (v) => (sh.y = v)), field("w", sh.w, (v) => (sh.w = v), 0), field("h", sh.h, (v) => (sh.h = v), 0));
+      else if (sh.kind === "circle") chip.append(field("x", sh.x, (v) => (sh.x = v)), field("y", sh.y, (v) => (sh.y = v)), field("r", sh.r, (v) => (sh.r = v), 0));
+      else chip.append(el("span", { className: "muted", textContent: `${sh.pts.length} corners` }));
+      const del = el("button", { textContent: "×", title: "Remove" });
+      del.onclick = () => { this.shapes.splice(i, 1); this.renderPanel(); this.redraw(); };
+      chip.append(del);
+      sub.append(chip);
+    });
+    sub.append(el("span", { className: "spacer" }), el("span", { className: "muted grid-step", textContent: `grid ${num(this.step)}` }), el("span", { className: "muted cursor" }));
+    p.replaceChildren(row, sub);
   }
 
   /** For tests: add a shape as if drawn. */

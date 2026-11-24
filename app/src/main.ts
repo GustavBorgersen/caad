@@ -108,7 +108,8 @@ async function restoreSelection(gen: number) {
 async function setProject(p: Project) {
   state.project = p;
   state.path = null;
-  $("project-name").textContent = p.name + (p.writable ? "" : " (read-only, edits stay in the browser)");
+  $("project-name").textContent = p.name + (p.writable ? "" : " (read-only)");
+  $("project-name").title = p.writable ? p.name : "The bundled examples: edits stay in this browser tab";
   const parts = await refreshParts();
   if (parts.length) openPart(parts[0]);
 }
@@ -218,6 +219,26 @@ if (!canOpenFolders()) {
 
 setProject(examples());
 
+// --- Panels ------------------------------------------------------------------------------------
+
+const remember = (key: string, value?: boolean): boolean => {
+  try {
+    if (value !== undefined) localStorage.setItem(key, value ? "1" : "0");
+    return localStorage.getItem(key) === "1";
+  } catch { return false; }
+};
+function panelToggle(button: HTMLElement, cls: string, key: string, titles: [string, string], icons: [string, string]) {
+  const apply = (on: boolean) => {
+    document.body.classList.toggle(cls, on);
+    button.textContent = on ? icons[1] : icons[0];
+    button.title = on ? titles[1] : titles[0];
+  };
+  apply(remember(key));
+  button.onclick = () => apply(remember(key, !document.body.classList.contains(cls)));
+}
+panelToggle($("toggle-left"), "left-compact", "caad.leftCompact", ["Compact timeline", "Show parts and full timeline"], ["«", "»"]);
+panelToggle($("toggle-code"), "code-hidden", "caad.codeHidden", ["Hide the code", "Show the code"], ["»", "‹"]);
+
 // --- Sketching -----------------------------------------------------------------------------------
 
 const sketcher = new Sketcher(viewer, $("sketch-panel"));
@@ -242,9 +263,10 @@ async function startSketch(planeExpr: string, label: string) {
   const bb = state.result?.summary?.bbox;
   const size = bb ? Math.max(40, Math.hypot(bb[3] - bb[0], bb[4] - bb[1], bb[5] - bb[2])) : 100;
   const upto = state.upto, path = state.path!;
-  $("sketch-button").hidden = true;
+  $("plane-choice").hidden = true;
+  document.body.classList.add("sketching");
   sketcher.start(plane, label, size, async (shapes, op) => {
-    $("sketch-button").hidden = false;
+    document.body.classList.remove("sketching");
     const feats = state.result?.timeline?.features ?? [];
     const last = feats.length - 1;
     const src = insertFeatures(editor.text, feats, upto, sketchLines(planeExpr, shapes, op));
@@ -254,7 +276,7 @@ async function startSketch(planeExpr: string, label: string) {
     state.selection = [];
     const res = await applyCode(path, src);
     if (res && !res.ok) status(`The new feature failed: ${res.error?.message ?? ""}`);
-  }, () => { $("sketch-button").hidden = false; });
+  }, () => { document.body.classList.remove("sketching"); });
 }
 
 $("new-part").onclick = async () => {

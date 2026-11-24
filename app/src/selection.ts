@@ -23,17 +23,24 @@ export function renderSelection(el: HTMLElement, infos: SelectInfo[]) {
     props.className = "props";
     for (const [key, label, unit] of PROPS) {
       if (items[0][key] === undefined) continue;
-      props.append(span(label), span(fmt(items[0][key]) + (unit ? ` ${unit}` : "")));
+      const pair = document.createElement("span");
+      pair.append(Object.assign(span(label), { className: "k" }), Object.assign(span(fmt(items[0][key]) + (unit ? ` ${unit}` : "")), { className: "v" }));
+      props.append(pair);
     }
     el.append(props);
   }
 
+  const alts = document.createElement("div");
+  alts.className = "alts";
+  alts.hidden = true;
+  let altCount = 0;
   for (const info of infos) {
     for (const [i, s] of info.selectors.entries()) {
       const row = document.createElement("div");
       row.className = "sel";
       const code = document.createElement("code");
       code.textContent = s.expr;
+      code.title = s.expr;
       const copy = document.createElement("button");
       copy.textContent = "Copy";
       copy.onclick = () => navigator.clipboard.writeText(s.expr).then(() => { copy.textContent = "Copied"; });
@@ -41,8 +48,14 @@ export function renderSelection(el: HTMLElement, infos: SelectInfo[]) {
       if (s.fragile) row.append(tag("position-based"));
       else if (i === 0) row.append(tag("best"));
       row.append(copy);
-      el.append(row);
+      if (i === 0) el.append(row);
+      else { alts.append(row); altCount++; }
     }
+  }
+  if (altCount) {
+    const more = Object.assign(document.createElement("button"), { className: "more", textContent: `${altCount} more selector${altCount > 1 ? "s" : ""}` });
+    more.onclick = () => { alts.hidden = !alts.hidden; more.textContent = alts.hidden ? `${altCount} more selector${altCount > 1 ? "s" : ""}` : "fewer"; };
+    el.append(more, alts);
   }
 }
 

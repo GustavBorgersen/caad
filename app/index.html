@@ -9,7 +9,7 @@
 <body>
   <header>
     <strong class="brand">CAAD</strong>
-    <button id="open-folder">Open folder…</button>
+    <button id="open-folder" title="Open a local folder of build123d parts (Chrome/Edge)">Open folder…</button>
     <button id="reopen" hidden></button>
     <button id="examples">Examples</button>
     <span id="project-name" class="muted"></span>
@@ -19,7 +19,8 @@
   </header>
   <main>
     <aside id="left">
-      <section>
+      <button id="toggle-left" class="panel-toggle" title="Compact timeline">«</button>
+      <section id="parts-section">
         <h2>Parts <button id="new-part" class="small" title="Create a new part file">+ New part</button></h2>
         <ul id="parts" class="list"></ul>
       </section>
@@ -39,7 +40,7 @@
       <div id="agent-note" hidden></div>
     </div>
     <div id="right">
-      <div id="file-name" class="muted"></div>
+      <div class="panel-head"><span id="file-name" class="muted"></span><button id="toggle-code" class="panel-toggle" title="Hide the code">»</button></div>
       <div id="editor"></div>
       <div id="error" hidden></div>
     </div>

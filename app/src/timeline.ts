@@ -20,7 +20,8 @@ export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: T
   feats.forEach((f) => {
     const li = document.createElement("li");
     li.className = `feature ${f.status}`;
-    li.title = `Line ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here`;
+    li.title = `${f.label}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here` +
+      (f.status === "error" && result?.error ? `\n${result.error.message}` : "");
     li.innerHTML = `<span class="icon"></span><span class="label"></span>`;
     li.querySelector(".icon")!.textContent = ICONS[f.kind] ?? "•";
     li.querySelector(".label")!.textContent = f.label;
