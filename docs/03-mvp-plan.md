@@ -1,5 +1,7 @@
 # CAAD — MVP plan
 
+> **Completed 2026-11-24.** Continued in [04 — Roadmap](04-roadmap.md).
+
 **Date:** 2026-11-23
 **Builds on:** [01 — Concept](01-concept.md) (section 9, first milestone) and [02 — Spike results](02-spike-results.md)
 
