@@ -1,9 +1,14 @@
 import "./style.css";
+import { Agents } from "./agent";
+import { setupAgentDialog } from "./agent-dialog";
 import { Editor } from "./editor";
 import { Kernel, type BuildResult, type Kind, type SelectInfo } from "./kernel";
 import { canOpenFolders, examples, lastFolder, openFolder, reopen, type Project } from "./project";
 import { renderSelection } from "./selection";
+import { insertFeatures, newPartSource, sketchLines } from "./sketch-code";
+import { Sketcher } from "./sketcher";
 import { renderTimeline } from "./timeline";
+import { makeTools } from "./tools";
 import { Viewer, type Pick } from "./viewer";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -37,14 +42,14 @@ kernel.onReady = (s) => {
 
 // --- Building ---------------------------------------------------------------------------------
 
-async function rebuild() {
-  if (!state.path) return;
+async function rebuild(): Promise<BuildResult | null> {
+  if (!state.path) return null;
   if (!kernel.ready) { status("Waiting for the kernel…"); }
   const t = performance.now();
   let r: BuildResult | null;
   try { r = await kernel.build(editor.text, state.path, state.upto); }
-  catch (e) { status("Kernel error: " + (e as Error).message); return; }
-  if (!r) return; // replaced by a newer build
+  catch (e) { status("Kernel error: " + (e as Error).message); return null; }
+  if (!r) return null; // replaced by a newer build
   state.result = r;
   viewer.setMesh(r.mesh, state.fitNext && !!r.mesh);
   if (r.mesh) state.fitNext = false;
@@ -59,6 +64,7 @@ async function rebuild() {
   err.textContent = r.error ? `Line ${r.error.line ?? "?"}: ${r.error.message}` : "";
   const ms = (performance.now() - t).toFixed(0);
   status(`${r.ok ? "Built" : "Failed"} in ${ms} ms (Python ${r.times.build} s, mesh ${r.times.mesh} s)`);
+  return r;
 }
 
 // --- Selection ------------------------------------------------------------------------------
@@ -76,6 +82,7 @@ async function describeSelection(picks: { kind: Kind; index: number }[]) {
 }
 
 viewer.onSelect = (picks: Pick[]) => {
+  $("agent-note").hidden = true; // a click replaces the agent's highlight
   if (!picks.length) { state.selection = []; renderSelection($("selection"), []); return; }
   describeSelection(picks);
 };
@@ -102,30 +109,64 @@ async function setProject(p: Project) {
   state.project = p;
   state.path = null;
   $("project-name").textContent = p.name + (p.writable ? "" : " (read-only, edits stay in the browser)");
-  const parts = await p.list();
+  const parts = await refreshParts();
+  if (parts.length) openPart(parts[0]);
+}
+
+async function refreshParts() {
+  const parts = state.project ? await state.project.list() : [];
   const ul = $("parts");
   ul.replaceChildren(...parts.map((path) => {
     const li = document.createElement("li");
     li.textContent = path;
+    li.classList.toggle("active", path === state.path);
     li.onclick = () => openPart(path);
     return li;
   }));
   if (!parts.length) ul.innerHTML = `<li class="muted">No build123d files found</li>`;
-  else openPart(parts[0]);
+  return parts;
 }
 
-async function openPart(path: string) {
-  if (!state.project) return;
+async function openPart(path: string, rollback: number | null = null): Promise<BuildResult | null> {
+  if (!state.project) return null;
   state.path = path;
-  state.upto = null;
+  state.upto = rollback;
   state.fitNext = true;
   state.selection = [];
   for (const li of $("parts").children) li.classList.toggle("active", li.textContent === path);
   $("file-name").textContent = path;
   editor.setText(await state.project.read(path));
   state.modified = await state.project.modified(path);
-  rebuild();
+  return rebuild();
 }
+
+/** New source for a part (from the agent): save, show and rebuild. */
+async function applyCode(path: string, code: string): Promise<BuildResult | null> {
+  if (!state.project) return null;
+  const isNew = !(await state.project.list()).includes(path);
+  await state.project.write(path, code);
+  if (isNew) await refreshParts();
+  if (path !== state.path) return openPart(path);
+  clearTimeout(saveTimer); // the agent's version replaces any unsaved typing
+  saveTimer = 0;
+  editor.setText(code);
+  state.modified = await state.project.modified(path);
+  return rebuild();
+}
+
+// --- Agent ------------------------------------------------------------------------------------
+
+const agents = new Agents(makeTools({
+  kernel, viewer,
+  project: () => state.project,
+  path: () => state.path,
+  result: () => state.result,
+  selection: () => state.selection,
+  openPart, applyCode,
+  note: (message) => { const el = $("agent-note"); el.hidden = !message; el.textContent = message ? `Agent: ${message}` : ""; },
+}));
+agents.onCall = (name) => status(`Agent: ${name.replace(/_/g, " ")}…`);
+setupAgentDialog($<HTMLDialogElement>("agent-dialog"), $<HTMLButtonElement>("agent-button"), agents);
 
 let saveTimer = 0; // non-zero while an edit is waiting to be saved
 editor.onChange = () => {
@@ -177,5 +218,55 @@ if (!canOpenFolders()) {
 
 setProject(examples());
 
+// --- Sketching -----------------------------------------------------------------------------------
+
+const sketcher = new Sketcher(viewer, $("sketch-panel"));
+
+$("sketch-button").onclick = async () => {
+  if (sketcher.active) return;
+  const r = state.result;
+  if (!state.path || !r?.timeline?.part) { status("Open a part first (or create one with + New part)."); return; }
+  const items = state.selection.flatMap((i) => i.items);
+  if (items.length === 1 && items[0].kind === "face" && items[0].type === "PLANE") {
+    startSketch(state.selection[0].selectors[0].expr, "the selected face");
+  } else $("plane-choice").hidden = !$("plane-choice").hidden;
+};
+document.querySelectorAll<HTMLButtonElement>("#plane-choice [data-plane]").forEach((b) => {
+  b.onclick = () => { $("plane-choice").hidden = true; startSketch(b.dataset.plane!, b.textContent!); };
+});
+
+async function startSketch(planeExpr: string, label: string) {
+  if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
+  const plane = await kernel.sketchPlane(planeExpr);
+  if (plane.error) { status(plane.error); return; }
+  const bb = state.result?.summary?.bbox;
+  const size = bb ? Math.max(40, Math.hypot(bb[3] - bb[0], bb[4] - bb[1], bb[5] - bb[2])) : 100;
+  const upto = state.upto, path = state.path!;
+  $("sketch-button").hidden = true;
+  sketcher.start(plane, label, size, async (shapes, op) => {
+    $("sketch-button").hidden = false;
+    const feats = state.result?.timeline?.features ?? [];
+    const last = feats.length - 1;
+    const src = insertFeatures(editor.text, feats, upto, sketchLines(planeExpr, shapes, op));
+    // Stay rolled back if we were, but include the two new features.
+    state.upto = upto != null && upto < last ? upto + 2 : null;
+    viewer.setSelection([]);
+    state.selection = [];
+    const res = await applyCode(path, src);
+    if (res && !res.ok) status(`The new feature failed: ${res.error?.message ?? ""}`);
+  }, () => { $("sketch-button").hidden = false; });
+}
+
+$("new-part").onclick = async () => {
+  if (!state.project) return;
+  const raw = prompt("Name of the new part (letters, digits, _):", "part");
+  const name = raw?.trim().replace(/\.py$/, "").replace(/[^A-Za-z0-9_]/g, "_").replace(/^(\d)/, "_$1");
+  if (!name) return;
+  const path = `${name}.py`;
+  if ((await state.project.list()).includes(path)) { status(`${path} already exists.`); return; }
+  await applyCode(path, newPartSource(name));
+  status(`Created ${path}. Click ✎ Sketch to start modelling.`);
+};
+
 // For tests and debugging in the console.
-Object.assign(window, { caad: { editor, viewer, kernel, state, rebuild, openPart } });
+Object.assign(window, { caad: { editor, viewer, kernel, state, rebuild, openPart, applyCode, agents, sketcher, startSketch } });

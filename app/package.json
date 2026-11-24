@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test:smoke": "node tests/smoke.mjs"
+    "test:smoke": "node tests/smoke.mjs",
+    "build:bridge": "mise exec -C ../bridge -- ../bridge/build.sh",
+    "test:bridge": "node tests/bridge.mjs",
+    "test:agent": "node tests/agent-e2e.mjs",
+    "test:sketch": "node tests/sketch-e2e.mjs"
   },
   "dependencies": {
     "@codemirror/lang-python": "^6.2.1",
@@ -17,10 +21,12 @@
     "three": "^0.187.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/three": "^0.187.0",
     "@types/wicg-file-system-access": "^2023.10.7",
     "puppeteer-core": "^25.18.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.8"
+    "vite": "^8.3.8",
+    "ws": "^8.23.0"
   }
 }

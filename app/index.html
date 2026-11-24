@@ -15,11 +15,12 @@
     <span id="project-name" class="muted"></span>
     <span class="spacer"></span>
     <span id="status" class="muted"></span>
+    <button id="agent-button"><span class="dot"></span>Agent</button>
   </header>
   <main>
     <aside id="left">
       <section>
-        <h2>Parts</h2>
+        <h2>Parts <button id="new-part" class="small" title="Create a new part file">+ New part</button></h2>
         <ul id="parts" class="list"></ul>
       </section>
       <section class="grow">
@@ -28,8 +29,14 @@
       </section>
     </aside>
     <div id="view">
+      <div id="view-tools">
+        <button id="sketch-button" title="Sketch on a plane, or on the selected flat face">✎ Sketch</button>
+        <span id="plane-choice" hidden>on <button data-plane="Plane.XY">Top (XY)</button><button data-plane="Plane.XZ">Front (XZ)</button><button data-plane="Plane.YZ">Right (YZ)</button><span class="muted">or select a flat face first</span></span>
+      </div>
+      <div id="sketch-panel" hidden></div>
       <div id="overlay">Loading CAD kernel…</div>
       <div id="selection" hidden></div>
+      <div id="agent-note" hidden></div>
     </div>
     <div id="right">
       <div id="file-name" class="muted"></div>
@@ -37,6 +44,7 @@
       <div id="error" hidden></div>
     </div>
   </main>
+  <dialog id="agent-dialog"></dialog>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

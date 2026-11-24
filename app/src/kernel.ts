@@ -22,6 +22,7 @@ export type BuildResult = {
   upto: number | null;
   error: { feature: number | null; line: number | null; message: string } | null;
   mesh: Mesh | null;
+  summary: { type: string; faces: number; edges: number; bbox: number[]; volume?: number } | null;
   times: { build: number; mesh: number };
   gen: number;
 };
@@ -79,6 +80,37 @@ export class Kernel {
   /** Indices a selector picks in the current model (to keep a selection across rebuilds). */
   resolve(kind: Kind, expr: string): Promise<{ value: number[]; gen: number }> {
     return this.call("resolve", [kind, expr]);
+  }
+
+  /** Run code against a copy of the open part's namespace (for the agent). */
+  snippet(code: string): Promise<{ output: string; value: unknown; error: string | null; gen: number }> {
+    return this.call("snippet", [code]);
+  }
+
+  /** Signature and docs of a build123d name, from the page's own build123d. */
+  apiHelp(name: string): Promise<{ value: string; gen: number }> {
+    return this.call("api_help", [name]);
+  }
+
+  /** Face and edge indices a selector picks (or an error). */
+  highlightIndices(expr: string): Promise<{ faces?: number[]; edges?: number[]; error?: string; gen: number }> {
+    return this.call("highlight_indices", [expr]);
+  }
+
+  /** The plane a sketch on a Plane expression or flat-face selector uses. */
+  sketchPlane(expr: string): Promise<{ origin: number[]; x: number[]; y: number[]; z: number[]; error?: string; gen: number }> {
+    return this.call("sketch_plane", [expr]);
+  }
+
+  /** Resolves when the kernel has loaded. */
+  whenReady(timeoutMs: number): Promise<boolean> {
+    if (this.ready) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const t = setInterval(() => {
+        if (this.ready || Date.now() - start > timeoutMs) { clearInterval(t); resolve(this.ready); }
+      }, 250);
+    });
   }
 
   private call<T>(fn: string, args: unknown[]): Promise<T> {

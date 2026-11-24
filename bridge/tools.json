@@ -1,0 +1,118 @@
+[
+  {
+    "name": "get_status",
+    "description": "Is the CAAD page connected, which project and part are open, and is the CAD kernel ready. Call this first if anything fails.",
+    "inputSchema": { "type": "object", "properties": {} }
+  },
+  {
+    "name": "build123d_guide",
+    "description": "CAAD's guide to build123d: part file conventions, builder mode, sketches, operations, selectors and common mistakes. Read it before writing your first part. Without a topic it returns the table of contents.",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "topic": { "type": "string", "description": "Section name from the table of contents, or 'all'" } }
+    }
+  },
+  {
+    "name": "api_help",
+    "description": "Signature and documentation of a build123d name (e.g. 'fillet', 'Box', 'ShapeList.sort_by', 'Mode'), taken from the exact build123d version the page runs. A partial name lists matching names.",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "name": { "type": "string" } },
+      "required": ["name"]
+    }
+  },
+  {
+    "name": "run_snippet",
+    "description": "Run Python code in the page's build123d kernel without changing any file, e.g. to try a selector or measure something. `from build123d import *` is done; the variables of the open part (after its last build) are available, and `part` is the shown shape. Returns printed output and the value of the last expression; shapes are summarised (type, volume, bounding box).",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "code": { "type": "string" } },
+      "required": ["code"]
+    }
+  },
+  {
+    "name": "list_parts",
+    "description": "The build123d part files in the open project.",
+    "inputSchema": { "type": "object", "properties": {} }
+  },
+  {
+    "name": "read_part",
+    "description": "The source code of a part file, with line numbers.",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "path": { "type": "string", "description": "Path relative to the project root, e.g. 'bracket.py'" } },
+      "required": ["path"]
+    }
+  },
+  {
+    "name": "write_part",
+    "description": "Create or overwrite a part file with complete source code. The page saves it, shows it to the user, rebuilds it and returns the result: OK or the error at its feature, the timeline, volume and bounding box. Prefer edit_part for small changes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "code": { "type": "string", "description": "The complete file" }
+      },
+      "required": ["path", "code"]
+    }
+  },
+  {
+    "name": "edit_part",
+    "description": "Replace an exact piece of text in a part file (it must occur exactly once), then save, show and rebuild like write_part. Returns the build result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "old_text": { "type": "string" },
+        "new_text": { "type": "string" }
+      },
+      "required": ["path", "old_text", "new_text"]
+    }
+  },
+  {
+    "name": "open_part",
+    "description": "Show a part in the user's view (and rebuild it). Optionally roll back to a feature index from the timeline.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "rollback": { "type": "integer", "description": "Show the part as it is after this feature (0-based); omit for the whole part" }
+      },
+      "required": ["path"]
+    }
+  },
+  {
+    "name": "get_timeline",
+    "description": "The open part's timeline: one entry per feature (line range, label, status ok/error/skipped/rolled-back), the error if any, volume and bounding box.",
+    "inputSchema": { "type": "object", "properties": {} }
+  },
+  {
+    "name": "get_selection",
+    "description": "What the user has selected in the view: faces/edges with type, area or length, radius, centre, normal or axis, and verified build123d selectors for them (use those in code instead of describing geometry).",
+    "inputSchema": { "type": "object", "properties": {} }
+  },
+  {
+    "name": "highlight",
+    "description": "Highlight geometry in the user's view, e.g. to ask 'do you mean these edges?'. The selector is evaluated against the open part, like code in the part file. An empty selector clears the highlight.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "selector": { "type": "string", "description": "e.g. bracket.edges().filter_by(Axis.Z)" },
+        "note": { "type": "string", "description": "Short message shown to the user next to the highlight" }
+      },
+      "required": ["selector"]
+    }
+  },
+  {
+    "name": "render",
+    "description": "A PNG image of the open part. 'current' is exactly what the user sees (including selection and highlights); the named views frame the whole part from that direction without moving the user's camera.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "view": { "type": "string", "enum": ["current", "iso", "front", "back", "top", "bottom", "left", "right"] },
+        "width": { "type": "integer", "description": "Pixels, default 800" },
+        "height": { "type": "integer", "description": "Pixels, default 600" }
+      }
+    }
+  }
+]

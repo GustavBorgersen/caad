@@ -50,3 +50,34 @@ h2 { margin: 0 12px 6px; font-size: 11px; text-transform: uppercase; letter-spac
 #selection .sel:first-of-type code { background: #fff3e0; }
 #selection .tag { font-size: 10px; color: var(--muted); }
 #selection button { padding: 1px 8px; font-size: 11px; }
+#agent-button { display: inline-flex; align-items: center; gap: 6px; }
+#agent-button .dot { width: 8px; height: 8px; border-radius: 50%; background: #b8bec6; }
+#agent-button.connected .dot { background: #2e9e4f; box-shadow: 0 0 0 3px rgba(46,158,79,0.15); }
+#agent-note { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; background: #e6f3fc; color: #0f5d99; border: 1px solid #b6dbf5; border-radius: 6px; max-width: 70%; }
+dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 64px); border: 1px solid var(--line); border-radius: 8px; padding: 18px 22px; color: var(--text); }
+dialog::backdrop { background: rgba(20, 25, 30, 0.35); }
+dialog h2 { margin: 0 0 8px; font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--text); }
+dialog h3 { margin: 18px 0 6px; font-size: 14px; }
+dialog p { margin: 6px 0; }
+dialog .close { position: absolute; right: 12px; top: 10px; border: none; font-size: 20px; line-height: 1; background: none; }
+dialog .state { padding: 6px 10px; border-radius: 4px; background: var(--hover); }
+dialog .state.on { background: #e8f6ec; color: #1d6e36; }
+dialog .cmd { display: flex; gap: 6px; align-items: flex-start; margin: 4px 0; }
+dialog .cmd code, dialog pre { flex: 1; display: block; padding: 6px 8px; background: #f3f5f7; border-radius: 4px; font-size: 12px; white-space: pre-wrap; word-break: break-all; margin: 0; }
+dialog details { margin: 6px 0; }
+dialog summary { cursor: pointer; color: var(--muted); }
+h2 .small { float: right; margin-top: -3px; padding: 0 6px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+#view-tools { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; align-items: center; }
+#view-tools button, #plane-choice button { background: rgba(255,255,255,0.95); }
+#plane-choice { display: inline-flex; gap: 4px; align-items: center; }
+#plane-choice[hidden] { display: none; }
+#sketch-panel { position: absolute; top: 48px; left: 10px; width: 410px; padding: 10px 12px; background: rgba(255,255,255,0.96); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+#sketch-panel .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+#sketch-panel .spacer { flex: 1; }
+#sketch-panel .hint { font-size: 12px; margin: 4px 0 6px; }
+#sketch-panel button.on { background: #fff3e0; border-color: var(--accent); }
+#sketch-panel button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+#sketch-panel button.primary:disabled { opacity: 0.5; }
+#sketch-panel input[type=number] { width: 62px; font: inherit; padding: 1px 4px; }
+#sketch-panel .shape { font-size: 12px; }
+#sketch-panel .shapes { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px 0; margin: 6px 0; }

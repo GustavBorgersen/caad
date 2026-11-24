@@ -151,7 +151,19 @@ def run(src, filename="part.py", upto=None):
     t2 = time.perf_counter()
     globals()["_current"] = {"ns": ns, "shape": shape, "part": info["part"]}
     return {"ok": error is None, "timeline": info, "upto": last, "error": error, "mesh": mesh,
+            "summary": _summary(shape) if mesh else None,
             "times": {"build": round(t1 - t0, 3), "mesh": round(t2 - t1, 3)}}
+
+
+def _summary(shape):
+    bb = shape.bounding_box()
+    out = {"type": type(shape).__name__, "faces": len(shape.faces()), "edges": len(shape.edges()),
+           "bbox": [_r(bb.min.X), _r(bb.min.Y), _r(bb.min.Z), _r(bb.max.X), _r(bb.max.Y), _r(bb.max.Z)]}
+    try:
+        out["volume"] = _r(shape.volume)
+    except Exception:  # noqa: BLE001 - e.g. a 2D result
+        pass
+    return out
 
 
 # --- Tessellation ----------------------------------------------------------------------------
@@ -356,3 +368,142 @@ def resolve(kind, expr):
     got = got if isinstance(got, list) else [got]
     objs = cur["shape"].faces() if kind == "face" else cur["shape"].edges()
     return [i for i, o in enumerate(objs) if any(o.is_same(g) for g in got)]
+
+
+# --- Agent helpers ---------------------------------------------------------------------------
+
+def _describe(value, depth=0):
+    """Short, readable description of a snippet result."""
+    from build123d import Shape
+    if isinstance(value, Shape):
+        kind = type(value).__name__
+        if kind == "Face":
+            return {"shape": "Face", **_face_info(value)}
+        if kind == "Edge":
+            return {"shape": "Edge", **_edge_info(value)}
+        d = _summary(value)
+        d["shape"] = d.pop("type")
+        return d
+    if isinstance(value, list) and depth == 0 and value and all(isinstance(v, Shape) for v in value):
+        return {"count": len(value), "items": [_describe(v, 1) for v in value[:12]],
+                **({"note": f"{len(value) - 12} more not shown"} if len(value) > 12 else {})}
+    text = repr(value)
+    return text if len(text) <= 4000 else text[:4000] + "…"
+
+
+def snippet(code):
+    """Run code against the open part's namespace (a copy) without touching files or the view."""
+    import contextlib
+    import io
+    env = _env()
+    cur = globals().get("_current") or {}
+    env["part"] = cur.get("shape")
+    out = io.StringIO()
+    value, error = None, None
+    try:
+        tree = ast.parse(code, "<snippet>")
+        last = tree.body.pop() if tree.body and isinstance(tree.body[-1], ast.Expr) else None
+        with contextlib.redirect_stdout(out):
+            exec(compile(tree, "<snippet>", "exec"), env)
+            if last is not None:
+                value = eval(compile(ast.Expression(last.value), "<snippet>", "eval"), env)
+    except Exception as e:  # noqa: BLE001
+        line = _error_line(e, "<snippet>")
+        error = f"{type(e).__name__}: {e}" + (f" (line {line})" if line else "")
+    return {"output": out.getvalue()[-8000:], "value": None if value is None else _describe(value), "error": error}
+
+
+_API_CLASSES = ["Shape", "ShapeList", "Part", "Sketch", "Curve", "Solid", "Face", "Edge", "Wire", "Vertex",
+                "Vector", "Plane", "Location", "Axis", "BuildPart", "BuildSketch", "BuildLine"]
+
+
+def api_help(name):
+    """Signature and docs of a build123d name, from the build123d the page runs."""
+    import inspect
+    import build123d
+    name = name.strip().removeprefix("build123d.")
+    obj = build123d
+    try:
+        for part in name.split("."):
+            obj = getattr(obj, part)
+    except AttributeError:
+        obj = None
+    if obj is not None and obj is not build123d:
+        out = [f"build123d {build123d.__version__}: {name}"]
+        try:
+            sig = inspect.signature(obj)
+            if inspect.isclass(obj) and "*args" in str(sig):  # build123d wraps classes: read __init__
+                init = inspect.signature(obj.__init__)
+                sig = init.replace(parameters=[p for n, p in init.parameters.items() if n != "self"])
+            out.append(f"{name}{sig}")
+        except (TypeError, ValueError):
+            pass
+        doc = inspect.getdoc(obj) or "(no docstring)"
+        out.append(doc[:6000] + ("…" if len(doc) > 6000 else ""))
+        if inspect.isclass(obj):
+            if issubclass(obj, __import__("enum").Enum):
+                out.append("Members: " + ", ".join(m.name for m in obj))
+            else:
+                members = sorted(m for m in dir(obj) if not m.startswith("_"))
+                out.append("Members: " + ", ".join(members)[:3000])
+        return "\n\n".join(out)
+    q = name.lower().split(".")[-1]
+    hits = [n for n in dir(build123d) if not n.startswith("_") and q in n.lower()]
+    for cls in _API_CLASSES:
+        c = getattr(build123d, cls, None)
+        hits += [f"{cls}.{m}" for m in dir(c) if not m.startswith("_") and q in m.lower()] if c else []
+    if not hits:
+        return f"No build123d name matches '{name}'."
+    lines = []
+    for h in hits[:40]:
+        o = build123d
+        for part in h.split("."):
+            o = getattr(o, part, None)
+        first = (inspect.getdoc(o) or "").split("\n")[0][:100] if o is not None else ""
+        lines.append(f"- {h}: {first}")
+    more = f"\n({len(hits) - 40} more)" if len(hits) > 40 else ""
+    return f"'{name}' is not an exact name. Matches:\n" + "\n".join(lines) + more
+
+
+def highlight_indices(expr):
+    """Face and edge indices that a selector expression picks in the shown shape."""
+    from build123d import Edge, Face
+    cur = globals().get("_current")
+    if not cur or cur["shape"] is None:
+        return {"error": "No part is shown."}
+    try:
+        got = eval(expr, _env())
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"}
+    got = got if isinstance(got, list) else [got]
+    faces = [f for f in got if isinstance(f, Face)]
+    edges = [e for e in got if isinstance(e, Edge)]
+    if len(faces) + len(edges) < len(got):
+        others = {type(g).__name__ for g in got if not isinstance(g, (Face, Edge))}
+        return {"error": f"The selector returned {', '.join(sorted(others))}; select faces or edges."}
+    shape = cur["shape"]
+    return {"faces": [i for i, f in enumerate(shape.faces()) if any(f.is_same(g) for g in faces)],
+            "edges": [i for i, e in enumerate(shape.edges()) if any(e.is_same(g) for g in edges)]}
+
+
+# --- Sketching ---------------------------------------------------------------------------------
+
+def sketch_plane(expr):
+    """The plane a sketch on `expr` (a Plane or a planar face) uses: origin and axes, as BuildSketch places it."""
+    from build123d import Face, Plane
+    try:
+        obj = eval(expr, _env())
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"}
+    if isinstance(obj, list):
+        if len(obj) != 1:
+            return {"error": f"The selector returned {len(obj)} faces; select one flat face."}
+        obj = obj[0]
+    if isinstance(obj, Face) and obj.geom_type != GeomType.PLANE:
+        return {"error": "Sketches need a flat face."}
+    try:
+        plane = obj if isinstance(obj, Plane) else Plane(obj)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Can't sketch on that: {e}"}
+    v = lambda d: [round(d.X, 9), round(d.Y, 9), round(d.Z, 9)]  # noqa: E731
+    return {"origin": v(plane.origin), "x": v(plane.x_dir), "y": v(plane.y_dir), "z": v(plane.z_dir)}

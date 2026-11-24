@@ -40,7 +40,7 @@ sys.meta_path.insert(0, _Stub())
 
 type RunRequest =
   | { id: number; type: "run"; src: string; filename: string; upto: number | null }
-  | { id: number; type: "call"; fn: "select" | "resolve"; args: unknown[] };
+  | { id: number; type: "call"; fn: "select" | "resolve" | "snippet" | "api_help" | "highlight_indices" | "sketch_plane"; args: unknown[] };
 
 const t0 = performance.now();
 const seconds = () => ((performance.now() - t0) / 1000).toFixed(1);
