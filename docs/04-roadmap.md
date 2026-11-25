@@ -35,7 +35,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 | **Project structure and project browser** | A default folder layout for part studios, assemblies, exports and sliced files, and a browser panel that shows them by type | 07 — Project structure (to write) |
 | **Export** | STEP and STL download from the page; an agent tool that exports into the project's export folder | — |
 | **Contrast fixes** | Clear marking of the selected/hovered feature in the timeline and the code, stronger colours — the quick part of the visual work | — |
-| **Own repository** | **Done 2026-11-25:** [github.com/GustavBorgersen/caad](https://github.com/GustavBorgersen/caad). Still to do: licence, CI running the test suites, Vercel deployment, bridge binaries as GitHub release assets | — |
+| **Own repository** | **Done 2026-11-25:** [github.com/GustavBorgersen/caad](https://github.com/GustavBorgersen/caad), MIT licence, deployed to [caad.vercel.app](https://caad.vercel.app) by a GitHub Action that also builds the bridge into the site. Still to do: CI running the headless test suites, bridge binaries as GitHub release assets | — |
 
 ### Phase 2 — Part studio
 

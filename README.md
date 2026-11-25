@@ -2,7 +2,7 @@
 
 A browser-based, open-source CAD program for [build123d](https://github.com/gumyr/build123d): Onshape-like modelling (timeline, sketches, solids, assemblies) on top of a git repo of Python files, with an AI agent working on the same model through MCP. Everything — yours and the agent's — ends up as code.
 
-Working name. The MVP works end to end; see the [roadmap](docs/04-roadmap.md).
+Working name. The MVP works end to end; see the [roadmap](docs/04-roadmap.md). Try it at **[caad.vercel.app](https://caad.vercel.app)** (Chrome or Edge).
 
 | Doc | |
 | :-- | :-- |

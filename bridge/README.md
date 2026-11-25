@@ -11,8 +11,8 @@ agent ──stdin/stdout (MCP)──► caad-mcp ◄──WebSocket, 127.0.0.1�
 The CAAD page shows the right commands for your system under **Agent**. For Claude Code on Linux/macOS:
 
 ```bash
-mkdir -p ~/.local/bin && curl -fsSL https://<caad site>/bridge/caad-mcp-linux-amd64 -o ~/.local/bin/caad-mcp && chmod +x ~/.local/bin/caad-mcp
-claude mcp add --scope user caad -- ~/.local/bin/caad-mcp --allow-origin https://<caad site>
+mkdir -p ~/.local/bin && curl -fsSL https://caad.vercel.app/bridge/caad-mcp-linux-amd64 -o ~/.local/bin/caad-mcp && chmod +x ~/.local/bin/caad-mcp
+claude mcp add --scope user caad -- ~/.local/bin/caad-mcp --allow-origin https://caad.vercel.app
 ```
 
 ## Security
