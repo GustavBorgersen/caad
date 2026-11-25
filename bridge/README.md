@@ -25,6 +25,8 @@ claude mcp add --scope user caad -- ~/.local/bin/caad-mcp --allow-origin https:/
 
 `tools.json` (tool names and schemas) and `instructions.md` (sent to the agent on connect) are embedded. The page announces its own tool list when it connects; if it differs, the bridge uses the page's list and notifies the agent (`tools/list_changed`), so a bridge downloaded once keeps working with newer pages.
 
+The agent gets its instructions when it starts, before any page connects, so they can't come from the page: `instructions.md` stays short and stable (what CAAD is; start with `get_status`, read `build123d_guide`). Everything that changes with CAAD — workflow, conventions, projects, sketches — lives in the guide the page serves (`app/public/agent/guide.md`). A bridge only needs updating when the bridge program itself changes.
+
 ## Build
 
 ```bash

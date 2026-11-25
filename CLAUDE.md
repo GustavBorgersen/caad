@@ -39,5 +39,6 @@ The headless tests start their own Vite server on other ports. Kernel changes ca
 - **Part files**: parameters at the top, one `with BuildPart() as <name>:` block; each statement in the block is one timeline feature.
 - **Projects** (docs/07): the folder you open is a workspace; projects are folders with a `pyproject.toml` that has `[tool.caad]`; parts in `<project>/parts/`, the project's folder is the import root (shared code like `params.py`).
 - **The page is the agent's toolbox**: new agent abilities are page-side tool handlers (`app/src/tools.ts`) plus an entry in `bridge/tools.json`. The bridge only relays.
+- **Agent guidance goes in `app/public/agent/guide.md`** (served by the page, always current), not in `bridge/instructions.md`: that is built into the bridge users install and rarely update, so it stays short and stable.
 - Verify build123d assumptions in the real kernel (Node test or `run_snippet`) before relying on them; the page runs build123d 0.13 in Pyodide with some dependencies replaced by placeholders (see `kernel.worker.ts`).
 - Don't commit binaries (`bridge/dist`, `app/public/bridge`) or `node_modules`.

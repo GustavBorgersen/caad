@@ -1,6 +1,14 @@
 # CAAD guide to build123d
 
-A compact guide for writing build123d parts in CAAD. Every example here is tested against the build123d version the page runs. For exact signatures use `api_help`.
+How to work in CAAD, and a compact guide to build123d. It comes from the page, so it matches the CAAD the user has open; every example is tested against the build123d version the page runs. For exact signatures use `api_help`.
+
+How to work:
+- Start with `get_status`; `list_parts` shows the user's projects and where things go.
+- Change parts with `write_part` (whole file) or `edit_part` (exact replacement). Both save, rebuild and return the result: check it, and fix errors before you answer. Use `render` to look at the result when shape matters.
+- When the user says "this", "these edges", "here": call `get_selection` and use the verified selectors it returns. To show what you mean, use `highlight`.
+- Try uncertain code with `run_snippet` first; it changes nothing.
+- `export_part` writes STEP or STL into the project's `exports/`.
+- Follow the conventions in *Part files* below: the user's timeline and the GUI's dialogs and sketch editor depend on them.
 
 ## Part files
 
@@ -23,8 +31,10 @@ with BuildPart() as plate:
 
 - Name the builder after the part (`plate`, `bracket`); selectors refer to it (`plate.edges()`).
 - Files live in **projects**: folders with a `pyproject.toml` (`[tool.caad]`). Parts go in `<project>/parts/`. Parameters shared by several parts go in a module of the project, e.g. `<project>/params.py` with `wall = 3`, and parts import them: `from params import wall` — the project's folder is the import root. `list_parts` shows the layout.
-- Keep one feature per statement. A `with BuildSketch()` / `with Locations()` block counts as one feature together with what is inside it.
-- Don't call `show()`, exporters or viewers — the page shows the part.
+- Keep one feature per statement, directly inside the block: a sketch block, an extrude, a fillet, a `Locations` block with holes. A `with BuildSketch()` / `with Locations()` block counts as one feature together with what is inside it. Don't hide features in functions or loops unless the user asks.
+- Use parameters for dimensions the user may want to change. Units are millimetres.
+- Select geometry with selectors (`part.edges().filter_by(Axis.Z)`), never with fixed indices.
+- Don't call `show()`, exporters or viewers — the page shows the part (`export_part` exports).
 
 ## Builder mode
 
