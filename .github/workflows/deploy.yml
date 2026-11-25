@@ -26,6 +26,7 @@ jobs:
     # Pull requests from forks get no secrets, so they can't deploy.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # a run takes about a minute; a hang shouldn't block the next deploy for hours
     steps:
       - uses: actions/checkout@v7
 

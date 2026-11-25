@@ -6,6 +6,8 @@ import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/typ
 import WebSocket from "ws";
 
 const BIN = process.env.CAAD_MCP ?? "../bridge/caad-mcp";
+// A hang (e.g. the bridge not exiting on a CI runner) fails the test instead of blocking it.
+setTimeout(() => { console.log("FAIL: timed out after 60 s"); process.exit(1); }, 60_000).unref();
 const check = (ok, what) => { console.log(`${ok ? "PASS" : "FAIL"}: ${what}`); if (!ok) process.exitCode = 1; };
 
 const client = new Client({ name: "bridge-test", version: "0" }, { capabilities: {} });
@@ -63,3 +65,4 @@ check((await client.listTools()).tools.some((t) => t.name === "new_tool"), "the 
 
 page.close();
 await client.close();
+process.exit(process.exitCode ?? 0); // don't wait for the bridge process and pipes to wind down
