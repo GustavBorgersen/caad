@@ -208,5 +208,20 @@ call("set_project", {});
 shared = call("run", plateSrc, "caad-examples/parts/plate.py");
 check(!shared.ok && /No module named 'params'/.test(shared.error.message), "another project's (or no) shared code isn't importable");
 
+// --- Export: the whole part as STEP or STL; the view's model stays as it was ---
+call("run", bracket, "bracket.py", 2); // the view is rolled back
+const exported = call("export_part", bracket, "bracket.py", "step");
+const stepText = new TextDecoder().decode(exported.data);
+const fullVolume = call("run", bracket, "bracket.py").summary.volume;
+call("run", bracket, "bracket.py", 2);
+check(stepText.startsWith("ISO-10303-21;") && exported.data.length > 10000 && Math.abs(exported.summary.volume - fullVolume) < 1e-6, `STEP: ${exported.data.length} bytes, the whole part (volume ${exported.summary.volume})`);
+py.FS.writeFile("/tmp/back.step", exported.data);
+check(Math.abs(py.runPython(`from build123d import import_step\nimport_step("/tmp/back.step").volume`) - fullVolume) < 1e-3, "read back, it has the same volume");
+const stl = call("export_part", bracket, "bracket.py", "stl");
+check(new TextDecoder().decode(stl.data.slice(0, 40)).startsWith("STL Exported") || stl.data.length > 1000, `STL: ${stl.data.length} bytes`);
+check(py.runPython("len(_current['shape'].faces())") === call("run", bracket, "bracket.py", 2).summary.faces, "the view's (rolled-back) model is left as it was");
+check(/doesn't build/.test(tryCall("export_part", bracket.replace("radius=5)", "radius=50)"), "bracket.py", "step").error ?? ""), "a part that doesn't build isn't exported");
+check(/use step or stl/.test(tryCall("export_part", bracket, "bracket.py", "obj").error ?? ""), "unknown formats are refused");
+
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
 process.exit(failures ? 1 : 0);

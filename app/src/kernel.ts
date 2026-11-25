@@ -212,6 +212,11 @@ export class Kernel {
     return this.call("set_project", [files]);
   }
 
+  /** The whole part built from `src` as a STEP or STL file (the view's model stays as it is); rejects if it doesn't build. */
+  exportPart(src: string, filename: string, format: "step" | "stl"): Promise<{ data: Uint8Array; summary: NonNullable<BuildResult["summary"]> }> {
+    return this.call("export_part", [src, filename, format]);
+  }
+
   /** Values of edited expressions, in the model the last readFeature saw. */
   featureValues(exprs: Record<string, string>): Promise<Record<string, Value>> {
     return this.call("feature_values", [exprs]);

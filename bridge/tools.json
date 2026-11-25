@@ -36,6 +36,18 @@
     "inputSchema": { "type": "object", "properties": {} }
   },
   {
+    "name": "export_part",
+    "description": "Export a part as STEP (exact geometry, for other CAD programs) or STL (a mesh, for slicers) into its project's exports/ folder (exports/<part>.step or .stl), where the user can download it. Exports the whole part, all features, even when the view is rolled back. A part in no project is downloaded in the user's browser instead. Opens the part first if `path` is another one.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "format": { "type": "string", "enum": ["step", "stl"] },
+        "path": { "type": "string", "description": "The part to export; default: the open part" }
+      },
+      "required": ["format"]
+    }
+  },
+  {
     "name": "read_part",
     "description": "The source code of a part file, with line numbers.",
     "inputSchema": {

@@ -191,11 +191,35 @@ async function syncProject(path: string) {
   await kernel.setProject(files);
 }
 
-async function download(path: string) {
-  if (!state.workspace) return;
-  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(await state.workspace.blob(path)), download: path.split("/").pop()! });
+/**
+ * Export the open part (all its features) as STEP or STL into its project's exports/, where the browser lists it
+ * (click to download). A part in no project downloads directly.
+ */
+async function exportPart(format: "step" | "stl"): Promise<{ path?: string; bytes: number; summary: NonNullable<BuildResult["summary"]> }> {
+  const ws = state.workspace, path = state.path;
+  if (!ws || !path) throw new Error("No part is open.");
+  if (!(await kernel.whenReady(100_000))) throw new Error("The CAD kernel is still loading.");
+  const r = await kernel.exportPart(editor.text, path, format);
+  const name = `${path.split("/").pop()!.replace(/\.py$/, "")}.${format}`;
+  const project = projectOf(state.index, path);
+  if (!project) {
+    saveAs(new Blob([r.data as Uint8Array<ArrayBuffer>]), name);
+    return { bytes: r.data.length, summary: r.summary };
+  }
+  const out = `${project.root ? `${project.root}/` : ""}exports/${name}`;
+  await ws.writeBytes(out, r.data);
+  await refreshBrowser();
+  return { path: out, bytes: r.data.length, summary: r.summary };
+}
+
+function saveAs(blob: Blob, name: string) {
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+}
+
+async function download(path: string) {
+  if (state.workspace) saveAs(await state.workspace.blob(path), path.split("/").pop()!);
 }
 
 async function openPart(path: string, rollback: number | null = null): Promise<BuildResult | null> {
@@ -379,6 +403,7 @@ const agents = new Agents(makeTools({
   kernel, viewer,
   workspace: () => state.workspace,
   index: () => state.index,
+  exportPart,
   path: () => state.path,
   result: () => state.result,
   selection: () => state.selection,
@@ -423,6 +448,17 @@ setInterval(async () => {
 // --- Header buttons ---------------------------------------------------------------------------
 
 $("examples").onclick = () => setWorkspace(examples());
+$("export-button").onclick = () => { if (state.path) $("export-choice").hidden = !$("export-choice").hidden; };
+document.querySelectorAll<HTMLButtonElement>("#export-choice [data-format]").forEach((b) => {
+  b.onclick = async () => {
+    $("export-choice").hidden = true;
+    status(`Exporting ${b.textContent}…`);
+    try {
+      const r = await exportPart(b.dataset.format as "step" | "stl");
+      status(r.path ? `Exported ${r.path} (${Math.ceil(r.bytes / 1000)} kB): click it under Exports to download.` : `Downloaded the ${b.textContent} file.`);
+    } catch (e) { status((e as Error).message); }
+  };
+});
 $("new-project").onclick = () => newProject();
 if (!canOpenFolders()) {
   $<HTMLButtonElement>("open-folder").disabled = true;

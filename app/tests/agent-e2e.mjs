@@ -84,6 +84,8 @@ try {
   r = await call("render", { view: "iso" });
   writeFileSync(`${OUT}/agent-render-plate.png`, Buffer.from(r.content.find((c) => c.type === "image").data, "base64"));
   await page.screenshot({ path: `${OUT}/agent-page.png` });
+  r = await call("export_part", { format: "step", path: "caad-examples/parts/bracket.py" });
+  check(/^Exported caad-examples\/exports\/bracket\.step: STEP, \d+ kB; the whole part/.test(r.text), "export_part: " + r.text);
   r = await call("open_part", { path: "caad-examples/parts/bracket.py", rollback: 1 });
   check(r.text.includes("rolled-back"), "open_part with rollback");
   console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");

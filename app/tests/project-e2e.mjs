@@ -53,6 +53,24 @@ try {
   check(await page.evaluate(() => window.caad.editor.text.includes("plate_w = 70")), "shared code opens in the code panel");
   await page.screenshot({ path: `${OUT}/project-1-browser.png` });
 
+  // 2b. Export: STEP and STL into the project's exports/, listed under Exports (click downloads).
+  await clickFile("caad-examples/parts/bracket.py");
+  await page.evaluate(() => window.caad.state.upto = 1); // rolled back: the export is still the whole part
+  for (const fmt of ["step", "stl"]) {
+    await page.click("#export-button");
+    await page.click(`#export-choice [data-format="${fmt}"]`);
+    await page.waitForFunction((f) => window.caad.state.files.some((x) => x.path === `caad-examples/exports/bracket.${f}`), { timeout: 60_000 }, fmt);
+  }
+  const exp = await page.evaluate(async () => {
+    const ws = window.caad.state.workspace;
+    const head = async (p) => new TextDecoder().decode((await (await ws.blob(p)).arrayBuffer()).slice(0, 24));
+    return { step: await head("caad-examples/exports/bracket.step"), stl: await head("caad-examples/exports/bracket.stl"),
+      size: (await ws.blob("caad-examples/exports/bracket.step")).size, status: document.getElementById("status").textContent };
+  });
+  check(exp.step.startsWith("ISO-10303-21;") && exp.size > 10_000 && /^STL Exported/.test(exp.stl), `exported bracket.step (${exp.size} bytes) and bracket.stl`);
+  check(/Exported caad-examples\/exports\/bracket\.stl \(\d+ kB\): click it under Exports/.test(exp.status), `status: ${exp.status}`);
+  check((await tree()).join().includes("group:Exports,export:bracket.step,export:bracket.stl"), "listed under Exports");
+
   // 3. New project: a folder with a pyproject.toml and parts/part.py, opened.
   answer = "fermenter";
   await builds("fermenter/parts/part.py", () => page.click("#new-project"));

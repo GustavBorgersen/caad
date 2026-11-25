@@ -29,6 +29,7 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | `src/feature-dialog.ts` | Feature dialog: fields from the kernel, live preview, surgical patch on OK (`../docs/05-feature-model.md`) |
 | `src/selection.ts` | Selection panel: properties and verified build123d selectors |
 | `src/project.ts` | The workspace (a local folder via the File System Access API, or the bundled examples), its projects and their files by kind |
+| `src/main.ts` (export) | ⇩ Export: STEP / STL into the project's `exports/`, via the kernel's `export_part` |
 | `src/agent.ts` / `src/tools.ts` | Connection to the local bridge; the agent's tools, answered by the page |
 | `src/agent-dialog.ts` | Agent button and setup dialog (bridge download, `claude mcp add` line) |
 | `src/sketcher.ts` | Sketch editor for constrained sketches: tools, snapping, dragging with live PlaneGCS solving; every action is a kernel code edit (`sketch_action`) |

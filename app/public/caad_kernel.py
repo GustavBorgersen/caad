@@ -1116,6 +1116,29 @@ def run(src, filename="part.py", upto=None):
             "times": {"build": round(t1 - t0, 3), "mesh": round(t2 - t1, 3)}}
 
 
+def export_part(src, filename, fmt):
+    """The whole part (all its features, even when the view is rolled back) as a STEP or STL file:
+    {"data": bytes, "summary": ...}. The view's model is left as it was."""
+    from build123d import export_step, export_stl
+    writers = {"step": export_step, "stl": export_stl}
+    if fmt not in writers:
+        raise ValueError(f"Can't export as '{fmt}': use step or stl.")
+    before = globals().get("_current")
+    try:
+        r = run(src, filename)
+        if not r["ok"]:
+            raise ValueError(f"The part doesn't build, so it can't be exported: {r['error']['message']}")
+        shape = globals()["_current"]["shape"]
+        if shape is None:
+            raise ValueError("The part has no shape to export yet.")
+        path = f"/tmp/caad-export.{fmt}"
+        writers[fmt](shape, path)
+        with open(path, "rb") as f:
+            return {"data": f.read(), "summary": r["summary"]}
+    finally:
+        globals()["_current"] = before
+
+
 def _summary(shape):
     bb = shape.bounding_box()
     out = {"type": type(shape).__name__, "faces": len(shape.faces()), "edges": len(shape.edges()),

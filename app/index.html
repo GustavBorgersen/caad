@@ -33,6 +33,8 @@
       <div id="view-tools">
         <button id="sketch-button" title="Sketch on a plane, or on the selected flat face">✎ Sketch</button>
         <span id="plane-choice" hidden>on <button data-plane="Plane.XY">Top (XY)</button><button data-plane="Plane.XZ">Front (XZ)</button><button data-plane="Plane.YZ">Right (YZ)</button><span class="muted">or select a flat face first</span></span>
+        <button id="export-button" title="Export the part as STEP or STL into the project's exports/">⇩ Export</button>
+        <span id="export-choice" hidden>as <button data-format="step" title="STEP: exact geometry, for other CAD programs">STEP</button><button data-format="stl" title="STL: a mesh, for slicers and 3D printing">STL</button></span>
       </div>
       <div id="sketch-panel" hidden></div>
       <div id="feature-panel" hidden></div>

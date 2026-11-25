@@ -1,7 +1,7 @@
 # CAAD — Project structure
 
 **Date:** 2026-11-25
-**Status:** 07a built (2026-11-25); 07b (export) next
+**Status:** Built (2026-11-25)
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1 ("Project structure and project browser"); follows [06 — Sketches](06-sketches.md)
 
 ## Problem
@@ -83,14 +83,14 @@ The README describes this. A `caad` package on PyPI (with PlaneGCS for re-solvin
 
 ## Export
 
-STEP and STL from the page: *Export* writes `exports/<part>.step` / `.stl` into the open project (or downloads them for the examples), and an `export_part` agent tool does the same. This is the roadmap's *Export* item; it lands here because it needs the `exports/` folder.
+STEP and STL from the page: *⇩ Export* writes `exports/<part>.step` / `.stl` into the open part's project, where the browser lists it (a click downloads it); a part in no project downloads directly. The examples keep exports in memory like their other edits. It exports the whole part, all features, even when the view is rolled back (verified: a STEP file read back has the part's exact volume). An `export_part` agent tool does the same. This is the roadmap's *Export* item; it lands here because it needs the `exports/` folder. 3MF (build123d's `Mesher` is available in the page) can follow when printing needs it.
 
 ## Phases
 
 | Phase | Contents |
 | :-- | :-- |
 | **07a — Workspace and projects** (done) | Projects found by `pyproject.toml` with `[tool.caad]`; a workspace with several projects; *New project*; *Make this a CAAD project*; shared code in the kernel (each project's folder on `sys.path`); project browser by project and kind; *+ New part* into `parts/`; examples in the layout; agent `list_parts` by project and kind; guide; README section on running parts outside CAAD |
-| **07b — Export** | STEP/STL to `exports/` or download; `export_part` agent tool |
+| **07b — Export** (done) | STEP/STL to `exports/` or download; `export_part` agent tool |
 
 ## Decided
 

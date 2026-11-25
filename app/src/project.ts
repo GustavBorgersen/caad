@@ -11,6 +11,8 @@ export interface Workspace {
   /** The file as it is on disk, for downloads (exports). */
   blob(path: string): Promise<Blob>;
   write(path: string, text: string): Promise<void>;
+  /** A binary file (exports). */
+  writeBytes(path: string, data: Uint8Array): Promise<void>;
   /** Last-modified time, used to notice edits from outside (the agent, another editor). */
   modified(path: string): Promise<number>;
 }
@@ -100,20 +102,33 @@ class FolderWorkspace implements Workspace {
     await w.write(text);
     await w.close();
   }
+  async writeBytes(path: string, data: Uint8Array) {
+    const w = await (await this.file(path, true)).createWritable();
+    await w.write(data as Uint8Array<ArrayBuffer>);
+    await w.close();
+  }
 }
 
 class ExamplesWorkspace implements Workspace {
   readonly name = "Examples";
   readonly writable = false; // edits stay in memory
   private files = new Map<string, { text: string; t: number }>();
+  private binaries = new Map<string, { data: Uint8Array; t: number }>(); // exports, kept in memory like the edits
   constructor(files: Record<string, string>) {
     for (const [path, text] of Object.entries(files)) this.files.set(path.replace(/^(\.\.\/)*examples\//, ""), { text, t: 0 });
   }
-  async scan() { return [...this.files].map(([path, f]) => ({ path, text: f.text })).sort((a, b) => a.path.localeCompare(b.path)); }
+  async scan() {
+    return [...[...this.files].map(([path, f]) => ({ path, text: f.text })), ...[...this.binaries.keys()].map((path) => ({ path }))]
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }
   async read(path: string) { return this.files.get(path)?.text ?? ""; }
-  async blob(path: string) { return new Blob([this.files.get(path)?.text ?? ""]); }
-  async modified(path: string) { return this.files.get(path)?.t ?? 0; }
+  async blob(path: string) {
+    const b = this.binaries.get(path);
+    return new Blob([b ? (b.data as Uint8Array<ArrayBuffer>) : this.files.get(path)?.text ?? ""]);
+  }
+  async modified(path: string) { return this.files.get(path)?.t ?? this.binaries.get(path)?.t ?? 0; }
   async write(path: string, text: string) { this.files.set(path, { text, t: Date.now() }); }
+  async writeBytes(path: string, data: Uint8Array) { this.binaries.set(path, { data, t: Date.now() }); }
 }
 
 export function examples(): Workspace {

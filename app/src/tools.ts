@@ -16,6 +16,8 @@ export interface App {
   /** Save new source for a part, show it and rebuild. */
   applyCode(path: string, code: string): Promise<BuildResult | null>;
   note(message: string | null): void;
+  /** Export the open part as STEP or STL into its project's exports/ (the path), or download it if it's in no project. */
+  exportPart(format: "step" | "stl"): Promise<{ path?: string; bytes: number; summary: NonNullable<BuildResult["summary"]> }>;
 }
 
 const KERNEL_WAIT_MS = 100_000;
@@ -121,6 +123,17 @@ export function makeTools(app: App): Record<string, ToolHandler> {
       }
       if (loose.length) lines.push("In no project:", ...loose.map((f) => `  ${f.path}`));
       return text(lines.length ? lines.join("\n") : "No CAAD projects or build123d files here yet. Ask the user to create a project (New project), or create one with write_part.");
+    },
+
+    async export_part({ format, path }: { format: "step" | "stl"; path?: string }) {
+      needProject();
+      await needKernel();
+      if (path && path !== app.path()) await app.openPart(path);
+      needPart();
+      const r = await app.exportPart(format);
+      const [x0, y0, z0, x1, y1, z1] = r.summary.bbox;
+      return text(`${r.path ? `Exported ${r.path}` : "Downloaded in the user's browser (the part is in no project)"}: ${format.toUpperCase()}, ` +
+        `${Math.ceil(r.bytes / 1000)} kB; the whole part (all features), ${fmt(x1 - x0)} × ${fmt(y1 - y0)} × ${fmt(z1 - z0)} mm.`);
     },
 
     async read_part({ path }: { path: string }) {
