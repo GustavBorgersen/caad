@@ -31,7 +31,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 | **Feature model** | Each feature type (sketch, extrude, revolve, fillet, chamfer, hole…) defines its code form, how to read its parameters back, and its dialog. Unknown code stays a "code" feature | [05 — Feature model](05-feature-model.md) |
 | **Timeline editing** | Double-click a feature to edit it in its dialog (sketch editor for sketches), with a live preview at its place in the timeline; insert at the rollback bar; delete | 05 |
 | **Sketch and extrude as separate features** | A sketch is its own named feature (`sk1`); extrude, revolve etc. refer to it and can reuse it | 05 |
-| **Sketches v2** | Free drawing (no grid), then constraints and dimensions like in Onshape; dimensions can use parameters; solved by PlaneGCS in the browser and at rebuild | 06 — Sketches and constraints (to write) |
+| **Sketches v2** | Free drawing (no grid), then constraints and dimensions like in Onshape; dimensions can use parameters; solved by PlaneGCS in the browser and at rebuild | [06 — Sketches and constraints](06-sketches.md) |
 | **Project structure and project browser** | A default folder layout for part studios, assemblies, exports and sliced files, and a browser panel that shows them by type | 07 — Project structure (to write) |
 | **Export** | STEP and STL download from the page; an agent tool that exports into the project's export folder | — |
 | **Contrast fixes** | Clear marking of the selected/hovered feature in the timeline and the code, stronger colours — the quick part of the visual work | — |
@@ -73,7 +73,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 | # | Document | Status |
 | :-- | :-- | :-- |
 | 05 | [Feature model and code round-trip](05-feature-model.md) | Slices 1–2 built; slice 3 next |
-| 06 | Sketches and constraints | To write before sketches v2 |
+| 06 | [Sketches and constraints](06-sketches.md) | Agreed — 06a next |
 | 07 | Project structure | To write in phase 1 |
 | 08 | Part studios and assemblies | To write before phase 2 |
 | — | Visual design | Brainstorm session first |
