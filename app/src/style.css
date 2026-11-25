@@ -141,3 +141,12 @@ body.left-compact .feature .del { display: none; }
 body.left-compact .rollback-bar .add { display: none; }
 .feature.under .icon { color: #1f6feb; } /* a constrained sketch with degrees of freedom left */
 .feature.warn .label { text-decoration: underline wavy #d08a00; }
+
+/* Sketch editor: dimension labels over the view, constraint state in the panel */
+.sketch-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.sketch-labels .dim { position: absolute; left: 0; top: 0; padding: 0 4px; font: 11px ui-monospace, monospace; background: rgba(255,255,255,0.92); border: 1px solid var(--line); border-radius: 3px; pointer-events: auto; cursor: pointer; white-space: nowrap; }
+.sketch-labels .dim.selected { border-color: var(--accent); color: var(--accent); }
+.sketch-labels .dim.conflict { border-color: var(--error); color: var(--error); }
+#sketch-panel .state { font-size: 11px; color: #1f6feb; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; }
+#sketch-panel .state.ok { color: var(--muted); }
+#sketch-panel .state.bad { color: var(--error); }

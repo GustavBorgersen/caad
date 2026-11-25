@@ -614,7 +614,7 @@ def _sketch_run(src, index):
     return block, cname, sk, env, error
 
 
-def _sketch_refs(block, cname, env):
+def _sketch_refs(block, cname, env, sk):
     """How the code can refer to each entity: {python id of the entity: expression}, shortest first."""
     import caad
     names = []
@@ -622,7 +622,8 @@ def _sketch_refs(block, cname, env):
         targets = st.targets if isinstance(st, ast.Assign) else []
         for t in targets:
             names += [t.id] if isinstance(t, ast.Name) else [e.id for e in getattr(t, "elts", []) if isinstance(e, ast.Name)]
-    exprs = [f"{cname}.origin", f"{cname}.x_axis", f"{cname}.y_axis"]
+    # c.origin and the axes are made when first used: only refer to them if the sketch did
+    exprs = ([f"{cname}.origin"] if sk._origin is not None else []) + ([f"{cname}.x_axis", f"{cname}.y_axis"] if sk._axes else [])
     for n in names:
         exprs += [n, f"{n}.start", f"{n}.end", f"{n}.center", *[f"{n}.corners[{i}]" for i in range(4)],
                   f"{n}.bottom", f"{n}.right", f"{n}.top", f"{n}.left"]
@@ -658,7 +659,7 @@ def _sketch_model(src, index):
     degrees of freedom, conflicts, and the block's statements."""
     import caad
     block, cname, sk, env, error = _sketch_run(src, index)
-    refs = _sketch_refs(block, cname, env)
+    refs = _sketch_refs(block, cname, env, sk)
     stmt_of = lambda line: next((i for i, st in enumerate(block.body) if line and st.lineno <= line <= st.end_lineno), None)  # noqa: E731
     entities = []
     for e in sk._entities:

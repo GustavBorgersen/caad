@@ -6,7 +6,7 @@ import { FeatureDialog } from "./feature-dialog";
 import { Kernel, type BuildResult, type Feature, type Kind, type SelectInfo } from "./kernel";
 import { canOpenFolders, examples, lastFolder, openFolder, reopen, type Project } from "./project";
 import { renderSelection } from "./selection";
-import { newPartSource, sketchBody } from "./sketch-code";
+import { newPartSource } from "./sketch-code";
 import { Sketcher } from "./sketcher";
 import { renderTimeline } from "./timeline";
 import { makeTools } from "./tools";
@@ -199,9 +199,14 @@ const featureDialog = new FeatureDialog($("feature-panel"), {
 /** Double-click in the timeline: roll back to just before the feature and open its dialog. */
 async function editFeature(f: Feature) {
   if (featureDialog.open || sketcher.active || !state.path) return;
+  if (f.kind === "sketch") {
+    if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
+    await openSketch(editor.text, f.index, f.name ?? "the sketch", { ok: state.upto, cancel: state.upto });
+    return;
+  }
   if (f.tier === "code") {
     editor.markFeature([f.line, f.end], true);
-    status(f.kind === "sketch" ? "Sketches can't be reopened yet: edit the sketch in the code." : "This feature is code: edit it in the code panel.");
+    status("This feature is code: edit it in the code panel.");
     return;
   }
   if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
@@ -354,7 +359,19 @@ panelToggle($("toggle-code"), "code-hidden", "caad.codeHidden", ["Hide the code"
 
 // --- Sketching -----------------------------------------------------------------------------------
 
-const sketcher = new Sketcher(viewer, $("sketch-panel"));
+const sketcher = new Sketcher(viewer, $("sketch-panel"), {
+  kernel, status,
+  async done(src) {
+    closeSketch();
+    state.upto = sketchReturn.ok;
+    if (state.path) await applyCode(state.path, src);
+  },
+  cancel() {
+    closeSketch();
+    state.upto = sketchReturn.cancel;
+    rebuild();
+  },
+});
 
 $("sketch-button").onclick = async () => {
   if (sketcher.active) return;
@@ -369,29 +386,48 @@ document.querySelectorAll<HTMLButtonElement>("#plane-choice [data-plane]").forEa
   b.onclick = () => { $("plane-choice").hidden = true; startSketch(b.dataset.plane!, b.textContent!); };
 });
 
+/** A new sketch: an empty constrained sketch at the rollback bar, opened in the editor; saved only on Done. */
 async function startSketch(planeExpr: string, label: string) {
+  if (sketcher.active || featureDialog.open || !state.path) return;
   if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
-  const plane = await kernel.sketchPlane(planeExpr);
-  if (plane.error) { status(plane.error); return; }
+  $("plane-choice").hidden = true;
+  const upto = state.upto;
+  const last = (state.result?.timeline?.features.length ?? 0) - 1;
+  const after = upto != null && upto < last ? upto : null;
+  let sk;
+  try { sk = await kernel.insertFeature(editor.text, after, "sketch", { plane: planeExpr, body: ["with Constrained() as c:", "    pass"] }); }
+  catch (e) { status(`Couldn't start the sketch: ${(e as Error).message}`); return; }
+  await openSketch(sk.src, sk.index, label, { ok: after === null ? null : after + 1, cancel: upto });
+}
+
+// Where the rollback bar goes when the sketch editor closes.
+let sketchReturn: { ok: number | null; cancel: number | null } = { ok: null, cancel: null };
+
+/** Roll back to just before sketch `index` of `src` (unsaved for a new sketch) and edit it. */
+async function openSketch(src: string, index: number, label: string, ret: typeof sketchReturn) {
+  sketchReturn = ret;
+  state.upto = index - 1;
+  viewer.setSelection([]);
+  state.selection = [];
+  await rebuild(); // the part before the sketch (the features before it are the same in the saved file)
+  let model, plane;
+  try {
+    model = await kernel.sketchOpen(src, index);
+    plane = await kernel.sketchPlane(model.plane ?? "Plane.XY");
+    if (plane.error) throw new Error(plane.error);
+  } catch (e) {
+    status((e as Error).message);
+    state.upto = ret.cancel;
+    rebuild();
+    return;
+  }
   const bb = state.result?.summary?.bbox;
   const size = bb ? Math.max(40, Math.hypot(bb[3] - bb[0], bb[4] - bb[1], bb[5] - bb[2])) : 100;
-  const upto = state.upto, path = state.path!;
-  $("plane-choice").hidden = true;
   document.body.classList.add("sketching");
-  sketcher.start(plane, label, size, async (shapes) => {
-    document.body.classList.remove("sketching");
-    const last = (state.result?.timeline?.features.length ?? 0) - 1;
-    let sk;
-    try { sk = await kernel.insertFeature(editor.text, upto, "sketch", { plane: planeExpr, body: sketchBody(shapes) }); }
-    catch (e) { status(`Couldn't add the sketch: ${(e as Error).message}`); return; }
-    state.upto = upto != null && upto < last ? upto + 1 : null; // stay rolled back if we were, with the sketch
-    viewer.setSelection([]);
-    state.selection = [];
-    const res = await applyCode(path, sk.src);
-    if (res && !res.ok) status(`The sketch failed: ${res.error?.message ?? ""}`);
-    else status(`Added sketch ${sk.name}. Extrude or cut it with + Extrude in the timeline.`);
-  }, () => { document.body.classList.remove("sketching"); });
+  sketcher.open(plane, label, size, { src, index, model });
 }
+
+function closeSketch() { document.body.classList.remove("sketching"); }
 
 $("new-part").onclick = async () => {
   if (!state.project) return;

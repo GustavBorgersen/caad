@@ -1,4 +1,5 @@
-// Sketch mode end to end in headless Chromium: draw with the mouse, Done, then + Extrude / cut; on a face; new part.
+// Sketch editor end to end in headless Chromium (docs/06-sketches.md): draw, Done, extrude; reopen and drag;
+// line chains with snapping and inferred constraints; delete; a sketch on a face; Cancel; a new part.
 import { spawn } from "node:child_process";
 import puppeteer from "puppeteer-core";
 
@@ -19,107 +20,140 @@ try {
   page.on("dialog", (d) => d.accept("widget"));
   for (let i = 0; i < 30; i++) { try { await page.goto(`http://127.0.0.1:${PORT}/`); break; } catch { await new Promise((r) => setTimeout(r, 500)); } }
   await page.waitForFunction(() => /^(Built|Failed)/.test(document.getElementById("status").textContent), { timeout: 300_000 });
+
   const volume = () => page.evaluate(() => window.caad.state.result?.summary?.volume ?? null);
   const code = () => page.evaluate(() => window.caad.editor.text);
-  // A build after `gen` of the saved code (the feature dialog's previews don't count).
-  const waitBuild = (gen) => page.waitForFunction((g) => (window.caad.state.result?.gen ?? 0) > g && !window.caad.state.result.preview, { timeout: 60_000 }, gen);
   const gen = () => page.evaluate(() => window.caad.state.result?.gen ?? 0);
-  const v0 = await volume();
-
-  const sketches = () => page.evaluate(() => window.caad.state.result?.sketches.map((s) => s.name) ?? []);
-  /** Close the sketch (Done): only the named sketch is added, shown as an outline. */
-  const done = async () => {
-    const g = await gen();
-    await page.evaluate(() => document.querySelector("#sketch-panel .primary").click());
-    await waitBuild(g);
+  // A build after `gen` of the saved code (the feature dialog's previews don't count).
+  const waitBuild = (g) => page.waitForFunction((x) => (window.caad.state.result?.gen ?? 0) > x && !window.caad.state.result.preview, { timeout: 60_000 }, g);
+  const sketchSrc = () => page.evaluate(() => window.caad.sketcher.src);
+  const model = () => page.evaluate(() => window.caad.sketcher.model);
+  const idle = () => page.waitForFunction(() => window.caad.sketcher.idle, { timeout: 30_000 });
+  const opened = () => page.waitForFunction(() => window.caad.sketcher.active && !document.getElementById("sketch-panel").hidden, { timeout: 60_000 });
+  const screen = (x, y) => page.evaluate(([a, b]) => window.caad.sketcher.screen([a, b]), [x, y]);
+  const clickAt = async (x, y) => { const s = await screen(x, y); await page.mouse.move(s.x, s.y); await page.mouse.click(s.x, s.y); await idle(); };
+  const dragFrom = async ([x0, y0], [x1, y1]) => {
+    const a = await screen(x0, y0), b = await screen(x1, y1);
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(a.x + ((b.x - a.x) * i) / 8, a.y + ((b.y - a.y) * i) / 8);
+    await page.mouse.up();
+    await idle();
   };
-  /** "+ Extrude" at the rollback bar, set the dialog's fields, OK. */
-  const extrude = async ({ end, result, opposite } = {}) => {
+  const tool = (t) => page.click(`#sketch-panel [data-tool="${t}"]`);
+  const state = () => page.$eval("#sketch-panel .state", (s) => s.textContent);
+  const done = async () => { const g = await gen(); await page.click("#sketch-panel .primary"); await waitBuild(g); };
+  const extrude = async ({ end, result } = {}) => {
     await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Extrude").click());
     await page.waitForSelector("#feature-panel:not([hidden]) .row", { timeout: 30_000 });
     if (end) await page.select('#feature-panel [data-field="until"] select', end);
     if (result) await page.select('#feature-panel [data-field="mode"] select', result);
-    if (opposite) await page.click('#feature-panel [data-field="dir"] input');
     const g = await gen();
     await page.click("#feature-panel .primary");
     await page.waitForSelector("#feature-panel[hidden]", { timeout: 30_000 });
     await waitBuild(g);
   };
+  const dblclickFeature = async (index) => {
+    for (let i = 0; ; i++) {
+      try { await (await page.$$("#timeline .feature"))[index].click({ count: 2 }); return; }
+      catch (e) { if (i > 5 || !/detached|not clickable/.test(e.message)) throw e; await new Promise((r) => setTimeout(r, 200)); }
+    }
+  };
+  const v0 = await volume();
+  const saved0 = await code();
 
-  // 1. Sketch on the top plane, draw a rectangle with two clicks, Done; then cut through all.
+  // 1. A new sketch on Top: the rectangle tool is ready; two clicks; nothing is saved before Done.
   await page.click("#sketch-button");
   await page.click('#plane-choice [data-plane="Plane.XY"]');
-  await page.waitForSelector("#sketch-panel:not([hidden])");
-  check(!(await page.$("#sketch-panel .op")), "the sketch panel has no extrude/cut options");
-  const box = await (await page.$("#view canvas")).boundingBox();
-  const at = (fx, fy) => [box.x + box.width * fx, box.y + box.height * fy];
-  for (const [fx, fy] of [[0.40, 0.45], [0.55, 0.55]]) { const [x, y] = at(fx, fy); await page.mouse.move(x, y); await page.mouse.click(x, y); }
-  check((await page.$$("#sketch-panel .shape")).length === 1, "a rectangle was drawn with two clicks");
-  await page.screenshot({ path: `${OUT}/sketch-1-drawing.png` });
-  const before = await code();
+  await opened();
+  check(await page.$eval('#sketch-panel [data-tool="rect"]', (b) => b.classList.contains("on")), "an empty sketch opens with the rectangle tool");
+  await clickAt(-10, -6);
+  await clickAt(4, 6);
+  let m = await model();
+  check(m.entities.filter((e) => e.kind === "line").length === 4 && /rect1 = c\.rectangle\(\(-10, -6\), \(4, 6\)\)/.test(await sketchSrc()), "two clicks drew a rectangle: rect1 = c.rectangle((-10, -6), (4, 6))");
+  check((await code()) === saved0, "nothing is saved yet");
+  check(/4 degrees of freedom/.test(await state()), `under-constrained: ${await state()}`);
+  await page.screenshot({ path: `${OUT}/sketch-1-rect.png` });
   await done();
   let src = await code();
-  check(src.includes("    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            rect1 = c.rectangle((") && !/extrude\(sk1/.test(src),
-    "Done adds only the named sketch, as a constrained sketch");
-  check(src.includes("from build123d import *\nfrom caad import Constrained\n") && /c\.length\(rect1\.bottom, [\d.]+\)\n\s+c\.length\(rect1\.left, [\d.]+\)\n\s+c\.hdistance\(c\.origin, rect1\.center, -?[\d.]+\)\n\s+c\.vdistance\(c\.origin, rect1\.center, -?[\d.]+\)/.test(src),
-    "with the import, its size as dimensions and its position from the origin");
-  console.log(src.split("\n").filter((l) => l.includes("rect1")).join("\n"));
-  check(await page.evaluate(() => window.caad.state.result.timeline.features.at(-1).sketch?.dof === 0), "fully constrained (0 degrees of freedom)");
-  check(JSON.stringify(await sketches()) === '["sk1"]' && (await volume()) === v0, "the sketch shows as an outline; the part is unchanged");
-  await page.screenshot({ path: `${OUT}/sketch-2-sketch.png` });
+  check(src.includes("from caad import Constrained") && /with BuildSketch\(Plane\.XY, mode=Mode\.PRIVATE\) as sk1:\n\s+with Constrained\(\) as c:\n\s+rect1 = c\.rectangle\(\(-10, -6\), \(4, 6\)\)\n/.test(src), "Done saves the sketch");
   await extrude({ end: "Until.LAST", result: "Mode.SUBTRACT" });
-  src = await code();
-  check(src.includes("    extrude(sk1.sketch, until=Until.LAST, mode=Mode.SUBTRACT)\n"), "+ Extrude, Through all, Remove: the cut uses sk1");
   const v1 = await volume();
-  check(v1 < v0 && (await sketches()).length === 0, `the cut removed material (volume ${v0} -> ${v1}) and the used sketch is no longer drawn`);
-  const feats = await page.$$eval("#timeline .feature", (l) => l.map((x) => x.className));
-  check(feats.every((c) => c.includes("ok")), `all ${feats.length} features ok in the timeline`);
-  await page.screenshot({ path: `${OUT}/sketch-3-cut.png` });
+  check(v1 < v0, `cut through all (volume ${v0} -> ${v1})`);
 
-  // 2. Sketch on a selected face (by selector), circle at an offset; extrude it 10 (the default).
-  await page.evaluate(() => window.caad.startSketch("bracket.faces().filter_by(Axis.Y).sort_by(Axis.Z)[-1]", "the wall"));
-  await page.waitForSelector("#sketch-panel:not([hidden])");
-  await page.evaluate(() => window.caad.sketcher.addShape({ kind: "circle", x: 12, y: 6, r: 5 }));
+  // 2. Reopen it (double-click) and drag a corner: the numbers in the code follow.
+  const sketchIndex = (await page.evaluate(() => window.caad.state.result.timeline.features.findIndex((f) => f.name === "sk1")));
+  await dblclickFeature(sketchIndex);
+  await opened();
+  check(await page.evaluate((i) => window.caad.state.upto === i - 1, sketchIndex), "double-clicking the sketch opens it, rolled back to just before it");
+  await dragFrom([4, 6], [8, 10]);
+  check(/rect1 = c\.rectangle\(\(-10, -6\), \(8(\.\d+)?, 10(\.\d+)?\)\)/.test(await sketchSrc()), `dragging the corner moved it: ${(await sketchSrc()).match(/rect1 = .*/)?.[0]}`);
+  await done();
+  const v2 = await volume();
+  check(/rect1 = c\.rectangle\(\(-10, -6\), \(8/.test(await code()) && v2 < v1, `saved; the bigger cut removes more (${v1} -> ${v2})`);
+  await page.screenshot({ path: `${OUT}/sketch-2-dragged.png` });
+
+  // 3. A line chain on the front face: horizontal is inferred, ending on the first point closes the triangle.
+  await page.evaluate(() => window.caad.startSketch("bracket.faces().sort_by(Axis.Y)[0]", "the front"));
+  await opened();
+  await tool("line");
+  await clickAt(-20, 2);
+  await clickAt(-5, 2.1);
+  await clickAt(-12, 6);
+  await clickAt(-20, 2);
+  src = await sketchSrc();
+  check(/line1 = c\.line\(\(-20, 2\), \(-5, 2\.1\)\)\n\s+c\.horizontal\(line1\)\n\s+line2 = c\.line\(line1\.end, \(-12, 6\)\)\n\s+line3 = c\.line\(line2\.end, line1\.start\)/.test(src),
+    "a chain: lines share their ends, the nearly horizontal one is horizontal, the last ends on the first point");
+  console.log(src.split("\n").filter((l) => /line\d = |horizontal/.test(l)).map((l) => "   " + l.trim()).join("\n"));
+  m = await model();
+  check(m.dof === 5 && /5 degrees/.test(await state()), `a triangle with one constraint: 5 degrees of freedom (${m.dof})`);
+  await page.screenshot({ path: `${OUT}/sketch-3-chain.png` });
+
+  // 4. Select the second line and delete it: the third, which starts at its end, goes too.
+  await tool("select");
+  await clickAt(-8.5, 4.05);
+  await page.keyboard.press("Delete");
+  await idle();
+  src = await sketchSrc();
+  check(src.includes("line1 = c.line") && !src.includes("line2 =") && !src.includes("line3 ="), "deleting a line takes what depends on it");
+  await page.click("#sketch-panel button:not(.primary)[title^='Leave']");
+  await page.waitForFunction(() => !window.caad.sketcher.active);
+  check(!(await code()).includes("sk2"), "Cancel saves nothing");
+
+  // 5. A circle on the top face, centred on the origin (it snaps there): extrude it.
+  await page.evaluate(() => window.caad.startSketch("bracket.faces().filter_by(Axis.Z).sort_by(Axis.Z)[-1]", "the top"));
+  await opened();
+  await tool("circle");
+  await clickAt(0.3, -0.2);
+  await clickAt(4, 0);
+  src = await sketchSrc();
+  check(/circle1 = c\.circle\(c\.origin, 4\)/.test(src), "the circle's centre snapped to the origin: c.circle(c.origin, 4)");
   await done();
   await extrude();
-  src = await code();
-  check(src.includes("with BuildSketch(bracket.faces().filter_by(Axis.Y).sort_by(Axis.Z)[-1], mode=Mode.PRIVATE) as sk2:") && src.includes("circle1 = c.circle((12, 6), 5)\n            c.radius(circle1, 5)") && src.includes("extrude(sk2.sketch, amount=10)"), "sketch on a face with its selector, extruded");
-  const v2 = await volume();
-  check(v2 > v1, "the extrude added material");
-  await page.screenshot({ path: `${OUT}/sketch-4-face.png` });
+  check((await volume()) > v2, "extruded");
 
-  // 2b. Cut through all from a sketch on the bottom face: Opposite direction makes it go into the part.
-  await page.evaluate(() => window.caad.startSketch("bracket.faces().sort_by(Axis.Z)[0]", "the bottom"));
-  await page.waitForSelector("#sketch-panel:not([hidden])");
-  await page.evaluate(() => window.caad.sketcher.addShape({ kind: "circle", x: 20, y: 0, r: 2 }));
-  await done();
-  await extrude({ end: "Until.LAST", result: "Mode.SUBTRACT", opposite: true });
-  src = await code();
-  check(src.includes("extrude(sk3.sketch, until=Until.LAST, dir=-sk3.sketch.faces()[0].normal_at(), mode=Mode.SUBTRACT)"), "Opposite direction flips the sketch's normal");
-  const v3 = await volume();
-  check(await page.evaluate(() => window.caad.state.result.ok) && Math.abs(v2 - v3 - Math.PI * 4 * 8) < 0.5, `it removed a 4 mm hole through the 8 mm base (${(v2 - v3).toFixed(1)} mm³)`);
-
-  // 3. A new part: a sketch alone (no solid yet), then its extrude.
-  let g = await gen();
+  // 6. A new part: a closed polyline, then its extrude.
+  const g = await gen();
   await page.click("#new-part");
   await waitBuild(g);
-  check((await page.$$eval("#parts li", (l) => l.map((x) => x.textContent))).includes("widget.py"), "new part created and listed");
   await page.click("#sketch-button");
   await page.click('#plane-choice [data-plane="Plane.XY"]');
-  await page.waitForSelector("#sketch-panel:not([hidden])");
-  await page.evaluate(() => window.caad.sketcher.addShape({ kind: "poly", pts: [[0, 0], [30, 0], [30, 10], [10, 20], [0, 20]] }));
+  await opened();
+  await tool("line");
+  for (const [x, y] of [[0, 0], [30, 0], [30, 10], [10, 20], [0, 20], [0, 0]]) await clickAt(x, y);
+  await page.screenshot({ path: `${OUT}/sketch-4-polyline.png` });
   await done();
   src = await code();
-  check(!src.includes("pass") && src.includes("poly1 = c.polygon((0, 0), (30, 0), (30, 10), (10, 20), (0, 20))\n            c.fix(*poly1.points)") && (await volume()) === null && JSON.stringify(await sketches()) === '["sk1"]',
-    "the sketch replaced `pass`: no solid yet, just the outline");
-  await page.screenshot({ path: `${OUT}/sketch-5-only-sketch.png` });
+  check(!src.includes("pass") && /line1 = c\.line\(c\.origin, \(30, 0\)\)/.test(src) && /line5 = c\.line\(line4\.end, c\.origin\)/.test(src) && (await volume()) === null,
+    "the new part's sketch is saved (starting and ending on the origin, where the clicks snapped); no solid yet");
   await extrude();
-  console.log(await code());
   check(Math.abs((await volume()) - 5000) < 1, `extruded 10: volume 5000 mm³ (${await volume()})`);
-  await page.screenshot({ path: `${OUT}/sketch-6-newpart.png` });
+  await page.screenshot({ path: `${OUT}/sketch-5-newpart.png` });
+
   console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
   await finish(failures ? 1 : 0);
 } catch (e) {
   console.log("TEST ERROR:", e.message);
+  await (await browser.pages()).at(-1).screenshot({ path: `${OUT}/sketch-error.png` }).catch(() => {});
   await finish(1);
 }

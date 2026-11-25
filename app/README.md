@@ -30,5 +30,5 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | `src/project.ts` | Local folder (File System Access API) or the bundled examples |
 | `src/agent.ts` / `src/tools.ts` | Connection to the local bridge; the agent's tools, answered by the page |
 | `src/agent-dialog.ts` | Agent button and setup dialog (bridge download, `claude mcp add` line) |
-| `src/sketcher.ts` / `src/sketch-code.ts` | Sketch mode (draw, snap, dimensions); Done adds the sketch's body as a named sketch (the kernel writes the feature) |
+| `src/sketcher.ts` | Sketch editor for constrained sketches: tools, snapping, dragging with live PlaneGCS solving; every action is a kernel code edit (`sketch_action`) |
 | `public/agent/guide.md` | build123d guide for the agent (every example is tested) |

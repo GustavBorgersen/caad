@@ -9,10 +9,15 @@ import type { Mesh, SketchOutline } from "./kernel";
 
 export type SketchPlane = { origin: number[]; x: number[]; y: number[]; z: number[] };
 
-/** Takes over the pointer while sketching (the camera still orbits with drag). */
+/** Takes over the pointer while sketching (the camera still orbits with drag, unless the tool takes it). */
 export interface PointerTool {
   move(ev: PointerEvent): void;
   click(ev: PointerEvent): void;
+  /** Pressed: return true to take this drag (dragging sketch geometry); the camera stays until release. */
+  down?(ev: PointerEvent): boolean;
+  drag?(ev: PointerEvent): void;
+  /** Released after a taken drag (also when it didn't move: the tool decides whether that was a click). */
+  up?(ev: PointerEvent): void;
 }
 
 export type Pick = { kind: "face" | "edge"; index: number; type: string; point: [number, number, number] };
@@ -239,6 +244,15 @@ export class Viewer {
   }
 
   /** World size of one screen pixel at a point. */
+  get canvas(): HTMLCanvasElement { return this.renderer.domElement; }
+
+  /** Where a point in the scene is on the canvas, in CSS pixels from its top left. */
+  toScreen(at: THREE.Vector3): { x: number; y: number } {
+    const p = at.clone().project(this.camera);
+    const el = this.renderer.domElement;
+    return { x: ((p.x + 1) / 2) * el.clientWidth, y: ((1 - p.y) / 2) * el.clientHeight };
+  }
+
   pixelSize(at: THREE.Vector3): number {
     const h = this.renderer.domElement.clientHeight || 1;
     return (2 * this.camera.position.distanceTo(at) * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / h;
@@ -305,7 +319,9 @@ export class Viewer {
   private bindPointer() {
     const canvas = this.renderer.domElement;
     let down: { x: number; y: number } | null = null;
+    let taken = false; // the tool took this drag
     canvas.addEventListener("pointermove", (ev) => {
+      if (taken) { this.tool?.drag?.(ev); return; }
       if (ev.buttons) return;
       if (this.tool) { this.tool.move(ev); return; }
       const hit = this.pick(ev);
@@ -316,8 +332,21 @@ export class Viewer {
         this.render();
       }
     });
-    canvas.addEventListener("pointerdown", (ev) => { down = { x: ev.clientX, y: ev.clientY }; });
+    canvas.addEventListener("pointerdown", (ev) => {
+      down = { x: ev.clientX, y: ev.clientY };
+      if (ev.button === 0 && this.tool?.down?.(ev)) {
+        taken = true;
+        this.controls.enabled = false;
+        canvas.setPointerCapture(ev.pointerId);
+      }
+    }, { capture: true }); // before OrbitControls, so a taken drag doesn't orbit
     canvas.addEventListener("pointerup", (ev) => {
+      if (taken) {
+        taken = false;
+        this.controls.enabled = true;
+        this.tool?.up?.(ev);
+        return;
+      }
       if (!down || Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 4 || ev.button !== 0) return; // a drag, not a click
       if (this.tool) { this.tool.click(ev); return; }
       const hit = this.pick(ev);
