@@ -32,7 +32,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 | **Timeline editing** | Double-click a feature to edit it in its dialog (sketch editor for sketches), with a live preview at its place in the timeline; insert at the rollback bar; delete | 05 |
 | **Sketch and extrude as separate features** | A sketch is its own named feature (`sk1`); extrude, revolve etc. refer to it and can reuse it | 05 |
 | **Sketches v2** | Free drawing (no grid), then constraints and dimensions like in Onshape; dimensions can use parameters; solved by PlaneGCS in the browser and at rebuild | [06 — Sketches and constraints](06-sketches.md) |
-| **Project structure and project browser** | A default folder layout for part studios, assemblies, exports and sliced files, and a browser panel that shows them by type | 07 — Project structure (to write) |
+| **Project structure and project browser** | A default folder layout for part studios, assemblies, exports and sliced files, and a browser panel that shows them by type | [07 — Project structure](07-project-structure.md) |
 | **Export** | STEP and STL download from the page; an agent tool that exports into the project's export folder | — |
 | **Contrast fixes** | Clear marking of the selected/hovered feature in the timeline and the code, stronger colours — the quick part of the visual work | — |
 | **Own repository** | **Done 2026-11-25:** [github.com/GustavBorgersen/caad](https://github.com/GustavBorgersen/caad), MIT licence, deployed to [caad.vercel.app](https://caad.vercel.app) by a GitHub Action that also builds the bridge into the site. Still to do: CI running the headless test suites, bridge binaries as GitHub release assets | — |
@@ -74,7 +74,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 | :-- | :-- | :-- |
 | 05 | [Feature model and code round-trip](05-feature-model.md) | Slices 1–2 built; slice 3 next |
 | 06 | [Sketches and constraints](06-sketches.md) | 06a, 06b built; 06c (references, sketch tools) later |
-| 07 | Project structure | To write in phase 1 |
+| 07 | [Project structure](07-project-structure.md) | Agreed — 07a next |
 | 08 | Part studios and assemblies | To write before phase 2 |
 | — | Visual design | Brainstorm session first |
 
@@ -85,6 +85,7 @@ Things to remember, not planned yet.
 - **Send to printer** — OctoPrint, Moonraker/Klipper, Bambu… through the local bridge, which can reach printers on the local network.
 - **Agent connection onboarding** — Chrome's local network access question still pops up as soon as the Agent dialog opens, before the user has read anything. Explain first, then trigger it from an explicit "Connect" step (and guide the user when it's blocked).
 - **Messages from the page to the agent** — a Claude Code hook that attaches the page's state (selection, drawing, active part) to each prompt; or a chat in the page with its own agent.
+- **`caad` on PyPI** — the `caad` module as a pip package (with PlaneGCS for re-solving sketches where it has wheels), published by a GitHub Action, so parts run outside CAAD after `pip install caad`. Until then advanced users download `caad.py` (design doc 07).
 - **GitHub mode** — open a repo and branch directly in the page, working copy in browser storage, atomic commits via the GitHub API (described in the MVP plan as M6).
 - **Hosted relay** — zero-install alternative to the bridge; works with claude.ai on the web and any remote-MCP client.
 - **Sign in with GitHub** (OAuth via a tiny serverless function).

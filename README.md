@@ -12,6 +12,7 @@ Working name. The MVP works end to end; see the [roadmap](docs/04-roadmap.md). T
 | [04 — Roadmap](docs/04-roadmap.md) | Phases from here, future features |
 | [05 — Feature model](docs/05-feature-model.md) | Reading code back as editable features |
 | [06 — Sketches](docs/06-sketches.md) | Constrained sketches in code, PlaneGCS at rebuild, the sketch editor |
+| [07 — Project structure](docs/07-project-structure.md) | Workspaces with several projects, the project file and layout, shared code, export |
 
 Code: `app/` (the web app), `bridge/` (the agent bridge), `examples/`, `spike/`.
 
