@@ -11,13 +11,39 @@ const SCAN_MS = 4000;
 
 export type AgentLink = { port: number; agent: string; bridge: string };
 
+// Chrome asks before a public site may reach this computer (Local Network Access). The permission
+// for 127.0.0.1 is "loopback-network"; Chrome 142-144 called it "local-network-access".
+const PERMISSIONS = ["loopback-network", "local-network-access"];
+export type Access = "granted" | "prompt" | "denied" | "none";
+
+/** Whether the page may reach a bridge without the browser asking; "none": the browser has no such permission. */
+export async function localAccess(): Promise<Access> {
+  if (["127.0.0.1", "localhost"].includes(location.hostname)) return "granted";
+  const states: string[] = [];
+  for (const name of PERMISSIONS) {
+    try { states.push((await navigator.permissions.query({ name } as unknown as PermissionDescriptor)).state); }
+    catch { /* not a permission this browser knows */ }
+  }
+  if (!states.length) return "none";
+  return states.includes("granted") ? "granted" : states.includes("prompt") ? "prompt" : "denied";
+}
+
 export class Agents {
   private sockets = new Map<number, WebSocket>();
   private links = new Map<number, AgentLink>();
+  private started = false;
   onChange: (links: AgentLink[]) => void = () => {};
   onCall: (name: string) => void = () => {};
 
-  constructor(private handlers: Record<string, ToolHandler>) {
+  constructor(private handlers: Record<string, ToolHandler>) {}
+
+  /**
+   * Start looking for bridges. Where that makes the browser ask for local network access, the page
+   * calls this only once the user opens the agent dialog, so the question comes with an explanation.
+   */
+  start() {
+    if (this.started) return;
+    this.started = true;
     this.scan();
     setInterval(() => this.scan(), SCAN_MS);
   }

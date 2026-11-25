@@ -1,5 +1,5 @@
 // "Agent" button and dialog: connection status, bridge download for this OS, and setup commands.
-import type { AgentLink, Agents } from "./agent";
+import { localAccess, type AgentLink, type Agents } from "./agent";
 
 type Os = "linux" | "darwin" | "windows";
 const BINARIES: { os: Os; arch: string; label: string }[] = [
@@ -77,7 +77,15 @@ export function setupAgentDialog(dialog: HTMLDialogElement, button: HTMLButtonEl
         <pre>${esc(desktop)}</pre></details>
       <h3>3. Start your agent and ask</h3>
       <p><i>"What have I selected in CAAD?"</i> or <i>"Make a 60 × 40 mm plate with four M4 holes."</i></p>
-      ${isLocal() ? "" : `<p class="muted">Chrome may ask once whether this site may access devices on your local network: allow it, so the page can reach the bridge on your computer.</p>`}`;
+      <p class="muted" id="local-access" hidden></p>`;
+    localAccess().then((a) => {
+      const note = dialog.querySelector<HTMLElement>("#local-access");
+      if (!note || a === "granted" || a === "none") return;
+      note.hidden = false;
+      note.textContent = a === "prompt"
+        ? "Chrome asks whether this site may access other apps and services on this device: allow it, so the page can reach the bridge on your computer."
+        : "Chrome is blocking this site from reaching apps on this device, so the page can't find the bridge. Allow it in the site settings (the icon left of the address bar), then reload the page.";
+    });
     dialog.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((b) => {
       b.onclick = () => navigator.clipboard.writeText(b.dataset.copy!).then(() => { b.textContent = "Copied"; });
     });
@@ -90,5 +98,5 @@ export function setupAgentDialog(dialog: HTMLDialogElement, button: HTMLButtonEl
   };
   agents.onChange = update;
   update([]);
-  button.onclick = () => { render(agents.connected); dialog.showModal(); };
+  button.onclick = () => { agents.start(); render(agents.connected); dialog.showModal(); }; // may make Chrome ask for local network access
 }

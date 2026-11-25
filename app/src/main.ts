@@ -1,5 +1,5 @@
 import "./style.css";
-import { Agents } from "./agent";
+import { Agents, localAccess } from "./agent";
 import { setupAgentDialog } from "./agent-dialog";
 import { Editor } from "./editor";
 import { Kernel, type BuildResult, type Kind, type SelectInfo } from "./kernel";
@@ -167,6 +167,8 @@ const agents = new Agents(makeTools({
   note: (message) => { const el = $("agent-note"); el.hidden = !message; el.textContent = message ? `Agent: ${message}` : ""; },
 }));
 agents.onCall = (name) => status(`Agent: ${name.replace(/_/g, " ")}…`);
+// Look for bridges right away only if that doesn't make the browser ask; otherwise the agent dialog starts it.
+localAccess().then((a) => { if (a === "granted" || a === "none") agents.start(); });
 setupAgentDialog($<HTMLDialogElement>("agent-dialog"), $<HTMLButtonElement>("agent-button"), agents);
 
 let saveTimer = 0; // non-zero while an edit is waiting to be saved
