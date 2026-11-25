@@ -72,7 +72,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 
 | # | Document | Status |
 | :-- | :-- | :-- |
-| 05 | [Feature model and code round-trip](05-feature-model.md) | Draft |
+| 05 | [Feature model and code round-trip](05-feature-model.md) | Ready to build — slice 1 |
 | 06 | Sketches and constraints | To write before sketches v2 |
 | 07 | Project structure | To write in phase 1 |
 | 08 | Part studios and assemblies | To write before phase 2 |
@@ -83,6 +83,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 Things to remember, not planned yet.
 
 - **Send to printer** — OctoPrint, Moonraker/Klipper, Bambu… through the local bridge, which can reach printers on the local network.
+- **Agent connection onboarding** — Chrome's local network access question still pops up as soon as the Agent dialog opens, before the user has read anything. Explain first, then trigger it from an explicit "Connect" step (and guide the user when it's blocked).
 - **Messages from the page to the agent** — a Claude Code hook that attaches the page's state (selection, drawing, active part) to each prompt; or a chat in the page with its own agent.
 - **GitHub mode** — open a repo and branch directly in the page, working copy in browser storage, atomic commits via the GitHub API (described in the MVP plan as M6).
 - **Hosted relay** — zero-install alternative to the bridge; works with claude.ai on the web and any remote-MCP client.
