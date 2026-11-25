@@ -207,6 +207,11 @@ export class Kernel {
     return (await this.call<{ value: string }>("sketch_convert", [src, index])).value;
   }
 
+  /** The open part's project: {path in the project: source} of its .py files, importable from its parts. */
+  setProject(files: Record<string, string>): Promise<unknown> {
+    return this.call("set_project", [files]);
+  }
+
   /** Values of edited expressions, in the model the last readFeature saw. */
   featureValues(exprs: Record<string, string>): Promise<Record<string, Value>> {
     return this.call("feature_values", [exprs]);

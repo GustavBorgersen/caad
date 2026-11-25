@@ -16,6 +16,22 @@ Working name. The MVP works end to end; see the [roadmap](docs/04-roadmap.md). T
 
 Code: `app/` (the web app), `bridge/` (the agent bridge), `examples/`, `spike/`.
 
+## Projects
+
+Open a folder (the *workspace*, e.g. a git repository); CAAD finds its projects — folders with a `pyproject.toml` that has a `[tool.caad]` table — and lists their parts, shared code and exports. *New project* creates one. A project looks like this ([design doc 07](docs/07-project-structure.md)):
+
+```
+my-project/
+├── pyproject.toml     [tool.caad]; dependencies = ["build123d==0.13.*"]
+├── params.py          shared parameters: parts import them (`from params import wall`)
+├── parts/             one part per file
+└── exports/           STEP / STL
+```
+
+### Running parts outside CAAD (advanced)
+
+Everything is plain build123d, so parts also run without the browser. From the project's folder, with Python and `build123d==0.13` installed: `python -m parts.lid`. Parts with constrained sketches (`from caad import Constrained`) also need the `caad` module: download [caad.py](https://caad.vercel.app/caad.py) (the one the page runs, also [app/public/caad.py](app/public/caad.py)) into the project's folder. Their sketches then build from the geometry CAAD last saved.
+
 ## Licence
 
 [MIT](LICENSE). CAAD builds on [build123d](https://github.com/gumyr/build123d) (Apache-2.0), [OCP.wasm](https://github.com/yeicor/OCP.wasm) (MIT), [Pyodide](https://pyodide.org) (MPL-2.0), [three.js](https://threejs.org) and [CodeMirror](https://codemirror.net) (MIT).

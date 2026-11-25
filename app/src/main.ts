@@ -4,7 +4,8 @@ import { setupAgentDialog } from "./agent-dialog";
 import { Editor } from "./editor";
 import { FeatureDialog } from "./feature-dialog";
 import { Kernel, type BuildResult, type Feature, type Kind, type SelectInfo } from "./kernel";
-import { canOpenFolders, examples, lastFolder, openFolder, reopen, type Project } from "./project";
+import { canOpenFolders, examples, indexWorkspace, lastFolder, openFolder, projectFile, projectOf, reopen,
+  type FileKind, type ScannedFile, type Workspace, type WorkspaceIndex } from "./project";
 import { renderSelection } from "./selection";
 import { newPartSource } from "./sketch-code";
 import { Sketcher } from "./sketcher";
@@ -21,7 +22,10 @@ const viewer = new Viewer($("view"));
 const editor = new Editor($("editor"));
 
 const state = {
-  project: null as Project | null,
+  workspace: null as Workspace | null,
+  files: [] as ScannedFile[], // the workspace's last scan
+  index: { projects: [], loose: [] } as WorkspaceIndex,
+  watched: new Map<string, number>(), // the open project's other .py files: their last-modified times
   path: null as string | null,
   upto: null as number | null,
   modified: 0, // last-modified time of the open file as we last saw or wrote it
@@ -108,56 +112,146 @@ async function restoreSelection(gen: number) {
   else { state.selection = []; renderSelection($("selection"), []); }
 }
 
-// --- Files ------------------------------------------------------------------------------------
+// --- Workspace and projects (docs/07-project-structure.md) ---------------------------------------
 
-async function setProject(p: Project) {
-  state.project = p;
+async function setWorkspace(ws: Workspace) {
+  state.workspace = ws;
   state.path = null;
-  $("project-name").textContent = p.name + (p.writable ? "" : " (read-only)");
-  $("project-name").title = p.writable ? p.name : "The bundled examples: edits stay in this browser tab";
-  const parts = await refreshParts();
-  if (parts.length) openPart(parts[0]);
+  $("project-name").textContent = ws.name + (ws.writable ? "" : " (read-only)");
+  $("project-name").title = ws.writable ? ws.name : "The bundled examples: edits stay in this browser tab";
+  await refreshBrowser();
+  const first = state.index.projects.flatMap((p) => p.files).find((f) => f.kind === "part") ?? state.index.loose[0];
+  if (first) openPart(first.path);
 }
 
-async function refreshParts() {
-  const parts = state.project ? await state.project.list() : [];
-  const ul = $("parts");
-  ul.replaceChildren(...parts.map((path) => {
-    const li = document.createElement("li");
-    li.textContent = path;
-    li.classList.toggle("active", path === state.path);
-    li.onclick = () => openPart(path);
-    return li;
-  }));
-  if (!parts.length) ul.innerHTML = `<li class="muted">No build123d files found</li>`;
-  return parts;
+/** Scan the workspace: its projects and their files by kind. */
+async function refreshBrowser() {
+  const ws = state.workspace;
+  state.files = ws ? await ws.scan() : [];
+  state.index = indexWorkspace(state.files, ws?.name ?? "");
+  renderBrowser();
+}
+
+const KINDS: [FileKind, string, string][] = [
+  ["part", "Parts", "parts/"], ["shared", "Shared code", ""], ["assembly", "Assemblies", "assemblies/"],
+  ["export", "Exports", "exports/"], ["print", "Print", "print/"],
+];
+const dirOf = (path: string) => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+
+function renderBrowser() {
+  const items: HTMLElement[] = [];
+  const li = (cls: string, text: string, title = "") => Object.assign(document.createElement("li"), { className: cls, textContent: text, title });
+  const fileItem = (f: { path: string; kind: FileKind }, label: string) => {
+    const item = li(`file ${f.kind}`, label, f.path);
+    item.dataset.path = f.path;
+    item.classList.toggle("active", f.path === state.path);
+    item.onclick = () => (f.kind === "export" || f.kind === "print" ? download(f.path) : openPart(f.path));
+    return item;
+  };
+  for (const p of state.index.projects) {
+    items.push(li("project", p.name, p.root ? `Project ${p.root}/` : "This folder is a project"));
+    for (const [kind, label, folder] of KINDS) {
+      const files = p.files.filter((f) => f.kind === kind);
+      if (!files.length) continue;
+      items.push(li("group", label));
+      for (const f of files) {
+        const rel = p.root ? f.path.slice(p.root.length + 1) : f.path;
+        items.push(fileItem(f, folder && rel.startsWith(folder) ? rel.slice(folder.length) : rel));
+      }
+    }
+  }
+  const folders = [...new Set(state.index.loose.map((f) => dirOf(f.path)))];
+  for (const folder of folders) {
+    const head = li("project loose", folder ? `${folder}/` : state.workspace?.name ?? "", "build123d files that are in no CAAD project");
+    const make = Object.assign(document.createElement("button"), { className: "small", textContent: "Make a project", title: "Add a pyproject.toml here, so this folder is a CAAD project (nothing is moved)" });
+    make.onclick = (e) => { e.stopPropagation(); makeProject(folder); };
+    head.append(" ", make);
+    items.push(head);
+    for (const f of state.index.loose.filter((x) => dirOf(x.path) === folder)) items.push(fileItem(f, f.path.slice(folder ? folder.length + 1 : 0)));
+  }
+  if (!items.length) items.push(li("muted", "No CAAD projects or build123d files here. Use New project to start one."));
+  $("parts").replaceChildren(...items);
+}
+
+/** The open part's project's .py files go into the kernel, so parts can import shared code. */
+async function syncProject(path: string) {
+  const ws = state.workspace;
+  const project = projectOf(state.index, path);
+  const files: Record<string, string> = {};
+  state.watched = new Map();
+  if (ws && project) {
+    for (const f of state.files) {
+      if (!f.path.endsWith(".py") || (project.root && !f.path.startsWith(project.root + "/"))) continue;
+      try {
+        files[project.root ? f.path.slice(project.root.length + 1) : f.path] = await ws.read(f.path);
+        if (f.path !== path) state.watched.set(f.path, await ws.modified(f.path));
+      } catch { /* removed since the scan */ }
+    }
+  }
+  await kernel.setProject(files);
+}
+
+async function download(path: string) {
+  if (!state.workspace) return;
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(await state.workspace.blob(path)), download: path.split("/").pop()! });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }
 
 async function openPart(path: string, rollback: number | null = null): Promise<BuildResult | null> {
-  if (!state.project) return null;
+  if (!state.workspace) return null;
   state.path = path;
   state.upto = rollback;
   state.fitNext = true;
   state.selection = [];
-  for (const li of $("parts").children) li.classList.toggle("active", li.textContent === path);
+  for (const el of $("parts").querySelectorAll<HTMLElement>("li.file")) el.classList.toggle("active", el.dataset.path === path);
   $("file-name").textContent = path;
-  editor.setText(await state.project.read(path));
-  state.modified = await state.project.modified(path);
+  editor.setText(await state.workspace.read(path));
+  state.modified = await state.workspace.modified(path);
+  await syncProject(path);
   return rebuild();
 }
 
-/** New source for a part (from the agent): save, show and rebuild. */
+/** New source for a file (from the agent, or a new part): save, show and rebuild. */
 async function applyCode(path: string, code: string): Promise<BuildResult | null> {
-  if (!state.project) return null;
-  const isNew = !(await state.project.list()).includes(path);
-  await state.project.write(path, code);
-  if (isNew) await refreshParts();
+  if (!state.workspace) return null;
+  const isNew = !state.files.some((f) => f.path === path);
+  await state.workspace.write(path, code);
+  if (isNew) await refreshBrowser();
   if (path !== state.path) return openPart(path);
   clearTimeout(saveTimer); // the agent's version replaces any unsaved typing
   saveTimer = 0;
   editor.setText(code);
-  state.modified = await state.project.modified(path);
+  state.modified = await state.workspace.modified(path);
   return rebuild();
+}
+
+/** New project: a folder in the workspace with a pyproject.toml and an empty part. */
+async function newProject() {
+  const ws = state.workspace;
+  if (!ws) return;
+  if (state.index.projects.some((p) => p.root === "")) { status("This folder is itself a project: open its parent folder to add projects next to it."); return; }
+  const raw = prompt("Name of the new project (letters, digits, - and _):", "my-project");
+  const name = raw?.trim().replace(/[^A-Za-z0-9_-]/g, "-").replace(/^-+|-+$/g, "");
+  if (!name) return;
+  if (state.files.some((f) => f.path.startsWith(name + "/"))) { status(`${name}/ already exists.`); return; }
+  await ws.write(`${name}/pyproject.toml`, projectFile(name));
+  await ws.write(`${name}/parts/part.py`, newPartSource("part"));
+  await refreshBrowser();
+  await openPart(`${name}/parts/part.py`);
+  status(`Created project ${name}. Click ✎ Sketch to start modelling.`);
+}
+
+/** Make a folder of loose build123d files a project: only adds the project file (or its [tool.caad] table). */
+async function makeProject(folder: string) {
+  const ws = state.workspace;
+  if (!ws) return;
+  const path = folder ? `${folder}/pyproject.toml` : "pyproject.toml";
+  const existing = state.files.find((f) => f.path === path);
+  const name = (folder.split("/").pop() || ws.name).replace(/[^A-Za-z0-9_-]/g, "-");
+  await ws.write(path, existing ? `${(existing.text ?? "").trimEnd()}\n\n[tool.caad]\nformat = 1\n` : projectFile(name));
+  await refreshBrowser();
+  status(`${folder || ws.name} is a CAAD project now (${path}).`);
 }
 
 // --- Editing features (docs/05-feature-model.md) ---------------------------------------------
@@ -283,7 +377,8 @@ async function removeFeature(f: Feature) {
 
 const agents = new Agents(makeTools({
   kernel, viewer,
-  project: () => state.project,
+  workspace: () => state.workspace,
+  index: () => state.index,
   path: () => state.path,
   result: () => state.result,
   selection: () => state.selection,
@@ -299,37 +394,42 @@ let saveTimer = 0; // non-zero while an edit is waiting to be saved
 editor.onChange = () => {
   clearTimeout(saveTimer);
   saveTimer = window.setTimeout(async () => {
-    if (state.project && state.path) {
-      await state.project.write(state.path, editor.text);
-      state.modified = await state.project.modified(state.path);
+    if (state.workspace && state.path) {
+      await state.workspace.write(state.path, editor.text);
+      state.modified = await state.workspace.modified(state.path);
       rebuild();
     }
     saveTimer = 0;
   }, SAVE_DELAY_MS);
 };
 
-// Edits from outside (Claude Code, another editor) show up within a second.
+// Edits from outside (Claude Code, another editor) show up within a second; so do edits to the project's
+// shared code, which rebuild the open part.
 setInterval(async () => {
-  const { project, path } = state;
-  if (!project?.writable || !path || saveTimer) return;
+  const { workspace: ws, path } = state;
+  if (!ws || !path || saveTimer || sketcher.active || featureDialog.open) return;
   try {
-    const m = await project.modified(path);
+    let changed = false;
+    for (const [p, t] of state.watched) if ((await ws.modified(p)) !== t) changed = true;
+    if (changed) { await syncProject(path); rebuild(); }
+    const m = await ws.modified(path);
     if (m === state.modified) return;
     state.modified = m;
-    const text = await project.read(path);
+    const text = await ws.read(path);
     if (text !== editor.text) { editor.setText(text); rebuild(); }
   } catch { /* file renamed or deleted: keep what we have */ }
 }, POLL_MS);
 
 // --- Header buttons ---------------------------------------------------------------------------
 
-$("examples").onclick = () => setProject(examples());
+$("examples").onclick = () => setWorkspace(examples());
+$("new-project").onclick = () => newProject();
 if (!canOpenFolders()) {
   $<HTMLButtonElement>("open-folder").disabled = true;
   $("open-folder").title = "Opening folders needs Chrome or Edge (File System Access API)";
 } else {
   $("open-folder").onclick = async () => {
-    try { await setProject(await openFolder()); } catch (e) { if ((e as Error).name !== "AbortError") status(String(e)); }
+    try { await setWorkspace(await openFolder()); } catch (e) { if ((e as Error).name !== "AbortError") status(String(e)); }
   };
   lastFolder().then((handle) => {
     if (!handle) return;
@@ -338,12 +438,12 @@ if (!canOpenFolders()) {
     btn.hidden = false;
     btn.onclick = async () => {
       const p = await reopen(handle);
-      if (p) { btn.hidden = true; await setProject(p); }
+      if (p) { btn.hidden = true; await setWorkspace(p); }
     };
   });
 }
 
-setProject(examples());
+setWorkspace(examples());
 
 // --- Panels ------------------------------------------------------------------------------------
 
@@ -437,13 +537,16 @@ async function openSketch(src: string, index: number, label: string, ret: typeof
 
 function closeSketch() { document.body.classList.remove("sketching"); }
 
+/** + Part: a new part file in the open project's parts/ (or next to the open file if it's in no project). */
 $("new-part").onclick = async () => {
-  if (!state.project) return;
+  if (!state.workspace) return;
   const raw = prompt("Name of the new part (letters, digits, _):", "part");
   const name = raw?.trim().replace(/\.py$/, "").replace(/[^A-Za-z0-9_]/g, "_").replace(/^(\d)/, "_$1");
   if (!name) return;
-  const path = `${name}.py`;
-  if ((await state.project.list()).includes(path)) { status(`${path} already exists.`); return; }
+  const project = state.path ? projectOf(state.index, state.path) : state.index.projects[0];
+  const folder = project ? (project.root ? `${project.root}/parts` : "parts") : dirOf(state.path ?? "");
+  const path = folder ? `${folder}/${name}.py` : `${name}.py`;
+  if (state.files.some((f) => f.path === path)) { status(`${path} already exists.`); return; }
   await applyCode(path, newPartSource(name));
   status(`Created ${path}. Click ✎ Sketch to start modelling.`);
 };

@@ -114,8 +114,8 @@ try {
   check(await page.$eval("#feature-panel", (p) => p.hidden) && /code/.test(await page.$eval("#status", (s) => s.textContent)), "a code feature points to the code panel");
 
   // 7. A call feature (Cylinder in the pump body): generic dialog, add an argument.
-  await page.evaluate(() => window.caad.openPart("pump_body.py"));
-  await page.waitForFunction(() => window.caad.state.path === "pump_body.py" && window.caad.state.result?.ok, { timeout: 60_000 });
+  await page.evaluate(() => window.caad.openPart("caad-examples/parts/pump_body.py"));
+  await page.waitForFunction(() => window.caad.state.path === "caad-examples/parts/pump_body.py" && window.caad.state.result?.ok, { timeout: 60_000 });
   const pumpBefore = await code();
   await dblclick(0);
   await panelOpen();
@@ -169,8 +169,8 @@ with BuildPart() as part:
   check(!(await code()).includes("sk1") && await page.evaluate(() => window.caad.state.result.ok), "deleting the unused sk1 removes its lines");
 
   // 10. "+ Fillet" at the rollback bar: a new feature on the selected edges, opened in its dialog.
-  await page.evaluate(() => window.caad.openPart("bracket.py"));
-  await page.waitForFunction(() => window.caad.state.path === "bracket.py" && window.caad.state.result?.ok, { timeout: 60_000 });
+  await page.evaluate(() => window.caad.openPart("caad-examples/parts/bracket.py"));
+  await page.waitForFunction(() => window.caad.state.path === "caad-examples/parts/bracket.py" && window.caad.state.result?.ok, { timeout: 60_000 });
   const bracketBefore = await code();
   await page.evaluate(async () => {
     const r = await window.caad.kernel.highlightIndices("bracket.edges().filter_by(Axis.Z).group_by(Axis.Y)[-1]");

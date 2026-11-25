@@ -14,8 +14,8 @@ const show = (title, r) => {
   if (j.error) console.log("   error:", j.error);
   for (const f of j.timeline?.features ?? []) console.log(`   ${String(f.index).padStart(2)} L${f.line}-${f.end} ${f.status.padEnd(11)} ${f.kind.padEnd(10)} ${f.label}`);
 };
-const bracket = readFileSync("../../examples/bracket.py", "utf8");
-const pump = readFileSync("../../examples/pump_body.py", "utf8");
+const bracket = readFileSync("../../examples/caad-examples/parts/bracket.py", "utf8");
+const pump = readFileSync("../../examples/caad-examples/parts/pump_body.py", "utf8");
 show("bracket", run(bracket, "bracket.py"));
 show("bracket rolled back to feature 1", run(bracket, "bracket.py", 1));
 show("pump", run(pump, "pump_body.py"));

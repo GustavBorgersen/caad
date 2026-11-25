@@ -44,7 +44,7 @@ sys.meta_path.insert(0, _Stub())
 type RunRequest =
   | { id: number; type: "run"; src: string; filename: string; upto: number | null }
   | { id: number; type: "call"; fn: "select" | "resolve" | "snippet" | "api_help" | "highlight_indices" | "sketch_plane"
-    | "read_feature" | "patch_feature" | "feature_values" | "insert_feature" | "delete_feature" | "sketch_open" | "sketch_action" | "sketch_convert"; args: unknown[] };
+    | "read_feature" | "patch_feature" | "feature_values" | "insert_feature" | "delete_feature" | "sketch_open" | "sketch_action" | "sketch_convert" | "set_project"; args: unknown[] };
 
 const t0 = performance.now();
 const seconds = () => ((performance.now() - t0) / 1000).toFixed(1);

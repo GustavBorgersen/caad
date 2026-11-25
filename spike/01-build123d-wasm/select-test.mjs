@@ -8,7 +8,7 @@ py.runPython(readFileSync("snapshot2.mjs", "utf8").match(/const STUB_FINDER = `(
 py.runPython(readFileSync("../../app/public/caad_kernel.py", "utf8"));
 const js = (r) => { const j = r.toJs({ dict_converter: Object.fromEntries }); r.destroy?.(); return j; };
 const test = (title, file, pickCode) => { try {
-  py.globals.get("run")(readFileSync(`../../examples/${file}`, "utf8"), file).destroy();
+  py.globals.get("run")(readFileSync(`../../examples/caad-examples/parts/${file}`, "utf8"), file).destroy();
   const [kind, idx] = js(py.runPython(pickCode));
   const t = performance.now();
   const r = js(py.globals.get("select")(kind, py.toPy(idx)));

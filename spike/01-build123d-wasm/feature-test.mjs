@@ -16,7 +16,7 @@ const call = (fn, ...args) => {
   catch (e) { throw new Error(`${fn}: ${String(e.message).split("\n").filter(Boolean).at(-1)}`); } // Pyodide's own stack is huge
 };
 const tryCall = (fn, ...args) => { try { return { value: call(fn, ...args) }; } catch (e) { return { error: e.message.replace(`${fn}: `, "") }; } };
-const example = (f) => readFileSync(`../../examples/${f}`, "utf8");
+const example = (f) => readFileSync(`../../examples/caad-examples/parts/${f}`, "utf8");
 const features = (src) => call("analyze", src).features;
 const patch = (src, index, changes) => {
   const r = tryCall("patch_feature", src, index, features(src)[index].kind, changes);
@@ -194,6 +194,19 @@ check(features(out).length === 2 && call("run", out, "part.py").ok, "delete the 
 out = call("delete_feature", "from build123d import *\n\nwith BuildPart() as part:\n    Box(1, 1, 1)  # cube\n", 0);
 check(out === "from build123d import *\n\nwith BuildPart() as part:\n    pass\n", "deleting the only feature leaves pass", out);
 check(/shares its line/.test(tryCall("delete_feature", "from build123d import *\n\nwith BuildPart() as part:\n    Box(1, 1, 1); Box(2, 2, 2)\n", 0).error ?? ""), "refuses a feature sharing its line");
+
+// --- Shared code: the open part's project is importable (set_project, docs/07) ---
+const plateSrc = readFileSync("../../examples/caad-examples/parts/plate.py", "utf8");
+const paramsSrc = readFileSync("../../examples/caad-examples/params.py", "utf8");
+call("set_project", { "params.py": paramsSrc, "parts/plate.py": plateSrc });
+let shared = call("run", plateSrc, "caad-examples/parts/plate.py");
+check(shared.ok && Math.abs(shared.summary.bbox[3] - shared.summary.bbox[0] - 50) < 1e-6, `a part imports the project's params.py (50 wide)`, shared.error?.message);
+call("set_project", { "params.py": paramsSrc.replace("plate_w = 50", "plate_w = 80"), "parts/plate.py": plateSrc });
+shared = call("run", plateSrc, "caad-examples/parts/plate.py");
+check(shared.ok && Math.abs(shared.summary.bbox[3] - shared.summary.bbox[0] - 80) < 1e-6, "an edited params.py is picked up on the next build (80 wide)");
+call("set_project", {});
+shared = call("run", plateSrc, "caad-examples/parts/plate.py");
+check(!shared.ok && /No module named 'params'/.test(shared.error.message), "another project's (or no) shared code isn't importable");
 
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
 process.exit(failures ? 1 : 0);

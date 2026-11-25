@@ -1,13 +1,14 @@
 // The agent's tools, answered by the page. Definitions (names, schemas) are in ../../bridge/tools.json.
 import { text, type ToolHandler, type ToolResult } from "./agent";
 import type { BuildResult, Feature, Kernel, SelectInfo } from "./kernel";
-import type { Project } from "./project";
+import { projectOf, type Workspace, type WorkspaceIndex } from "./project";
 import type { Pick, Viewer } from "./viewer";
 
 export interface App {
   kernel: Kernel;
   viewer: Viewer;
-  project(): Project | null;
+  workspace(): Workspace | null;
+  index(): WorkspaceIndex; // its projects and their files by kind
   path(): string | null;
   result(): BuildResult | null;
   selection(): SelectInfo[];
@@ -54,8 +55,8 @@ export function sketchStatus(s: NonNullable<Feature["sketch"]>): string {
 
 export function makeTools(app: App): Record<string, ToolHandler> {
   const needProject = () => {
-    const p = app.project();
-    if (!p) throw new Error("No project is open in CAAD. Ask the user to open a folder (or the examples).");
+    const p = app.workspace();
+    if (!p) throw new Error("No folder is open in CAAD. Ask the user to open a folder (or the examples).");
     return p;
   };
   const needKernel = async () => {
@@ -68,12 +69,14 @@ export function makeTools(app: App): Record<string, ToolHandler> {
 
   return {
     async get_status() {
-      const p = app.project();
-      const parts = p ? await p.list() : [];
+      const p = app.workspace();
+      const index = app.index();
+      const path = app.path();
+      const project = path ? projectOf(index, path) : undefined;
       return text([
         `CAAD page: ${location.origin}`,
-        `Project: ${p ? `${p.name}${p.writable ? "" : " (examples: read-only, edits stay in the browser)"}, ${parts.length} part file(s)` : "none open"}`,
-        `Open part: ${app.path() ?? "none"}`,
+        `Workspace: ${p ? `${p.name}${p.writable ? "" : " (examples: read-only, edits stay in the browser)"}, ${index.projects.length} project(s)` : "none open"}`,
+        `Open part: ${path ?? "none"}${project ? ` (project ${project.root || "at the workspace root"})` : path ? " (in no project)" : ""}`,
         `CAD kernel: ${app.kernel.ready ? "ready" : "loading (takes about a minute after the page opens)"}`,
         `Selection: ${app.selection().flatMap((s) => s.items).length} item(s)`,
       ].join("\n"));
@@ -105,8 +108,19 @@ export function makeTools(app: App): Record<string, ToolHandler> {
     },
 
     async list_parts() {
-      const parts = await needProject().list();
-      return text(parts.length ? parts.join("\n") : "No build123d part files in this project yet. Create one with write_part.");
+      needProject();
+      const { projects, loose } = app.index();
+      const kinds = { part: "Parts", shared: "Shared code (importable by the project's parts)", assembly: "Assemblies", export: "Exports", print: "Print" } as const;
+      const lines: string[] = [];
+      for (const p of projects) {
+        lines.push(`Project ${p.root || "(the workspace folder)"}${p.root ? "/" : ""}: parts go in ${p.root ? `${p.root}/` : ""}parts/`);
+        for (const [kind, label] of Object.entries(kinds)) {
+          const files = p.files.filter((f) => f.kind === kind);
+          if (files.length) lines.push(`  ${label}:`, ...files.map((f) => `    ${f.path}`));
+        }
+      }
+      if (loose.length) lines.push("In no project:", ...loose.map((f) => `  ${f.path}`));
+      return text(lines.length ? lines.join("\n") : "No CAAD projects or build123d files here yet. Ask the user to create a project (New project), or create one with write_part.");
     },
 
     async read_part({ path }: { path: string }) {

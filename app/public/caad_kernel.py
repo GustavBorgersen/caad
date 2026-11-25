@@ -1006,6 +1006,35 @@ def sketch_action(src, index, actions):
 
 # --- Running ---------------------------------------------------------------------------------
 
+_PROJECT_DIR = "/project"  # the open part's project: its .py files, importable from its parts (docs/07)
+
+
+def set_project(files):
+    """The open part's project, as {path in the project: source} for its .py files: parts import shared code from
+    it (`from params import wall`), with the project's folder as the import root, like `python -m`."""
+    import os
+    import shutil
+    shutil.rmtree(_PROJECT_DIR, ignore_errors=True)
+    os.makedirs(_PROJECT_DIR, exist_ok=True)
+    for rel, text in dict(files).items():
+        path = os.path.join(_PROJECT_DIR, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+    if _PROJECT_DIR not in sys.path:
+        sys.path.insert(0, _PROJECT_DIR)
+    _forget_project_modules()
+
+
+def _forget_project_modules():
+    """Drop the project's modules, so the next import reads their current files."""
+    import importlib
+    for name, mod in list(sys.modules.items()):
+        if (getattr(mod, "__file__", None) or "").startswith(_PROJECT_DIR + "/"):
+            del sys.modules[name]
+    importlib.invalidate_caches()
+
+
 def _truncate(src, filename, upto):
     """AST of the file with the part block cut after feature `upto` (inclusive)."""
     tree = ast.parse(src, filename)
@@ -1049,6 +1078,7 @@ def run(src, filename="part.py", upto=None):
     caad = sys.modules.get("caad")
     if caad is not None:
         caad.solves.clear()
+    _forget_project_modules()  # shared code may have changed
     try:
         exec(compile(_truncate(src, filename, last), filename, "exec"), ns)
     except Exception as e:  # noqa: BLE001 - any error in user code is reported, not raised

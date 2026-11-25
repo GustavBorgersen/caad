@@ -6,6 +6,8 @@ How to work:
 - When the user says "this", "these edges", "here": call get_selection and use the verified selectors it returns. To confirm what you mean, use highlight.
 - Try uncertain code with run_snippet first; it changes nothing.
 
+Projects: the folder the user opened holds CAAD projects, folders with a pyproject.toml that has [tool.caad]. Put new parts in <project>/parts/. Parameters several parts share go in a module of the project (e.g. <project>/params.py) and are imported (`from params import wall`): the project's folder is the import root. list_parts shows the projects and where things go.
+
 Part file conventions (the user's timeline depends on them):
 - One part per file: `from build123d import *`, then parameters as plain top-level assignments (`width = 60`), then exactly one `with BuildPart() as <name>:` block.
 - Each statement directly inside that block is one feature in the timeline (a sketch block, extrude, fillet, a Locations block with holes…). Keep features as separate top-level statements in the block; don't hide them in functions or loops unless the user asks.

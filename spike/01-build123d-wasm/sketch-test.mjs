@@ -9,7 +9,7 @@ py.runPython(readFileSync("snapshot2.mjs", "utf8").match(/const STUB_FINDER = `(
 py.runPython(readFileSync("../../app/public/caad_kernel.py", "utf8"));
 const js = (r) => (r?.toJs ? r.toJs({ dict_converter: Object.fromEntries }) : r);
 const run = (src) => js(py.globals.get("run")(src, "t.py"));
-const bracket = readFileSync("../../examples/bracket.py", "utf8");
+const bracket = readFileSync("../../examples/caad-examples/parts/bracket.py", "utf8");
 run(bracket);
 const sel = "bracket.faces().filter_by(Axis.Y).sort_by(Axis.Z)[-1]"; // the wall's front face
 const pl = js(py.globals.get("sketch_plane")(sel));

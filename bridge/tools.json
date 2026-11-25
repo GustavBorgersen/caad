@@ -32,7 +32,7 @@
   },
   {
     "name": "list_parts",
-    "description": "The build123d part files in the open project.",
+    "description": "The open folder's CAAD projects and their files by kind: parts, shared code (importable by the project's parts, e.g. params.py), assemblies, exports; and build123d files in no project. Shows where new parts go (<project>/parts/).",
     "inputSchema": { "type": "object", "properties": {} }
   },
   {
@@ -40,7 +40,7 @@
     "description": "The source code of a part file, with line numbers.",
     "inputSchema": {
       "type": "object",
-      "properties": { "path": { "type": "string", "description": "Path relative to the project root, e.g. 'bracket.py'" } },
+      "properties": { "path": { "type": "string", "description": "Path relative to the open folder (the workspace), e.g. 'caad-examples/parts/bracket.py'" } },
       "required": ["path"]
     }
   },

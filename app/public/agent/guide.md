@@ -22,6 +22,7 @@ with BuildPart() as plate:
 ```
 
 - Name the builder after the part (`plate`, `bracket`); selectors refer to it (`plate.edges()`).
+- Files live in **projects**: folders with a `pyproject.toml` (`[tool.caad]`). Parts go in `<project>/parts/`. Parameters shared by several parts go in a module of the project, e.g. `<project>/params.py` with `wall = 3`, and parts import them: `from params import wall` — the project's folder is the import root. `list_parts` shows the layout.
 - Keep one feature per statement. A `with BuildSketch()` / `with Locations()` block counts as one feature together with what is inside it.
 - Don't call `show()`, exporters or viewers — the page shows the part.
 

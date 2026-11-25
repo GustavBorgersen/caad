@@ -12,7 +12,7 @@ for (const [i, code] of blocks.entries()) {
   console.log(`guide example ${i + 1}: ${r.ok ? "OK" : "FAIL"} ${r.summary ? `${r.summary.type} vol=${r.summary.volume} bbox=${r.summary.bbox}` : ""} ${r.error ? JSON.stringify(r.error) : ""}`);
 }
 
-run(readFileSync("../../examples/bracket.py", "utf8"), "bracket.py");
+run(readFileSync("../../examples/caad-examples/parts/bracket.py", "utf8"), "bracket.py");
 const snip = py.globals.get("snippet");
 console.log("\nsnippet 1:", JSON.stringify(js(snip("print('hi')\nlen(bracket.edges().filter_by(Axis.Z))"))));
 console.log("snippet 2:", JSON.stringify(js(snip("bracket.faces().sort_by(Axis.Z)[-1]"))).slice(0, 300));

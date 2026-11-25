@@ -116,7 +116,7 @@ check(r.model.error && /Expected a line/.test(r.model.error.message) && r.model.
 check(/Unknown sketch action/.test(tryCall("sketch_action", src0, 1, [{ op: "nope" }]).error ?? ""), "unknown actions are refused");
 
 // --- Converting plain sketches: expressions kept, regions checked ---
-const bracket = (await import("node:fs")).readFileSync("../../examples/bracket.py", "utf8");
+const bracket = (await import("node:fs")).readFileSync("../../examples/caad-examples/parts/bracket.py", "utf8");
 const volumeOf = (src) => call("run", src, "part.py").summary?.volume;
 let conv = call("sketch_convert", bracket, 0);
 check(conv.includes("from build123d import *\nfrom caad import Constrained\n") &&

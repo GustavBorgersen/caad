@@ -156,3 +156,14 @@ body.left-compact .rollback-bar .add { display: none; }
 .sketch-labels .dim-input { position: absolute; left: 0; top: 0; width: 120px; font: 11px ui-monospace, monospace; padding: 1px 4px; border: 1px solid var(--accent); border-radius: 3px; pointer-events: auto; }
 #sketch-panel .sub button.option { padding: 0 6px; min-width: 24px; font-size: 12px; }
 #sketch-panel .sub button.option.dim { color: #1f6feb; }
+
+/* Project browser (docs/07-project-structure.md): projects, then their files by kind */
+#parts-section h2 .actions { float: right; display: inline-flex; gap: 3px; margin-top: -3px; }
+#parts-section h2 .actions .small { float: none; margin: 0; }
+#parts li.project { font-weight: 600; cursor: default; padding-top: 6px; }
+#parts li.project.loose { font-weight: 400; color: var(--muted); }
+#parts li.project .small { padding: 0 5px; font-size: 10px; }
+#parts li.group { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); cursor: default; padding: 3px 12px 0 22px; }
+#parts li.group:hover, #parts li.project:hover { background: none; }
+#parts li.file { padding-left: 30px; }
+#parts li.file.export, #parts li.file.print { color: var(--muted); }

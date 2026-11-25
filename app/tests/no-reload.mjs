@@ -11,7 +11,7 @@ for (let i = 0; i < 30; i++) { try { await page.goto(`http://127.0.0.1:${PORT}/`
 await new Promise((r) => setTimeout(r, 2000));
 await page.evaluate(() => { window.marker = "still here"; });
 const now = new Date();
-utimesSync("../examples/bracket.py", now, now);
+utimesSync("../examples/caad-examples/parts/bracket.py", now, now);
 await new Promise((r) => setTimeout(r, 3000));
 const marker = await page.evaluate(() => window.marker).catch(() => undefined);
 console.log(marker === "still here" ? "PASS: no reload" : "FAIL: page reloaded");

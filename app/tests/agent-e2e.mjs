@@ -35,7 +35,7 @@ try {
   await page.waitForFunction(() => /^(Built|Failed)/.test(document.getElementById("status").textContent), { timeout: 300_000 });
 
   let r = await call("get_status");
-  check(r.text.includes("Open part: bracket.py") && r.text.includes("ready"), "get_status: " + r.text.split("\n").slice(1, 4).join(" | "));
+  check(r.text.includes("Open part: caad-examples/parts/bracket.py (project caad-examples)") && r.text.includes("ready"), "get_status: " + r.text.split("\n").slice(1, 4).join(" | "));
   r = await call("build123d_guide");
   check(r.text.includes("Sections") && r.text.includes("Selectors"), "build123d_guide lists sections");
   r = await call("build123d_guide", { topic: "selectors" });
@@ -43,21 +43,21 @@ try {
   r = await call("api_help", { name: "Hole" });
   check(r.text.includes("Hole(radius"), "api_help: " + r.text.split("\n")[2]);
   r = await call("list_parts");
-  check(r.text.includes("pump_body.py"), "list_parts: " + r.text.replace(/\n/g, ", "));
-  r = await call("read_part", { path: "bracket.py" });
+  check(r.text.includes("Project caad-examples/: parts go in caad-examples/parts/") && r.text.includes("    caad-examples/parts/pump_body.py") && r.text.includes("Shared code") && r.text.includes("caad-examples/params.py"), "list_parts: " + r.text.replace(/\n/g, ", "));
+  r = await call("read_part", { path: "caad-examples/parts/bracket.py" });
   check(r.text.includes(" 9 | with BuildPart() as bracket:"), "read_part has line numbers");
   r = await call("get_timeline");
   check(r.text.includes("built OK") && r.text.includes("fillet"), "get_timeline:\n" + r.text.split("\n").slice(0, 2).join("\n"));
   r = await call("run_snippet", { code: "e = bracket.edges().filter_by(Axis.Z)\nprint(len(e))\ne[0]" });
   check(r.text.includes("Output:") && r.text.includes("LINE"), "run_snippet: " + r.text.replace(/\s+/g, " ").slice(0, 120));
 
-  r = await call("edit_part", { path: "bracket.py", old_text: "radius=5)", new_text: "radius=50)" });
+  r = await call("edit_part", { path: "caad-examples/parts/bracket.py", old_text: "radius=5)", new_text: "radius=50)" });
   check(r.isError !== true && r.text.includes("FAILED at feature 5"), "edit_part with a bad fillet reports the failing feature");
-  r = await call("edit_part", { path: "bracket.py", old_text: "radius=50)", new_text: "radius=8)" });
+  r = await call("edit_part", { path: "caad-examples/parts/bracket.py", old_text: "radius=50)", new_text: "radius=8)" });
   check(r.text.includes("built OK"), "edit_part fix: " + r.text.split("\n")[1]);
   const editorText = await page.evaluate(() => window.caad.editor.text);
   check(editorText.includes("radius=8)"), "the user's code panel shows the agent's edit");
-  r = await call("edit_part", { path: "bracket.py", old_text: "nonexistent", new_text: "x" });
+  r = await call("edit_part", { path: "caad-examples/parts/bracket.py", old_text: "nonexistent", new_text: "x" });
   check(r.isError && r.text.includes("not found"), "edit_part refuses text that isn't there");
 
   r = await call("highlight", { selector: "bracket.edges().filter_by(Axis.Z)", note: "these vertical edges?" });
@@ -78,13 +78,13 @@ try {
   r = await call("get_selection");
   check(r.text.includes("bracket.faces()"), "get_selection:\n" + r.text);
 
-  r = await call("write_part", { path: "plate.py", code: "from build123d import *\n\nwith BuildPart() as plate:\n    Box(60, 40, 5)\n    with GridLocations(44, 24, 2, 2):\n        Hole(2.2)\n    fillet(plate.edges().filter_by(Axis.Z), radius=4)\n" });
-  check(r.text.includes("plate.py: built OK") && r.text.includes("60 × 40 × 5"), "write_part new part:\n" + r.text.split("\n").slice(0, 2).join("\n"));
-  check((await page.$$eval("#parts li", (l) => l.map((x) => x.textContent))).includes("plate.py"), "the new part appears in the parts list and is shown");
+  r = await call("write_part", { path: "caad-examples/parts/plate2.py", code: "from build123d import *\n\nwith BuildPart() as plate:\n    Box(60, 40, 5)\n    with GridLocations(44, 24, 2, 2):\n        Hole(2.2)\n    fillet(plate.edges().filter_by(Axis.Z), radius=4)\n" });
+  check(r.text.includes("caad-examples/parts/plate2.py: built OK") && r.text.includes("60 × 40 × 5"), "write_part new part:\n" + r.text.split("\n").slice(0, 2).join("\n"));
+  check((await page.$$eval("#parts li", (l) => l.map((x) => x.textContent))).includes("plate2.py"), "the new part appears in the parts list and is shown");
   r = await call("render", { view: "iso" });
   writeFileSync(`${OUT}/agent-render-plate.png`, Buffer.from(r.content.find((c) => c.type === "image").data, "base64"));
   await page.screenshot({ path: `${OUT}/agent-page.png` });
-  r = await call("open_part", { path: "bracket.py", rollback: 1 });
+  r = await call("open_part", { path: "caad-examples/parts/bracket.py", rollback: 1 });
   check(r.text.includes("rolled-back"), "open_part with rollback");
   console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
   await finish(failures ? 1 : 0);

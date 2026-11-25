@@ -1,7 +1,7 @@
 # CAAD — Project structure
 
 **Date:** 2026-11-25
-**Status:** Agreed — ready to build 07a
+**Status:** 07a built (2026-11-25); 07b (export) next
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1 ("Project structure and project browser"); follows [06 — Sketches](06-sketches.md)
 
 ## Problem
@@ -89,7 +89,7 @@ STEP and STL from the page: *Export* writes `exports/<part>.step` / `.stl` into 
 
 | Phase | Contents |
 | :-- | :-- |
-| **07a — Workspace and projects** | Projects found by `pyproject.toml` with `[tool.caad]`; a workspace with several projects; *New project*; *Make this a CAAD project*; shared code in the kernel (each project's folder on `sys.path`); project browser by project and kind; *+ New part* into `parts/`; examples in the layout; agent `list_parts` by project and kind; guide; README section on running parts outside CAAD |
+| **07a — Workspace and projects** (done) | Projects found by `pyproject.toml` with `[tool.caad]`; a workspace with several projects; *New project*; *Make this a CAAD project*; shared code in the kernel (each project's folder on `sys.path`); project browser by project and kind; *+ New part* into `parts/`; examples in the layout; agent `list_parts` by project and kind; guide; README section on running parts outside CAAD |
 | **07b — Export** | STEP/STL to `exports/` or download; `export_part` agent tool |
 
 ## Decided

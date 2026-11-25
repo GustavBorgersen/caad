@@ -12,6 +12,7 @@ npm run test:bridge  # bridge protocol test
 npm run test:agent   # the real bridge + app in headless Chromium, every agent tool
 npm run test:sketch  # sketch mode: draw, cut, sketch on a face, new part
 npm run test:feature # feature dialog: double-click, edit with live preview, OK/Cancel
+npm run test:project # workspace and projects: browser, shared code, New project, + Part
 ```
 
 The first start takes about a minute while the CAD kernel loads (see `../docs/02-spike-results.md`).
@@ -27,7 +28,7 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | `src/timeline.ts` | Timeline panel with rollback bar; double-click edits a feature, × deletes one, + Extrude / + Fillet / + Chamfer at the bar add one |
 | `src/feature-dialog.ts` | Feature dialog: fields from the kernel, live preview, surgical patch on OK (`../docs/05-feature-model.md`) |
 | `src/selection.ts` | Selection panel: properties and verified build123d selectors |
-| `src/project.ts` | Local folder (File System Access API) or the bundled examples |
+| `src/project.ts` | The workspace (a local folder via the File System Access API, or the bundled examples), its projects and their files by kind |
 | `src/agent.ts` / `src/tools.ts` | Connection to the local bridge; the agent's tools, answered by the page |
 | `src/agent-dialog.ts` | Agent button and setup dialog (bridge download, `claude mcp add` line) |
 | `src/sketcher.ts` | Sketch editor for constrained sketches: tools, snapping, dragging with live PlaneGCS solving; every action is a kernel code edit (`sketch_action`) |
