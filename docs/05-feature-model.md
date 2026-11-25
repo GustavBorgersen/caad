@@ -1,7 +1,7 @@
 # CAAD — Feature model and code round-trip
 
 **Date:** 2026-11-24, decisions added 2026-11-25
-**Status:** Slice 1 built (2026-11-25); slice 2 next
+**Status:** Slices 1 and 2 built (2026-11-25); slice 3 next
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1
 
 ## Problem
@@ -81,7 +81,7 @@ First set of feature types and their canonical forms:
 | Kind | Canonical code | Notes |
 | :-- | :-- | :-- |
 | **Sketch** | `with BuildSketch(<plane>, mode=Mode.PRIVATE) as skN:` + body | The body is edited in the sketch editor; its format is design doc 06 |
-| **Extrude** | `extrude(skN.sketch, amount=…, [both=True], [taper=…], [mode=Mode.SUBTRACT/INTERSECT])` | *Through all*: `until=Until.LAST` |
+| **Extrude** | `extrude(skN.sketch, amount=…, [both=True], [taper=…], [mode=Mode.SUBTRACT/INTERSECT])` | *Through all*: `until=Until.LAST`. A sketch on a face has its normal pointing out of the part, so a cut through all from a face also gets `dir=` into the part (verified: without it, build123d finds no intersection) |
 | **Revolve** | `revolve(skN.sketch, axis=…, revolution_arc=…, [mode=…])` | |
 | **Fillet / Chamfer** | `fillet(<edges>, radius=…)` / `chamfer(<edges>, length=…, [length2=…])` | Edges as a selector |
 | **Hole** | `with Locations(<points or faces>):` + `Hole(…)` / `CounterBoreHole(…)` / `CounterSinkHole(…)` | |
@@ -124,9 +124,10 @@ All in `caad_kernel.py`, called through the worker like `select` and `resolve` t
 | `read_feature(src, index)` | `kind`, `label`, `fields`, and per parameter: `expr` (source text or `null`), `value` (evaluated, see above), `error` |
 | `feature_values(exprs)` | Values of edited expressions, in the model `read_feature` saw (previews replace the latest run) |
 | `patch_feature(src, index, kind, changes)` | New source. `changes` maps a parameter to a new expression, or to `null` to remove it. Fails if the feature at `index` is no longer of `kind` — the file changed while the dialog was open (e.g. the agent edited it) |
-| `insert_feature(src, after, kind, params)` | New source with the canonical code of a new feature after feature `after` (the rollback bar) |
+| `insert_feature(src, after, kind, params)` | `{src, index, name}`: the canonical code of a new feature after feature `after` (the rollback bar; `None` = at the end, `-1` = first). A sketch takes `{plane, body}` and gets the next free `skN` |
+| `delete_feature(src, index)` | New source without the feature; refused while a later feature refers to its name or takes it as a pending sketch, or when it shares its line with other code |
 
-`insertFeatures` in `sketch-code.ts` moves into `insert_feature`. Turning a drawn sketch into code moves into the kernel with design doc 06; until then `sketch-code.ts` keeps generating the sketch body, in the named form.
+`read_feature` also lists the named sketches before the feature, for the sketch field. Turning a drawn sketch into code moves into the kernel with design doc 06; until then `sketch-code.ts` generates the sketch body and the extrude's arguments, and the kernel writes both features.
 
 ## Patching rules
 
@@ -170,7 +171,7 @@ The agent keeps writing code with `write_part` / `edit_part`. The build123d guid
 | Slice | Contents |
 | :-- | :-- |
 | **1 — Read and patch** (done) | Registry with extrude, fillet and chamfer; call and code tiers; `analyze` extension, `read_feature`, `patch_feature`; Node tests; generic dialog in the page with live preview, opened by double-click |
-| **2 — Named sketches** | Sketcher writes the named form; extrude's sketch field; `insert_feature` and a "+" at the rollback bar (fillet/chamfer from the selected edges); refs and safe delete |
+| **2 — Named sketches** (done) | Sketcher writes the named form; extrude's sketch field; `insert_feature` and a "+" at the rollback bar (fillet/chamfer from the selected edges); refs and safe delete |
 | **3 — More types, agent** | Revolve, hole, mirror; `edit_feature` tool; guide teaches the canonical forms |
 
 ## Tests

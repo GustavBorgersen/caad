@@ -11,8 +11,11 @@ py.runPython(readFileSync("../../app/public/caad_kernel.py", "utf8"));
 let failures = 0;
 const check = (ok, what, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"}: ${what}${!ok && detail ? `\n      ${detail}` : ""}`); if (!ok) failures++; };
 const js = (r) => { if (r?.toJs) { const j = r.toJs({ dict_converter: Object.fromEntries }); r.destroy(); return j; } return r; };
-const call = (fn, ...args) => js(py.globals.get(fn)(...args.map((a) => py.toPy(a))));
-const tryCall = (fn, ...args) => { try { return { value: call(fn, ...args) }; } catch (e) { return { error: String(e.message).split("\n").filter(Boolean).at(-1) }; } };
+const call = (fn, ...args) => {
+  try { return js(py.globals.get(fn)(...args.map((a) => py.toPy(a)))); }
+  catch (e) { throw new Error(`${fn}: ${String(e.message).split("\n").filter(Boolean).at(-1)}`); } // Pyodide's own stack is huge
+};
+const tryCall = (fn, ...args) => { try { return { value: call(fn, ...args) }; } catch (e) { return { error: e.message.replace(`${fn}: `, "") }; } };
 const example = (f) => readFileSync(`../../examples/${f}`, "utf8");
 const features = (src) => call("analyze", src).features;
 const patch = (src, index, changes) => {
@@ -138,6 +141,45 @@ check(/radius/.test(tryCall("patch_feature", bracket, 5, "fillet", { radius: "5 
 check(/required/.test(tryCall("patch_feature", bracket, 5, "fillet", { radius: null }).error ?? ""), "refuses removing a required argument");
 check(/no argument/.test(tryCall("patch_feature", bracket, 5, "fillet", { depth: "1" }).error ?? ""), "refuses unknown arguments");
 check(/radius/.test(tryCall("patch_feature", bracket, 5, "fillet", { radius: "5)\n    Box(1, 1, 1" }).error ?? ""), "refuses an expression that tries to add a statement");
+
+// --- Inserting features in canonical form ---
+const empty = "from build123d import *\n\nwith BuildPart() as part:\n    pass\n";
+let ins = call("insert_feature", empty, null, "sketch", { plane: "Plane.XY", body: ["Rectangle(40, 20)"] });
+check(ins.index === 0 && ins.name === "sk1" && ins.src.includes("    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:\n        Rectangle(40, 20)\n") && !ins.src.includes("pass"),
+  "a sketch replaces the pass of an empty part", ins.src);
+ins = call("insert_feature", ins.src, ins.index, "extrude", { to_extrude: "sk1.sketch", amount: "5", both: "False", mode: null });
+check(ins.index === 1 && ins.src.includes("    extrude(sk1.sketch, amount=5)\n"), "an extrude: sketch positional, defaults left out", ins.src);
+let built = call("run", ins.src, "part.py");
+check(built.ok && Math.abs(built.summary.volume - 4000) < 1e-6, `the inserted sketch + extrude build (volume ${built.summary?.volume})`);
+ins = call("insert_feature", ins.src, null, "sketch", { plane: "part.faces().sort_by(Axis.Z)[-1]", body: ["Circle(3)"] });
+check(ins.name === "sk2" && ins.index === 2, "the next sketch is sk2, at the end");
+ins = call("insert_feature", ins.src, 2, "extrude", { to_extrude: "sk2.sketch", until: "Until.LAST", dir: "(0, 0, -1)", mode: "Mode.SUBTRACT" });
+check(ins.src.includes("extrude(sk2.sketch, until=Until.LAST, mode=Mode.SUBTRACT, dir=(0, 0, -1))"), "keywords in the dialog's order, extra ones after", ins.src.split("\n").at(-2));
+built = call("run", ins.src, "part.py");
+check(built.ok && Math.abs(built.summary.volume - (4000 - Math.PI * 9 * 5)) < 0.01, `cut through all from a face, into the part (volume ${built.summary?.volume?.toFixed(2)})`);
+let ins2 = call("insert_feature", bracket, 2, "fillet", { objects: "bracket.edges().filter_by(Axis.Z)", radius: "1" });
+check(ins2.index === 3 && features(ins2.src)[3].kind === "fillet" && ins2.src.split("\n")[15] === "    fillet(bracket.edges().filter_by(Axis.Z), radius=1)",
+  "insert after a feature (at the rollback bar)", ins2.src.split("\n")[15]);
+ins2 = call("insert_feature", bracket, -1, "chamfer", { objects: "bracket.edges()", length: "1" });
+check(ins2.index === 0 && features(ins2.src)[0].kind === "chamfer", "insert before the first feature");
+check(call("insert_feature", named, null, "sketch", { plane: "Plane.XZ", body: [] }).name === "sk2", "sketch names skip names already in the file");
+check(/no argument/.test(tryCall("insert_feature", bracket, null, "fillet", { objects: "bracket.edges()", size: "1" }).error ?? ""), "refuses unknown arguments");
+r = call("read_feature", ins.src, 3);
+check(JSON.stringify(r.sketches) === '["sk1","sk2"]', `an extrude can use the named sketches before it: ${JSON.stringify(r.sketches)}`);
+check(JSON.stringify(call("read_feature", bracket, 3).sketches) === "[]", "implicit sketches aren't offered by name");
+
+// --- Deleting features ---
+let del = tryCall("delete_feature", ins.src, 0);
+check(/used by 2\. Extrude sk1/.test(del.error ?? ""), `refuses deleting a sketch an extrude uses: ${del.error}`);
+del = tryCall("delete_feature", bracket, 2);
+check(/used by 4\. Extrude wall/.test(del.error ?? ""), `refuses deleting an implicit sketch an extrude takes: ${del.error}`);
+out = call("delete_feature", bracket, 5);
+check(out === bracket.replace("    fillet(bracket.edges().filter_by(Axis.Z).group_by(Axis.Y)[0], radius=5)\n", ""), "deletes the fillet's line only");
+out = call("delete_feature", call("delete_feature", ins.src, 3), 2);
+check(features(out).length === 2 && call("run", out, "part.py").ok, "delete the cut, then its sketch");
+out = call("delete_feature", "from build123d import *\n\nwith BuildPart() as part:\n    Box(1, 1, 1)  # cube\n", 0);
+check(out === "from build123d import *\n\nwith BuildPart() as part:\n    pass\n", "deleting the only feature leaves pass", out);
+check(/shares its line/.test(tryCall("delete_feature", "from build123d import *\n\nwith BuildPart() as part:\n    Box(1, 1, 1); Box(2, 2, 2)\n", 0).error ?? ""), "refuses a feature sharing its line");
 
 console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
 process.exit(failures ? 1 : 0);

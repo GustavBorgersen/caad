@@ -22,6 +22,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 export class FeatureDialog {
   private detail: FeatureDetail | null = null;
+  private created: { src: string; original: string } | null = null; // a new feature: its source, not saved yet
   private exprs = new Map<string, string | null>(); // current expression per field; null = not in the code
   private added = new Set<string>(); // optional fields the user chose to show
   private timer = 0;
@@ -36,8 +37,10 @@ export class FeatureDialog {
 
   get open() { return this.detail !== null; }
 
-  show(detail: FeatureDetail) {
+  /** Open for a feature; `newSrc` when it's a new feature that exists only in that (unsaved) source. */
+  show(detail: FeatureDetail, newSrc?: string) {
     this.detail = detail;
+    this.created = newSrc ? { src: newSrc, original: this.host.source() } : null;
     this.exprs = new Map(detail.fields!.map((f) => [f.name, f.expr ?? null]));
     this.added.clear();
     this.render();
@@ -56,7 +59,8 @@ export class FeatureDialog {
     const d = this.detail!;
     const fields = d.fields!;
     const hidden = fields.filter((f) => !this.visible(f) && !f.show_if);
-    const title = d.tier === "type" ? d.kind[0].toUpperCase() + d.kind.slice(1) : `${d.call}()`;
+    const name = d.tier === "type" ? d.kind[0].toUpperCase() + d.kind.slice(1) : `${d.call}()`;
+    const title = this.created ? `New ${d.tier === "type" ? d.kind : name}` : name;
     this.el.innerHTML = `
       <div class="head"><b>${esc(title)}</b><span class="muted">feature ${d.index + 1}</span></div>
       <div class="fields">${fields.filter((f) => this.visible(f)).map((f) => this.row(f)).join("")}</div>
@@ -100,6 +104,13 @@ export class FeatureDialog {
     const expr = this.exprs.get(f.name) ?? null;
     const changed = expr !== (f.expr ?? null);
     let input: string;
+    if (f.type === "sketch") { // the named sketches before this feature, or the pending ones
+      const d = this.detail!;
+      f = { ...f, type: "choice", options: [
+        { label: d.pending.length ? `Pending: ${d.pending.join(", ")}` : "None" },
+        ...d.sketches.map((n) => ({ expr: `${n}.sketch`, label: n })),
+      ] };
+    }
     if (f.type === "choice") {
       const opts = [...(f.options ?? [])];
       if (expr !== null && !opts.some((o) => (o.expr ?? null) === expr)) opts.push({ expr, label: expr });
@@ -139,7 +150,7 @@ export class FeatureDialog {
     const seq = ++this.seq;
     const changes = this.changes();
     let src: string;
-    try { src = await this.host.kernel.patchFeature(this.host.source(), d.index, d.kind, changes); }
+    try { src = await this.host.kernel.patchFeature(this.created?.src ?? this.host.source(), d.index, d.kind, changes); }
     catch (e) { if (seq === this.seq) this.say((e as Error).message, true); return; }
     const error = await this.host.preview(src, d.index);
     if (seq !== this.seq || !this.detail) return;
@@ -171,10 +182,14 @@ export class FeatureDialog {
     const d = this.detail;
     if (!d) return;
     const changes = this.changes();
-    if (!Object.keys(changes).length) { this.cancel(); return; }
+    if (this.created && this.host.source() !== this.created.original) {
+      this.say("The file changed while this dialog was open, so nothing was added. Cancel and try again.", true);
+      return;
+    }
+    if (!this.created && !Object.keys(changes).length) { this.cancel(); return; }
     let src: string;
-    // Patch the current source: if the file changed meanwhile, the kernel refuses unless the feature is still there.
-    try { src = await this.host.kernel.patchFeature(this.host.source(), d.index, d.kind, changes); }
+    // An edit patches the current source: if the file changed meanwhile, the kernel refuses unless the feature is still there.
+    try { src = await this.host.kernel.patchFeature(this.created?.src ?? this.host.source(), d.index, d.kind, changes); }
     catch (e) { this.say((e as Error).message, true); return; }
     this.close();
     await this.host.apply(src);
@@ -190,6 +205,7 @@ export class FeatureDialog {
     clearTimeout(this.timer);
     this.seq++;
     this.detail = null;
+    this.created = null;
     this.el.hidden = true;
     this.el.replaceChildren();
   }

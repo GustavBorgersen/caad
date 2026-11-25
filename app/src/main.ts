@@ -6,7 +6,7 @@ import { FeatureDialog } from "./feature-dialog";
 import { Kernel, type BuildResult, type Feature, type Kind, type SelectInfo } from "./kernel";
 import { canOpenFolders, examples, lastFolder, openFolder, reopen, type Project } from "./project";
 import { renderSelection } from "./selection";
-import { insertFeatures, newPartSource, sketchLines } from "./sketch-code";
+import { extrudeArgs, newPartSource, sketchBody } from "./sketch-code";
 import { Sketcher } from "./sketcher";
 import { renderTimeline } from "./timeline";
 import { makeTools } from "./tools";
@@ -59,6 +59,8 @@ async function rebuild(): Promise<BuildResult | null> {
     rollback: (upto) => { if (!featureDialog.open) { state.upto = upto; rebuild(); } },
     hover: (f) => editor.markFeature(f ? [f.line, f.end] : null, !!f),
     edit: (f) => editFeature(f),
+    remove: (f) => removeFeature(f),
+    add: (kind) => addFeature(kind),
   });
   editor.markError(r.error?.line ?? null);
   const err = $("error");
@@ -159,7 +161,14 @@ async function applyCode(path: string, code: string): Promise<BuildResult | null
 
 // --- Editing features (docs/05-feature-model.md) ---------------------------------------------
 
-let editUpto: number | null = null; // where the rollback bar was before the dialog opened
+// Where the rollback bar goes when the dialog closes (a new feature moves it one down).
+let editReturn: { ok: number | null; cancel: number | null } = { ok: null, cancel: null };
+
+/** Best selector for the selection, when everything selected is of this kind. */
+function selected(kind: Kind): string | null {
+  const [info, ...more] = state.selection;
+  return info && !more.length && info.items[0]?.kind === kind ? info.selectors[0]?.expr ?? null : null;
+}
 
 const featureDialog = new FeatureDialog($("feature-panel"), {
   kernel,
@@ -173,18 +182,15 @@ const featureDialog = new FeatureDialog($("feature-panel"), {
   },
   async apply(src) {
     document.body.classList.remove("editing-feature");
-    state.upto = editUpto;
+    state.upto = editReturn.ok;
     if (state.path) await applyCode(state.path, src);
   },
   cancel() {
     document.body.classList.remove("editing-feature");
-    state.upto = editUpto;
+    state.upto = editReturn.cancel;
     rebuild();
   },
-  selection(kind) { // only when everything selected is of this kind
-    const [info, ...more] = state.selection;
-    return info && !more.length && info.items[0]?.kind === kind ? info.selectors[0]?.expr ?? null : null;
-  },
+  selection: selected,
 });
 
 /** Double-click in the timeline: roll back to just before the feature and open its dialog. */
@@ -196,20 +202,51 @@ async function editFeature(f: Feature) {
     return;
   }
   if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
-  editUpto = state.upto;
-  state.upto = f.index - 1;
+  editReturn = { ok: state.upto, cancel: state.upto };
+  await openDialog(editor.text, f.index);
+}
+
+/** Roll back to just before feature `index` of `src` and open its dialog (`src` unsaved: a new feature). */
+async function openDialog(src: string, index: number) {
+  state.upto = index - 1;
   document.body.classList.add("editing-feature");
-  const r = await rebuild();
+  const r = await rebuild(); // the features before it are the same in the saved file
   let detail;
-  try { detail = r ? await kernel.readFeature(editor.text, f.index) : null; }
+  try { detail = r ? await kernel.readFeature(src, index) : null; }
   catch (e) { status(`Can't edit this feature: ${(e as Error).message}`); }
   if (!detail?.fields) {
     document.body.classList.remove("editing-feature");
-    state.upto = editUpto;
+    state.upto = editReturn.cancel;
     rebuild();
     return;
   }
-  featureDialog.show(detail);
+  featureDialog.show(detail, src === editor.text ? undefined : src);
+}
+
+/** "+ Fillet" / "+ Chamfer" at the rollback bar: a new feature on the selected edges, in its dialog. */
+async function addFeature(kind: "fillet" | "chamfer") {
+  if (featureDialog.open || sketcher.active || !state.path) return;
+  const edges = selected("edge");
+  if (!edges) { status(`Select the edges to ${kind} in the view first (Shift+click for more).`); return; }
+  if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
+  const last = (state.result?.timeline?.features.length ?? 0) - 1;
+  const after = state.upto != null && state.upto < last ? state.upto : null;
+  let ins;
+  try { ins = await kernel.insertFeature(editor.text, after, kind, { objects: edges, [kind === "fillet" ? "radius" : "length"]: "1" }); }
+  catch (e) { status((e as Error).message); return; }
+  editReturn = { ok: after === null ? null : after + 1, cancel: state.upto };
+  await openDialog(ins.src, ins.index);
+}
+
+/** The × in the timeline: delete a feature, unless a later one uses it. */
+async function removeFeature(f: Feature) {
+  if (featureDialog.open || sketcher.active || !state.path) return;
+  if (!confirm(`Delete feature ${f.index + 1}, "${f.label}"?`)) return;
+  let src;
+  try { src = await kernel.deleteFeature(editor.text, f.index); }
+  catch (e) { alert((e as Error).message); return; }
+  if (state.upto != null && state.upto >= f.index) state.upto--;
+  await applyCode(state.path, src);
 }
 
 // --- Agent ------------------------------------------------------------------------------------
@@ -324,11 +361,16 @@ async function startSketch(planeExpr: string, label: string) {
   const upto = state.upto, path = state.path!;
   $("plane-choice").hidden = true;
   document.body.classList.add("sketching");
+  const onFace = !/^Plane\.\w+$/.test(planeExpr);
   sketcher.start(plane, label, size, async (shapes, op) => {
     document.body.classList.remove("sketching");
-    const feats = state.result?.timeline?.features ?? [];
-    const last = feats.length - 1;
-    const src = insertFeatures(editor.text, feats, upto, sketchLines(planeExpr, shapes, op));
+    const last = (state.result?.timeline?.features.length ?? 0) - 1;
+    let src;
+    try { // a named sketch, then the extrude or cut that uses it (docs/05-feature-model.md)
+      const sk = await kernel.insertFeature(editor.text, upto, "sketch", { plane: planeExpr, body: sketchBody(shapes) });
+      const into = onFace ? plane.z.map((v) => -v) : null;
+      src = (await kernel.insertFeature(sk.src, sk.index, "extrude", { to_extrude: `${sk.name}.sketch`, ...extrudeArgs(op, into) })).src;
+    } catch (e) { status(`Couldn't add the sketch: ${(e as Error).message}`); return; }
     // Stay rolled back if we were, but include the two new features.
     state.upto = upto != null && upto < last ? upto + 2 : null;
     viewer.setSelection([]);

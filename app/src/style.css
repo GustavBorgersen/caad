@@ -129,3 +129,13 @@ body.sketching #selection, body.sketching #view-tools, body.sketching #agent-not
 #feature-panel .actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 #feature-panel button.primary { background: var(--accent); color: white; border-color: var(--accent); }
 body.editing-feature #timeline, body.editing-feature #right, body.editing-feature #view-tools, body.editing-feature #parts { pointer-events: none; opacity: 0.6; }
+.feature { position: relative; }
+.feature .del { position: absolute; right: 4px; top: 2px; padding: 0 5px; border: none; background: none; color: var(--muted); font-size: 14px; line-height: 1.2; visibility: hidden; }
+.feature:hover .del { visibility: visible; }
+.feature .del:hover { color: var(--error); background: none !important; }
+body.left-compact .feature .del { display: none; }
+.rollback-bar { display: flex; align-items: center; gap: 6px; }
+.rollback-bar > span:first-child { flex: 1; cursor: pointer; }
+.rollback-bar .add { display: inline-flex; gap: 3px; }
+.rollback-bar .add button { padding: 0 5px; font-size: 11px; }
+body.left-compact .rollback-bar .add { display: none; }

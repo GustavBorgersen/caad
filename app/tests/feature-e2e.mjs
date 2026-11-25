@@ -17,6 +17,8 @@ try {
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log("  [page exception]", e.message));
   page.on("console", (m) => m.type() === "error" && !m.text().includes("WebSocket") && console.log("  [console error]", m.text()));
+  let lastAlert = "";
+  page.on("dialog", (d) => { lastAlert = d.message(); d.accept(); }); // confirm() and alert()
   for (let i = 0; i < 30; i++) { try { await page.goto(`http://127.0.0.1:${PORT}/`); break; } catch { await new Promise((r) => setTimeout(r, 500)); } }
   await page.waitForFunction(() => /^(Built|Failed)/.test(document.getElementById("status").textContent), { timeout: 300_000 });
 
@@ -28,7 +30,7 @@ try {
   const dblclick = async (index) => {
     for (let i = 0; ; i++) { // the timeline re-renders after every build: retry with a fresh row
       try { await (await page.$$("#timeline .feature"))[index].click({ count: 2 }); return; }
-      catch (e) { if (i > 5 || !/detached/.test(e.message)) throw e; await new Promise((r) => setTimeout(r, 200)); }
+      catch (e) { if (i > 5 || !/detached|not clickable/.test(e.message)) throw e; await new Promise((r) => setTimeout(r, 200)); }
     }
   };
   const fieldInput = (name) => page.$(`#feature-panel [data-field="${name}"] input, #feature-panel [data-field="${name}"] select`);
@@ -63,7 +65,7 @@ try {
   // 2. Extrude: tick Symmetric (a new keyword argument).
   await dblclick(1);
   await panelOpen();
-  check((await page.$eval('#feature-panel [data-field="to_extrude"] input', (i) => i.placeholder)) === "pending: base", "the extrude shows its pending sketch");
+  check((await page.$eval('#feature-panel [data-field="to_extrude"] select', (s) => s.selectedOptions[0].textContent)) === "Pending: base", "the extrude shows its pending sketch");
   await (await fieldInput("both")).click();
   g = await gen();
   await page.keyboard.press("Enter").catch(() => {});
@@ -129,9 +131,82 @@ try {
     "Add argument appends arc_size=180");
   await page.screenshot({ path: `${OUT}/feature-3-call.png` });
 
+  // 8. Named sketches: the extrude's sketch is a choice of the sketches before it.
+  const twoSketches = `from build123d import *
+
+with BuildPart() as part:
+    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:
+        Rectangle(20, 20)
+    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk2:
+        Circle(5)
+    extrude(sk1.sketch, amount=5)
+`;
+  g = await gen();
+  await page.evaluate((src) => window.caad.applyCode("named.py", src), twoSketches);
+  await page.waitForFunction(() => window.caad.state.path === "named.py" && window.caad.state.result?.ok, { timeout: 60_000 });
+  await dblclick(2);
+  await panelOpen();
+  const options = await page.$$eval('#feature-panel [data-field="to_extrude"] option', (o) => o.map((x) => x.textContent));
+  check(JSON.stringify(options) === JSON.stringify(["None", "sk1", "sk2"]), `sketch choices: ${options}`);
+  await page.select('#feature-panel [data-field="to_extrude"] select', "sk2.sketch");
+  g = await gen();
+  await page.click("#feature-panel .primary");
+  await panelClosed();
+  await waitBuild(g);
+  check((await code()).includes("    extrude(sk2.sketch, amount=5)\n"), "choosing sk2 changes only the sketch reference");
+  check(Math.abs(await page.evaluate(() => window.caad.state.result.summary.volume) - Math.PI * 25 * 5) < 0.01, "and the part is the extruded circle");
+
+  // 9. Deleting: refused while a later feature uses it, else the line goes.
+  lastAlert = "";
+  await (await page.$$("#timeline .feature .del"))[1].evaluate((b) => b.click());
+  await page.waitForFunction(() => true);
+  await new Promise((r) => setTimeout(r, 500));
+  check(/^'sk2' is used by 3\. Extrude sk2/.test(lastAlert) && (await code()).includes("as sk2:"), `deleting a used sketch is refused: ${lastAlert}`);
+  g = await gen();
+  await (await page.$$("#timeline .feature .del"))[0].evaluate((b) => b.click());
+  await waitBuild(g);
+  check(!(await code()).includes("sk1") && await page.evaluate(() => window.caad.state.result.ok), "deleting the unused sk1 removes its lines");
+
+  // 10. "+ Fillet" at the rollback bar: a new feature on the selected edges, opened in its dialog.
+  await page.evaluate(() => window.caad.openPart("bracket.py"));
+  await page.waitForFunction(() => window.caad.state.path === "bracket.py" && window.caad.state.result?.ok, { timeout: 60_000 });
+  const bracketBefore = await code();
+  await page.evaluate(async () => {
+    const r = await window.caad.kernel.highlightIndices("bracket.edges().filter_by(Axis.Z).group_by(Axis.Y)[-1]");
+    window.caad.viewer.onSelect(r.edges.map((index) => ({ kind: "edge", index })));
+  });
+  await page.waitForFunction(() => window.caad.state.selection.length === 1, { timeout: 30_000 });
+  await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Fillet").click());
+  await panelOpen();
+  check(/New fillet/.test(await page.$eval("#feature-panel .head", (h) => h.textContent)) && (await values()).objects === "= 2 edges", "the dialog opens for the new fillet on the 2 selected edges");
+  check((await code()) === bracketBefore, "nothing is written before OK");
+  await type("radius", "2");
+  g = await gen();
+  await page.click("#feature-panel .primary");
+  await panelClosed();
+  await waitBuild(g);
+  src = await code();
+  const added = src.slice(bracketBefore.length);
+  check(src.startsWith(bracketBefore) && /^    fillet\(bracket\.edges\(\)[^\n]*, radius=2\)\n$/.test(added), `OK adds the fillet at the end: ${added.trim()}`);
+  check(await page.evaluate(() => window.caad.state.result.ok && window.caad.state.result.timeline.features.length === 7), "and it builds as feature 7");
+
+  // 11. A new chamfer, cancelled: nothing changes.
+  await page.evaluate(async () => {
+    const r = await window.caad.kernel.highlightIndices("bracket.edges().filter_by(Axis.X).sort_by(Axis.Z)[-1]");
+    window.caad.viewer.onSelect(r.edges.map((index) => ({ kind: "edge", index })));
+  });
+  await page.waitForFunction(() => window.caad.state.selection.length === 1, { timeout: 30_000 });
+  await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Chamfer").click());
+  await panelOpen();
+  await page.keyboard.press("Escape");
+  await panelClosed();
+  await new Promise((r) => setTimeout(r, 500));
+  check((await code()) === src, "a cancelled new chamfer leaves the file as it was");
+
   console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
   await finish(failures ? 1 : 0);
 } catch (e) {
   console.log("ERROR:", e.message);
+  await (await browser.pages()).at(-1).screenshot({ path: `${OUT}/feature-error.png` }).catch(() => {});
   await finish(1);
 }

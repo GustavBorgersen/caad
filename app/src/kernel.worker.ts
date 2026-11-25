@@ -41,7 +41,7 @@ sys.meta_path.insert(0, _Stub())
 type RunRequest =
   | { id: number; type: "run"; src: string; filename: string; upto: number | null }
   | { id: number; type: "call"; fn: "select" | "resolve" | "snippet" | "api_help" | "highlight_indices" | "sketch_plane"
-    | "read_feature" | "patch_feature" | "feature_values"; args: unknown[] };
+    | "read_feature" | "patch_feature" | "feature_values" | "insert_feature" | "delete_feature"; args: unknown[] };
 
 const t0 = performance.now();
 const seconds = () => ((performance.now() - t0) / 1000).toFixed(1);
@@ -93,11 +93,17 @@ function handle(req: RunRequest) {
   postMessage({ type: "result", id: req.id, gen, result }, transfer);
 }
 
+/** The last line of a Python traceback; our own ValueErrors are messages for the user, without the type. */
+function pythonError(e: unknown): string {
+  const lines = String((e as Error).message ?? e).trim().split("\n");
+  return lines[lines.length - 1].replace(/^ValueError: /, "");
+}
+
 function drain() {
   while (run && queue.length) {
     const req = queue.shift()!;
     try { handle(req); }
-    catch (e) { postMessage({ type: "result", id: req.id, error: String((e as Error).message ?? e) }); }
+    catch (e) { postMessage({ type: "result", id: req.id, error: pythonError(e) }); }
   }
 }
 

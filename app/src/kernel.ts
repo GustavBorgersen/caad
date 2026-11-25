@@ -38,6 +38,7 @@ export type FeatureField = {
 
 export type FeatureDetail = {
   index: number; kind: string; tier: Feature["tier"]; label: string; name?: string; pending: string[];
+  sketches: string[]; // named sketches before this feature, for a sketch field
   call?: string; fields?: FeatureField[]; gen: number;
 };
 
@@ -137,6 +138,19 @@ export class Kernel {
   /** Source with a feature's arguments changed ({name: expression, or null to remove}); rejects with the reason. */
   async patchFeature(src: string, index: number, kind: string, changes: Record<string, string | null>): Promise<string> {
     return (await this.call<{ value: string }>("patch_feature", [src, index, kind, changes])).value;
+  }
+
+  /**
+   * Source with a new feature in canonical form after feature `after` (null: at the end, -1: first).
+   * A sketch takes {plane, body} and gets the next free name skN; other kinds take the call's arguments.
+   */
+  insertFeature(src: string, after: number | null, kind: string, params: Record<string, unknown>): Promise<{ src: string; index: number; name?: string }> {
+    return this.call("insert_feature", [src, after, kind, params]);
+  }
+
+  /** Source without a feature; rejects (with the reason) while a later feature uses it. */
+  async deleteFeature(src: string, index: number): Promise<string> {
+    return (await this.call<{ value: string }>("delete_feature", [src, index])).value;
   }
 
   /** Values of edited expressions, in the model the last readFeature saw. */

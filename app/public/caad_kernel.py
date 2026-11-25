@@ -301,9 +301,12 @@ def read_feature(src, index):
     """A feature with its parameters as expressions, and their values in the latest run (the page
     rolls back to just before the feature first, so values are what the feature sees)."""
     stmt = _feature_stmt(src, index)
-    feat = analyze(src)["features"][index]
+    feats = analyze(src)["features"]
+    feat = feats[index]
     out = {"index": index, "kind": feat["kind"], "tier": feat["tier"], "label": feat["label"],
-           "name": feat["name"], "pending": feat.get("pending", [])}
+           "name": feat["name"], "pending": feat.get("pending", []),
+           # named private sketches before this feature: what a sketch field can refer to
+           "sketches": [f["name"] for f in feats[:index] if f["kind"] == "sketch" and f["name"] and not f.get("implicit")]}
     found = _call_of(stmt)
     if feat["tier"] == "code" or not found:
         return out
@@ -442,6 +445,91 @@ def patch_feature(src, index, kind, changes):
     if len(after) != len(before) or after[index]["kind"] != kind:
         raise ValueError("The change would alter other features; nothing was written.")
     return out
+
+
+def _free_sketch_name(src):
+    used = {n.id for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Name)}
+    return next(f"sk{i}" for i in range(1, 10000) if f"sk{i}" not in used)
+
+
+def _create(kind, params):
+    """Canonical code for a new call feature: the sketch or edges positional, the rest as keywords
+    in the order of the dialog's fields; arguments at their defaults are left out."""
+    sig = _signature(kind)
+    if sig is None:
+        raise ValueError(f"Unknown feature type '{kind}'.")
+    fields = _fields(kind, sig)
+    params = {k: v for k, v in dict(params).items() if isinstance(v, str) and v.strip()}
+    for name in params:
+        if name not in sig.parameters:
+            raise ValueError(f"{kind}() has no argument '{name}'.")
+    first = fields[0]["name"] if fields and fields[0]["type"] in ("sketch", "edges", "faces") else None
+    args = [params[first]] if first in params else []
+    for f in fields:
+        v = params.get(f["name"])
+        if f["name"] != first and v is not None and not _is_default(v, sig.parameters[f["name"]].default):
+            args.append(f"{f['name']}={v}")
+    return [f"{kind}({', '.join(args)})"]
+
+
+def insert_feature(src, after, kind, params):
+    """Source with a new feature after feature `after` (None: at the end, -1: first), in canonical form.
+    A sketch gets the next free name `skN`; params are {"plane": expr, "body": [lines]} for a sketch,
+    else the call's arguments as expressions. Returns {src, index, name}."""
+    tree = ast.parse(src)
+    block, _ = _find_part_block(tree)
+    if block is None:
+        raise ValueError("This file has no `with BuildPart()` block to add to.")
+    params = dict(params)
+    after = after if isinstance(after, int) else None  # JS null arrives as JsNull
+    name = None
+    if kind == "sketch":
+        name = _free_sketch_name(src)
+        body = list(params.get("body") or ["pass"])
+        lines = [f"with BuildSketch({params.get('plane') or 'Plane.XY'}, mode=Mode.PRIVATE) as {name}:"]
+        lines += ["    " + line for line in body]
+    else:
+        lines = _create(kind, params)
+    t = _Text(src)
+    first = block.body[0]
+    indent = t.lines[first.lineno - 1][:first.col_offset]
+    text = "".join(indent + line + "\n" for line in lines)
+    n = len(block.body)
+    only_pass = n == 1 and isinstance(first, ast.Pass)
+    if only_pass:
+        a, b, index = t.starts[first.lineno - 1], t.starts[first.end_lineno], 0
+    elif after is not None and after < 0:
+        a = b = t.starts[first.lineno - 1]
+        index = 0
+    else:
+        stmt = block.body[n - 1 if after is None else min(after, n - 1)]
+        a = b = t.starts[stmt.end_lineno]
+        index = (n - 1 if after is None else min(after, n - 1)) + 1
+    if a == len(src) and src and not src.endswith("\n"):
+        text = "\n" + text
+    return {"src": src[:a] + text + src[b:], "index": index, "name": name}
+
+
+def delete_feature(src, index):
+    """Source without feature `index`. Refused while a later feature uses it."""
+    feats = analyze(src)["features"]
+    if not 0 <= index < len(feats):
+        raise ValueError(f"There is no feature {index}.")
+    f = feats[index]
+    key = f["name"] or f"sketch {index}"
+    users = [g for g in feats[index + 1:] if (f["name"] and f["name"] in g["refs"]) or key in g.get("pending", [])]
+    if users:
+        names = "; ".join(f"{g['index'] + 1}. {g['label']}" for g in users)
+        raise ValueError(f"'{f['name'] or f['label']}' is used by {names}. Change or delete {'that' if len(users) == 1 else 'those'} first.")
+    block, _ = _find_part_block(ast.parse(src))
+    stmt = block.body[index]
+    t = _Text(src)
+    a, b = t.starts[stmt.lineno - 1], t.starts[stmt.end_lineno]
+    if src[a:t.start(stmt)].strip() or src[t.end(stmt):b].split("#")[0].strip():
+        raise ValueError("This feature shares its line with other code: delete it in the code.")
+    if len(block.body) == 1:
+        return src[:a] + t.lines[stmt.lineno - 1][:stmt.col_offset] + "pass\n" + src[b:]
+    return src[:a] + src[b:]
 
 
 # --- Running ---------------------------------------------------------------------------------

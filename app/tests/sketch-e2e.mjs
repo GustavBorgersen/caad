@@ -40,7 +40,7 @@ try {
   await page.evaluate(() => document.querySelector("#sketch-panel .primary").click());
   await waitBuild(g);
   let src = await code();
-  check(src.includes("with BuildSketch(Plane.XY):") && src.includes("extrude(until=Until.LAST, mode=Mode.SUBTRACT)"), "code for the sketch and the cut was inserted");
+  check(src.includes("with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:") && src.includes("extrude(sk1.sketch, until=Until.LAST, mode=Mode.SUBTRACT)"), "a named sketch and a cut that uses it were inserted");
   console.log(src.split("\n").filter((l) => /BuildSketch\(Plane|Rectangle\(|Until.LAST|Locations\(\(-?\d/.test(l)).join("\n"));
   const v1 = await volume();
   check(v1 < v0, `the cut removed material (volume ${v0} -> ${v1})`);
@@ -56,9 +56,24 @@ try {
   await page.evaluate(() => document.querySelector("#sketch-panel .primary").click());
   await waitBuild(g).catch(async () => console.log("  no rebuild; status:", await page.$eval("#status", (e) => e.textContent), "| error panel:", await page.$eval("#error", (e) => e.textContent)));
   src = await code();
-  check(src.includes("with BuildSketch(bracket.faces().filter_by(Axis.Y).sort_by(Axis.Z)[-1]):") && src.includes("Circle(5)") && src.includes("extrude(amount=10)"), "sketch on a face inserted with its selector");
-  check((await volume()) > v1, "the extrude added material");
+  check(src.includes("with BuildSketch(bracket.faces().filter_by(Axis.Y).sort_by(Axis.Z)[-1], mode=Mode.PRIVATE) as sk2:") && src.includes("Circle(5)") && src.includes("extrude(sk2.sketch, amount=10)"), "sketch on a face inserted with its selector");
+  const v2 = await volume();
+  check(v2 > v1, "the extrude added material");
   await page.screenshot({ path: `${OUT}/sketch-3-face.png` });
+
+  // 2b. Cut through all from a sketch on the bottom face: goes into the part, against the face's normal.
+  g = await gen();
+  await page.evaluate(() => window.caad.startSketch("bracket.faces().sort_by(Axis.Z)[0]", "the bottom"));
+  await page.waitForSelector("#sketch-panel:not([hidden])");
+  await page.evaluate(() => window.caad.sketcher.addShape({ kind: "circle", x: 20, y: 0, r: 2 }));
+  await page.evaluate(() => [...document.querySelectorAll("#sketch-panel .op button")].find((b) => b.textContent === "Cut").click());
+  await page.evaluate(() => [...document.querySelectorAll("#sketch-panel label")].find((l) => l.textContent.includes("through all")).querySelector("input").click());
+  await page.evaluate(() => document.querySelector("#sketch-panel .primary").click());
+  await waitBuild(g);
+  src = await code();
+  check(src.includes("extrude(sk3.sketch, until=Until.LAST, mode=Mode.SUBTRACT, dir=(0, 0, 1))"), "a cut through all from a face goes into the part");
+  const v3 = await volume();
+  check(await page.evaluate(() => window.caad.state.result.ok) && Math.abs(v2 - v3 - Math.PI * 4 * 8) < 0.5, `it removed a 4 mm hole through the 8 mm base (${(v2 - v3).toFixed(1)} mm³)`);
 
   // 3. A new part, then its first feature.
   g = await gen();
