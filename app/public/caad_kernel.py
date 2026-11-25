@@ -99,6 +99,8 @@ def analyze(src, filename="part.py"):
             if info.get("implicit"):  # adds its faces to the builder's pending faces
                 f["implicit"] = True
                 pending.append(info.get("name") or f"sketch {i}")
+            if info.get("constrained"):  # opens in the sketch editor; plain sketches are converted first
+                f["constrained"] = True
             if info.get("uses_pending"):  # an extrude/revolve without a sketch takes all pending ones
                 f["pending"], pending = pending, []
             if info.get("label"):
@@ -227,7 +229,8 @@ def _feature_info(stmt, src):
         mode = next((k.value for k in item.context_expr.keywords if k.arg == "mode"), None)
         private = isinstance(mode, ast.Attribute) and mode.attr == "PRIVATE"
         name = item.optional_vars.id if isinstance(item.optional_vars, ast.Name) else None
-        return {"tier": "code", "name": name, "implicit": not private}
+        constrained = any(isinstance(n, ast.With) and _call_name(n.items[0].context_expr) == "Constrained" for n in stmt.body)
+        return {"tier": "code", "name": name, "implicit": not private, "constrained": constrained}
     found = _call_of(stmt)
     if not found:
         return None
@@ -816,6 +819,117 @@ def _sketch_delete(src, index, entity_ids, constraint_ids):
         st = block.body[i]
         src = src[: t.starts[st.lineno - 1]] + src[t.starts[st.end_lineno]:]
     return src
+
+
+_PLAIN_SHAPES = ("Rectangle", "Circle", "Polygon")
+
+
+def sketch_convert(src, index, filename="part.py"):
+    """Source with plain sketch `index` (Rectangle, Circle, Polygon, at Locations, added or subtracted) written as a
+    constrained sketch, keeping its expressions: `Rectangle(width, depth)` gets lengths `width` and `depth`, positions
+    become distances from the origin. Checked by building both and comparing their regions; ValueError (the reason)
+    when it can't be converted. The sketch's own line stays, so an extrude that takes its pending faces still works."""
+    stmt = _feature_stmt(src, index)
+    if not (isinstance(stmt, ast.With) and _call_name(stmt.items[0].context_expr) == "BuildSketch"):
+        raise ValueError("This feature isn't a sketch.")
+    if any(isinstance(n, ast.With) and _call_name(n.items[0].context_expr) == "Constrained" for n in stmt.body):
+        raise ValueError("This sketch is already constrained.")
+    ns = {"__name__": "__caad__", "__file__": filename}
+    exec(compile(_truncate(src, filename, index - 1), filename, "exec"), ns)
+    value = lambda node: float(eval(compile(ast.Expression(node), filename, "eval"), ns))  # noqa: E731
+    text = lambda node: ast.get_source_segment(src, node)  # noqa: E731
+    refuse = lambda node, why="": ValueError(  # noqa: E731
+        f"Can't convert line {node.lineno} (`{' '.join(text(node).split())[:60]}`){why}; only Rectangle, Circle and Polygon, "
+        "optionally at Locations, convert. Edit this sketch in the code.")
+
+    shapes = []  # (call, locations: [((x expr, y expr), (x, y))] or [None] for the origin)
+    for st in stmt.body:
+        if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call):
+            shapes.append((st.value, [None]))
+        elif isinstance(st, ast.With) and len(st.items) == 1 and _call_name(st.items[0].context_expr) == "Locations":
+            loc = st.items[0].context_expr
+            locs = []
+            for a in loc.args:
+                if loc.keywords or not (isinstance(a, ast.Tuple) and len(a.elts) in (2, 3)) or (len(a.elts) == 3 and value(a.elts[2]) != 0):
+                    raise refuse(st, " (locations must be (x, y) points)")
+                locs.append(((text(a.elts[0]), text(a.elts[1])), (value(a.elts[0]), value(a.elts[1]))))
+            for inner in st.body:
+                if not (isinstance(inner, ast.Expr) and isinstance(inner.value, ast.Call)):
+                    raise refuse(inner)
+                shapes.append((inner.value, locs))
+        else:
+            raise refuse(st)
+
+    lines, taken = [], set()
+    name = lambda prefix: _free_name(src, prefix, taken)  # noqa: E731
+
+    def place(point, loc):
+        if loc is None:
+            return [f"c.coincident({point}, c.origin)"]
+        (xe, ye), _ = loc
+        return [f"c.hdistance(c.origin, {point}, {xe})", f"c.vdistance(c.origin, {point}, {ye})"]
+
+    for call, locs in shapes:
+        kind = _call_name(call)
+        if kind not in _PLAIN_SHAPES or not isinstance(call.func, ast.Name):
+            raise refuse(call)
+        kw = {k.arg: k.value for k in call.keywords}
+        mode = kw.pop("mode", None)
+        if mode is not None and not (isinstance(mode, ast.Attribute) and mode.attr in ("ADD", "SUBTRACT")):
+            raise refuse(call, " (only added or subtracted shapes)")
+        align = kw.pop("align", None) if kind == "Polygon" else None
+        if kw or any(isinstance(a, ast.Starred) for a in call.args):
+            raise refuse(call, f" ({', '.join(kw) or '*args'} isn't supported)")
+        for loc in locs:
+            x, y = loc[1] if loc else (0.0, 0.0)
+            if kind == "Rectangle" and len(call.args) == 2:
+                w, h = value(call.args[0]), value(call.args[1])
+                n = name("rect")
+                taken.add(n)
+                lines += [f"{n} = c.rectangle(({_fmt(x - w / 2)}, {_fmt(y - h / 2)}), ({_fmt(x + w / 2)}, {_fmt(y + h / 2)}))",
+                          f"c.length({n}.bottom, {text(call.args[0])})", f"c.length({n}.left, {text(call.args[1])})",
+                          *place(f"{n}.center", loc)]
+            elif kind == "Circle" and len(call.args) == 1:
+                n = name("circle")
+                taken.add(n)
+                lines += [f"{n} = c.circle(({_fmt(x)}, {_fmt(y)}), {_fmt(value(call.args[0]))})",
+                          f"c.radius({n}, {text(call.args[0])})", *place(f"{n}.center", loc)]
+            elif kind == "Polygon" and len(call.args) >= 3:
+                pts = call.args
+                if not all(isinstance(p, ast.Tuple) and len(p.elts) == 2 for p in pts):
+                    raise refuse(call, " (points must be (x, y) pairs)")
+                # build123d 0.13 keeps a polygon's points as written by default (Align.NONE); other alignments move it
+                if align is not None and ast.unparse(align) not in ("None", "Align.NONE", "(Align.NONE, Align.NONE)"):
+                    raise refuse(call, " (an aligned polygon)")
+                xy = [(value(p.elts[0]) + x, value(p.elts[1]) + y) for p in pts]
+                n = name("poly")
+                taken.add(n)
+                lines += [f"{n} = c.polygon({', '.join(f'({_fmt(a)}, {_fmt(b)})' for a, b in xy)})", f"c.fix(*{n}.points)"]
+            else:
+                raise refuse(call, " (unexpected arguments)")
+
+    t = _Text(src)
+    first, last = stmt.body[0], stmt.body[-1]
+    indent = t.lines[first.lineno - 1][: first.col_offset]
+    body = indent + "with Constrained() as c:\n" + "".join(f"{indent}    {l}\n" for l in lines)
+    out = src[: t.starts[first.lineno - 1]] + body + src[t.starts[last.end_lineno]:]
+    out = _ensure_import(out, "caad", "Constrained")
+
+    # Same regions? Build the sketch both ways on its own, in the part's names.
+    import copy
+    def regions(code, idx):
+        node = copy.deepcopy(_feature_stmt(code, idx))
+        node.items[0].optional_vars = ast.Name(id="__caad_sketch", ctx=ast.Store())
+        import caad
+        env = {**ns, "Constrained": caad.Constrained}  # the import the converted file gets
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[])), filename, "exec"), env)
+        return env["__caad_sketch"].sketch
+    before, after = regions(src, index), regions(out, index)
+    diff = (before - after).area + (after - before).area
+    if diff > 1e-6 * max(before.area, 1.0):
+        raise ValueError("Converting would change this sketch: build123d adds and subtracts shapes in order, the "
+                         "sketch editor nests them (a loop inside a loop is a hole). Edit this sketch in the code.")
+    return out
 
 
 def sketch_action(src, index, actions):

@@ -19,6 +19,7 @@ export type Feature = {
   name: string | null; // `with BuildSketch() as name`
   refs: string[]; // names of earlier features it uses
   implicit?: boolean; // a sketch that adds its faces to the pending ones
+  constrained?: boolean; // a constrained sketch (opens in the sketch editor; plain ones are converted first)
   pending?: string[]; // the pending sketches an extrude without a sketch uses
   sketch?: { dof?: number; message?: string }; // a constrained sketch: degrees of freedom left (none without a solver)
 };
@@ -199,6 +200,11 @@ export class Kernel {
   /** Apply sketch editor actions as code edits: the new source, the sketch's model, and the names adds made. */
   sketchAction(src: string, index: number, actions: SketchAction[]): Promise<{ src: string; model: SketchModel; made: string[] }> {
     return this.call("sketch_action", [src, index, actions]);
+  }
+
+  /** Source with plain sketch `index` written as a constrained sketch (checked to give the same regions); rejects with the reason. */
+  async sketchConvert(src: string, index: number): Promise<string> {
+    return (await this.call<{ value: string }>("sketch_convert", [src, index])).value;
   }
 
   /** Values of edited expressions, in the model the last readFeature saw. */

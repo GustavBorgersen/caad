@@ -201,7 +201,15 @@ async function editFeature(f: Feature) {
   if (featureDialog.open || sketcher.active || !state.path) return;
   if (f.kind === "sketch") {
     if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
-    await openSketch(editor.text, f.index, f.name ?? "the sketch", { ok: state.upto, cancel: state.upto });
+    let src = editor.text;
+    if (!f.constrained) { // a plain build123d sketch: convert it (unsaved: Cancel leaves the code as it was)
+      if (!confirm(`"${f.label}" is a plain build123d sketch. Convert it to a constrained sketch to edit it here?\n\n` +
+        "Its sizes and positions become dimensions (expressions are kept). It's only saved when you press Done.")) return;
+      try { src = await kernel.sketchConvert(src, f.index); }
+      catch (e) { alert((e as Error).message); return; }
+    }
+    await openSketch(src, f.index, f.name ?? "the sketch", { ok: state.upto, cancel: state.upto });
+    if (!f.constrained && sketcher.active) status("Converted to a constrained sketch: Done saves it, Cancel leaves the code as it was.");
     return;
   }
   if (f.tier === "code") {

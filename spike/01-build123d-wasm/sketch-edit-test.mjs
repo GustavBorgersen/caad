@@ -115,6 +115,35 @@ r = call("sketch_action", src0, 1, [{ op: "constrain", kind: "length", refs: ["r
 check(r.model.error && /Expected a line/.test(r.model.error.message) && r.model.error.line === 15, `a wrong reference: the error and its line (${r.model.error?.line}: ${r.model.error?.message})`);
 check(/Unknown sketch action/.test(tryCall("sketch_action", src0, 1, [{ op: "nope" }]).error ?? ""), "unknown actions are refused");
 
+// --- Converting plain sketches: expressions kept, regions checked ---
+const bracket = (await import("node:fs")).readFileSync("../../examples/bracket.py", "utf8");
+const volumeOf = (src) => call("run", src, "part.py").summary?.volume;
+let conv = call("sketch_convert", bracket, 0);
+check(conv.includes("from build123d import *\nfrom caad import Constrained\n") &&
+  conv.includes("    with BuildSketch() as base:\n        with Constrained() as c:\n            rect1 = c.rectangle((-30, -20), (30, 20))\n            c.length(rect1.bottom, width)\n            c.length(rect1.left, depth)\n            c.coincident(rect1.center, c.origin)\n    extrude(amount=thickness)"),
+  "the bracket's base: Rectangle(width, depth) -> a rectangle with lengths width and depth, centred on the origin", conv.split("\n").slice(9, 17).join(" | "));
+check(Math.abs(volumeOf(conv) - volumeOf(bracket)) < 1e-6, "the part is the same (the extrude still takes the pending sketch)");
+check(call("sketch_open", conv, 0).dof === 0 && call("run", conv, "part.py").timeline.features[0].constrained, "and it opens in the editor, fully constrained");
+conv = call("sketch_convert", conv, 2);
+check(conv.includes("rect2 = c.rectangle((-30, -40), (30, 0))\n            c.length(rect2.bottom, width)\n            c.length(rect2.left, 40)\n            c.hdistance(c.origin, rect2.center, 0)\n            c.vdistance(c.origin, rect2.center, -20)") &&
+  conv.split("from caad import").length === 2 && Math.abs(volumeOf(conv) - volumeOf(bracket)) < 1e-6,
+  "the wall at Locations((0, -20)): its position from the origin; one import; still the same part", conv.split("\n").slice(18, 25).join(" | "));
+const plain = (body) => `from build123d import *\n\nw = 20\n\nwith BuildPart() as p:\n    with BuildSketch(Plane.XZ) as s:\n${body.split("\n").map((l) => "        " + l).join("\n")}\n    extrude(amount=3)\n`;
+conv = call("sketch_convert", plain("Rectangle(w * 2, 30)\nwith Locations((5, 0), (-5, 0)):\n    Circle(2, mode=Mode.SUBTRACT)"), 0);
+check(conv.includes("circle1 = c.circle((5, 0), 2)") && conv.includes("circle2 = c.circle((-5, 0), 2)") && conv.includes("c.length(rect1.bottom, w * 2)") &&
+  Math.abs(volumeOf(conv) - volumeOf(plain("Rectangle(w * 2, 30)\nwith Locations((5, 0), (-5, 0)):\n    Circle(2, mode=Mode.SUBTRACT)"))) < 1e-6,
+  "subtracted circles at two locations become holes; `w * 2` stays an expression");
+for (const [label, body] of [["a polygon with align=None", "Polygon((0, 0), (20, 0), (10, 15), align=None)"], ["a polygon with build123d's default alignment (as written)", "Polygon((0, 0), (20, 0), (10, 15))"]]) {
+  conv = call("sketch_convert", plain(body), 0);
+  check(/poly1 = c\.polygon\(/.test(conv) && conv.includes("c.fix(*poly1.points)") && Math.abs(volumeOf(conv) - volumeOf(plain(body))) < 1e-6, `${label}: same region`, conv.match(/poly1 = .*/)?.[0]);
+}
+const refused = (body) => tryCall("sketch_convert", plain(body), 0).error ?? "";
+check(/Can't convert line 8 \(`fillet/.test(refused("Rectangle(30, 20)\nfillet(s.vertices(), radius=2)")), `a fillet in the sketch: refused, naming the line (${refused("Rectangle(30, 20)\nfillet(s.vertices(), radius=2)").slice(0, 60)}…)`);
+check(/Can't convert/.test(refused("with GridLocations(10, 10, 2, 2):\n    Circle(2)")), "GridLocations: refused");
+check(/an aligned polygon/.test(refused("Polygon((0, 0), (20, 0), (10, 15), align=(Align.CENTER, Align.CENTER))")), "a centred polygon: refused rather than guessed");
+check(/would change this sketch/.test(refused("Rectangle(30, 20)\nCircle(4)")), "a circle added inside a rectangle (no hole in build123d, a hole when nested): refused");
+check(/already constrained/.test(tryCall("sketch_convert", src0, 1).error ?? ""), "a constrained sketch isn't converted again");
+
 // --- The edited file builds ---
 const built = call("run", withLine, "part.py");
 check(built.ok && near(built.summary.volume, 80 * 60 * 10 + 14 * 12 * 5, 0.01), `the edited part builds (volume ${built.summary?.volume})`);

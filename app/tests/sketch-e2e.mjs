@@ -62,6 +62,23 @@ try {
   const v0 = await volume();
   const saved0 = await code();
 
+  // 0. The bracket's base sketch is plain build123d: double-click converts it (after asking) and opens it.
+  await dblclickFeature(0);
+  await opened();
+  const labels = () => page.$$eval(".sketch-labels .dim", (d) => d.map((x) => x.textContent).sort().join(" | "));
+  check((await labels()) === "depth = 40 | width = 60" && /Fully constrained/.test(await state()) && /Converted/.test(await page.$eval("#status", (x) => x.textContent)),
+    `converted: its sizes are dimensions with their expressions (${await labels()})`);
+  check((await sketchSrc()).includes("c.length(rect1.bottom, width)") && (await code()) === saved0, "the converted sketch isn't saved yet");
+  await page.click("#sketch-panel button[title^='Leave']");
+  await page.waitForFunction(() => !window.caad.sketcher.active);
+  check((await code()) === saved0, "Cancel leaves the plain sketch as it was");
+  await dblclickFeature(0);
+  await opened();
+  await done();
+  check((await code()).includes("    with BuildSketch() as base:\n        with Constrained() as c:\n            rect1 = c.rectangle((-30, -20), (30, 20))") && Math.abs((await volume()) - v0) < 1e-6,
+    "Done saves the converted sketch; the part is unchanged");
+  const savedConverted = await code();
+
   // 1. A new sketch on Top: the rectangle tool is ready; two clicks; nothing is saved before Done.
   await page.click("#sketch-button");
   await page.click('#plane-choice [data-plane="Plane.XY"]');
@@ -70,8 +87,8 @@ try {
   await clickAt(-10, -6);
   await clickAt(4, 6);
   let m = await model();
-  check(m.entities.filter((e) => e.kind === "line").length === 4 && /rect1 = c\.rectangle\(\(-10, -6\), \(4, 6\)\)/.test(await sketchSrc()), "two clicks drew a rectangle: rect1 = c.rectangle((-10, -6), (4, 6))");
-  check((await code()) === saved0, "nothing is saved yet");
+  check(m.entities.filter((e) => e.kind === "line").length === 4 && /rect2 = c\.rectangle\(\(-10, -6\), \(4, 6\)\)/.test(await sketchSrc()), "two clicks drew a rectangle: rect2 = c.rectangle((-10, -6), (4, 6))");
+  check((await code()) === savedConverted, "nothing is saved yet");
   check(/4 degrees of freedom/.test(await state()), `under-constrained: ${await state()}`);
   await page.screenshot({ path: `${OUT}/sketch-1-rect.png` });
 
@@ -105,11 +122,11 @@ try {
   await option("vdistance");
   await typeDim("0");
   src = await sketchSrc();
-  check(["c.length(rect1.bottom, width / 4)", "c.length(rect1.left, 12)", "c.hdistance(c.origin, rect1.center, -5)", "c.vdistance(c.origin, rect1.center, 0)"].every((l) => src.includes(l)),
+  check(["c.length(rect2.bottom, width / 4)", "c.length(rect2.left, 12)", "c.hdistance(c.origin, rect2.center, -5)", "c.vdistance(c.origin, rect2.center, 0)"].every((l) => src.includes(l)),
     "dimensions written: width / 4, 12, and the centre from the origin", src.split("\n").filter((l) => /c\.(length|hdistance|vdistance)/.test(l)).join(" | "));
   check(/Fully constrained/.test(await state()) && (await page.$$eval(".sketch-labels .dim", (d) => d.map((x) => x.textContent))).includes("width / 4 = 15"), `fully constrained; labels show "width / 4 = 15"`);
   m = await model();
-  const corner0 = m.entities.find((e) => e.ref === "rect1.corners[0]");
+  const corner0 = m.entities.find((e) => e.ref === "rect2.corners[0]");
   check(Math.abs(corner0.x + 12.5) < 1e-6 && Math.abs(corner0.y + 6) < 1e-6, `solved: 15 x 12 centred at (-5, 0) (corner ${corner0.x}, ${corner0.y})`);
   // A conflicting dimension shows red; select its label and delete it.
   await clickAt(-5, 6);
@@ -123,7 +140,7 @@ try {
   await page.screenshot({ path: `${OUT}/sketch-1b-dimensions.png` });
   await done();
   src = await code();
-  check(src.includes("from caad import Constrained") && /with BuildSketch\(Plane\.XY, mode=Mode\.PRIVATE\) as sk1:\n\s+with Constrained\(\) as c:\n\s+rect1 = c\.rectangle\(/.test(src) && src.includes("c.length(rect1.bottom, width / 4)"), "Done saves the sketch");
+  check(src.includes("from caad import Constrained") && /with BuildSketch\(Plane\.XY, mode=Mode\.PRIVATE\) as sk1:\n\s+with Constrained\(\) as c:\n\s+rect2 = c\.rectangle\(/.test(src) && src.includes("c.length(rect2.bottom, width / 4)"), "Done saves the sketch");
   await extrude({ end: "Until.LAST", result: "Mode.SUBTRACT" });
   const v1 = await volume();
   check(v1 < v0, `cut through all (volume ${v0} -> ${v1})`);
@@ -135,7 +152,7 @@ try {
   check(await page.evaluate((i) => window.caad.state.upto === i - 1, sketchIndex), "double-clicking the sketch opens it, rolled back to just before it");
   await page.evaluate(() => { const d = [...document.querySelectorAll(".sketch-labels .dim")].find((x) => x.textContent.startsWith("width / 4")); d.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
   await typeDim("width / 3");
-  check((await sketchSrc()).includes("c.length(rect1.bottom, width / 3)"), "the dimension's expression changed");
+  check((await sketchSrc()).includes("c.length(rect2.bottom, width / 3)"), "the dimension's expression changed");
   await done();
   const v2 = await volume();
   check((await code()).includes("width / 3") && v2 < v1, `saved; the wider cut removes more (${v1} -> ${v2})`);
