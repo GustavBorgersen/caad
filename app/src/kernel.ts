@@ -46,6 +46,36 @@ export type FeatureDetail = {
 
 export type Value = { value?: string; error?: string };
 
+/** A constrained sketch as the sketch editor sees it (caad_kernel.py: _sketch_model; Python's None arrives as undefined). */
+export type SketchEntity = {
+  id: string; kind: "point" | "line" | "circle" | "arc";
+  ref?: string; // how code refers to it ("rect1.corners[0]"); none: it can't be constrained from the editor
+  stmt?: number; // the block statement that made it
+  construction: boolean;
+  x?: number; y?: number; fixed?: boolean; // point
+  p1?: string; p2?: string; // line: point ids
+  c?: string; r?: number; s?: string; e?: string; // circle, arc: centre (and ends) as point ids, radius
+};
+export type SketchConstraint = {
+  id: string; type: string; // PlaneGCS type
+  method?: string; // the caad call (c.length…); none: built into a shape
+  stmt?: number; text: string; builtin: boolean; involves: string[];
+  dim?: { expr: string; value: number }; // a dimension: its expression and value (degrees for angles)
+};
+export type SketchModel = {
+  entities: SketchEntity[]; constraints: SketchConstraint[];
+  primitives: Record<string, unknown>[]; // PlaneGCS primitives, for solving while dragging
+  dof?: number; conflicting: string[]; problem?: string; error?: { line?: number; message: string };
+  c: string; statements: { line: number; end: number; text: string }[];
+  plane?: string; name?: string; // from sketchOpen
+};
+export type SketchAction =
+  | { op: "add"; kind: "point" | "line" | "polyline" | "circle" | "arc" | "rectangle" | "polygon"; args: unknown[]; close?: boolean; construction?: boolean }
+  | { op: "constrain"; kind: string; refs: string[]; value?: string | number }
+  | { op: "dimension"; constraint: string; expr: string }
+  | { op: "move"; points: Record<string, [number, number]>; circles?: Record<string, number> }
+  | { op: "delete"; entities: string[]; constraints: string[] };
+
 export type SketchOutline = { name: string; index: number; edges: { points: Float32Array }[] };
 
 export type BuildResult = {
@@ -158,6 +188,16 @@ export class Kernel {
   /** Source without a feature; rejects (with the reason) while a later feature uses it. */
   async deleteFeature(src: string, index: number): Promise<string> {
     return (await this.call<{ value: string }>("delete_feature", [src, index])).value;
+  }
+
+  /** Start editing a constrained sketch (feature `index`): its model, plane and name. Rejects if it can't be edited. */
+  sketchOpen(src: string, index: number): Promise<SketchModel> {
+    return this.call("sketch_open", [src, index]);
+  }
+
+  /** Apply sketch editor actions as code edits: the new source, the sketch's model, and the names adds made. */
+  sketchAction(src: string, index: number, actions: SketchAction[]): Promise<{ src: string; model: SketchModel; made: string[] }> {
+    return this.call("sketch_action", [src, index, actions]);
   }
 
   /** Values of edited expressions, in the model the last readFeature saw. */

@@ -88,13 +88,13 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 
 ## The sketch editor
 
-- **Reopen**: double-click a sketch in the timeline. The view rolls back to just before it; the kernel reads it (`read_sketch(src, index)` → plane, entities, constraints, dimensions as expressions with their values).
+- **Reopen**: double-click a sketch in the timeline. The view rolls back to just before it; the kernel opens a session (`sketch_open(src, index)`): it keeps the part's names as they are before the sketch and returns the sketch's model — plane, entities with the expression code uses for each (`rect1.corners[0]`), constraints, dimensions as expressions with their values, PlaneGCS primitives, degrees of freedom and conflicts. New sketches open the same way, as an empty `with Constrained() as c: pass` that is only saved on Done.
 - **Tools**: line / polyline, rectangle, circle, arc, point; construction toggle. **No grid snapping** — snapping to existing points and edges instead, with inferred constraints shown while drawing (coincident, horizontal, vertical, on-edge), as in Onshape.
 - **Constraints**: select entities, then a constraint button; only the ones that apply to the selection are enabled.
 - **Dimensions**: a dimension tool; the value field takes expressions, offers the part's parameters, and shows the evaluated value.
 - **Live solving**: PlaneGCS WebAssembly in the page solves on every drag (milliseconds for sketch-sized problems).
 - **Status colours**: fully constrained geometry dark, under-constrained blue, conflicting constraints red with a message; the degrees of freedom left are shown in the panel.
-- **Done** → `write_sketch(src, index, sketch)`, surgical like feature edits: changed coordinates and dimension expressions replace their text; new entities and constraints are appended to the block; deleted ones removed; the names the code uses (`r`, `h`, or the agent's own) are kept.
+- **Every action is a code edit** (`sketch_action(src, index, actions)`), done by the kernel so the code generation lives in Python: *add* appends a statement (`line1 = c.line(rect1.corners[2], (30, 20))` — snapping to a point uses its expression, so shared points are coincidence); *constrain* appends a constraint or dimension; *dimension* replaces a dimension's expression; *move* sets the geometry numbers of the statements to the solved positions after a drag (only numbers that change; expressions are left alone); *delete* removes statements and everything that depends on them. The kernel re-runs just the sketch's block in the saved names and returns the new model, problems included instead of raised. Dragging itself solves in the page, with the model's primitives. **Done** saves the edited source; **Cancel** drops it.
 
 ## The agent
 
@@ -107,7 +107,7 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 | Phase | Contents |
 | :-- | :-- |
 | **06a — Constrained sketches in code** (done) | The `caad` module: entities, shapes, constraints, dimensions, regions; PlaneGCS at build in the page (WebAssembly bridge) and outside (PyPI or stored geometry); errors at the sketch feature; the sketcher writes the constrained form (its rectangles, circles and polygons as shapes, with their sizes as dimensions); outlines and `get_timeline` status; guide and `api_help`. Node tests against the page's build123d |
-| **06b — The sketch editor** | Reopen sketches (`read_sketch` / `write_sketch`); line, arc and point tools; snapping with inferred constraints; constraint buttons and the dimension tool with expressions; live solving; status colours; converting plain sketches on first edit |
+| **06b — The sketch editor** | Sketch sessions in the kernel (`sketch_open` / `sketch_action`, done); reopening sketches; line, arc and point tools; snapping with inferred constraints; constraint buttons and the dimension tool with expressions; live solving; status colours; converting plain sketches on first edit |
 | **06c — References and tools** | Use the part's edges in a sketch (projected, referred to by selector) and constrain to them; trim, sketch fillet, mirror, pattern; choosing individual regions to extrude |
 
 ## Decided

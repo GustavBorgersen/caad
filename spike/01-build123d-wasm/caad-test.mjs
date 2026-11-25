@@ -73,6 +73,7 @@ const vol = (body) => { const x = call("run", part(body), "part.py"); return x.o
 check(near(vol("c.rectangle((0, 0), (60, 40))\nc.circle((30, 20), 10)\nc.circle((30, 20), 4)"), (2400 - Math.PI * 100 + Math.PI * 16) * 5, 0.01), "a hole with an island in it");
 check(near(vol("c.rectangle((0, 0), (20, 10))\nc.rectangle((10, 5), (30, 15))"), (200 + 200 - 50) * 5, 0.01), "crossing rectangles merge");
 check(near(vol("c.circle((0, 0), 5)\nc.circle((30, 0), 5)"), 2 * Math.PI * 25 * 5, 0.01), "separate loops are separate regions");
+check(near(vol("r = c.rectangle((0, 0), (20, 10))\nl = c.line(r.corners[2], (30, 20))\nc.line(l.end, (40, 20))"), 200 * 5, 0.01), "lines hanging off a loop don't keep it from closing");
 r = call("run", part("c.polygon((0, 0), (0, 10), (10, 10), (10, 0))"), "part.py");
 check(r.ok && near(r.summary.bbox[2], 0) && near(r.summary.bbox[5], 5), `a clockwise polygon still extrudes up (z ${r.summary?.bbox?.[2]}…${r.summary?.bbox?.[5]})`);
 r = call("run", part("c.line((0, 0), (10, 0))\nc.circle((30, 0), 2, construction=True)"), "part.py");

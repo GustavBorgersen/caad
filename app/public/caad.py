@@ -34,6 +34,7 @@ class _Entity:
     def __init__(self, sketch, construction):
         self.id = f"{type(self).__name__.lower()}{len(sketch._entities)}"
         self.construction = construction
+        self.line = _caller()[0]  # the statement that made it (for CAAD's sketch editor)
         sketch._entities.append(self)
 
 
@@ -160,6 +161,7 @@ class Constrained:
         self._origin = self._axes = None
         self.faces = None  # after the block: the regions that were added
         self.dof = None  # after the block: degrees of freedom left (None without a solver)
+        self.conflicting, self.problem = [], None  # see _build(strict=False)
 
     def __enter__(self):
         self._line = _caller()[0]
@@ -365,7 +367,10 @@ class Constrained:
     def _primitives(self):
         return [p for e in self._entities for p in e._primitives()] + [c[0] for c in self._constraints]
 
-    def _build(self):
+    def _build(self, strict=True):
+        """Solve and add the regions. CAAD's sketch editor builds with strict=False: problems are kept in
+        `conflicting` (constraint ids) and `problem` instead of raised, and no regions are made."""
+        self.conflicting, self.problem = [], None
         result = _solver()(self._primitives())
         info = {"line": self._line, "dof": None, "solver": None, "message": None}
         solves.append(info)
@@ -380,15 +385,22 @@ class Constrained:
             texts = {c[0]["id"]: c for c in self._constraints}
             conflicting = [texts[i] for i in result["conflicting"] if i in texts]
             if conflicting:
-                raise ValueError("Conflicting constraints: " + _describe(conflicting) + ".")
-            if result["status"] not in (0, 1):
-                raise ValueError("The sketch's constraints can't be solved from its stored geometry; "
-                                 "check the dimensions (a size of 0 or a length that can't be reached?).")
+                self.conflicting = [c[0]["id"] for c in conflicting]
+                self.problem = "Conflicting constraints: " + _describe(conflicting) + "."
+            elif result["status"] not in (0, 1):
+                self.problem = ("The sketch's constraints can't be solved from its stored geometry; "
+                                "check the dimensions (a size of 0 or a length that can't be reached?).")
+            if self.problem:
+                if strict:
+                    raise ValueError(self.problem)
+                return
             self._apply(result["primitives"])
             self.dof = info["dof"] = result["dof"]
             redundant = [texts[i] for i in result["redundant"] if i in texts]
             if redundant:
                 info["message"] = "Redundant constraints (already implied by others): " + _describe(redundant) + "."
+        if not strict:
+            return
         self.faces = _regions([e._edge() for e in self._entities if not e.construction and hasattr(e, "_edge")])
         if self.faces is not None:
             from build123d import BuildSketch, add
@@ -492,6 +504,7 @@ def _residual(c, entities):
 def _regions(edges):
     """Faces from the closed loops: loops inside loops alternate between material and hole; loops
     that cross are merged. All face up (+Z), so the sketch extrudes along its plane's normal."""
+    edges = _prune(edges)
     if not edges:
         return None
     from build123d import Face, Wire
@@ -513,6 +526,22 @@ def _regions(edges):
             if fd == d:
                 result = f if result is None else (result.fuse(f) if d % 2 == 0 else result.cut(f))
     return result.clean() if result is not None else None
+
+
+def _prune(edges):
+    """Edges without the ones that have a free end (repeatedly): those can't be part of a loop, and a line
+    hanging off a corner would otherwise keep that loop from closing."""
+    key = lambda v: (round(v.X, 6), round(v.Y, 6))  # noqa: E731
+    while True:
+        ends = [None if e.is_closed else (key(e.position_at(0)), key(e.position_at(1))) for e in edges]
+        count = {}
+        for end in filter(None, ends):
+            for k in end:
+                count[k] = count.get(k, 0) + 1
+        keep = [e for e, end in zip(edges, ends) if end is None or (count[end[0]] > 1 and count[end[1]] > 1)]
+        if len(keep) == len(edges):
+            return keep
+        edges = keep
 
 
 # --- Helpers -----------------------------------------------------------------------------------

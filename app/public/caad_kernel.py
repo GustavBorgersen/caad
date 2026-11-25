@@ -7,6 +7,7 @@ failing feature, and tessellates the result per face and edge for the 3D view.
 import ast
 import enum
 import inspect
+import math
 import sys
 import time
 import traceback
@@ -557,6 +558,331 @@ def delete_feature(src, index):
     if len(block.body) == 1:
         return src[:a] + t.lines[stmt.lineno - 1][:stmt.col_offset] + "pass\n" + src[b:]
     return src[:a] + src[b:]
+
+
+# --- Sketch editor: constrained sketches read into a model and edited as code (docs/06-sketches.md) ---
+
+_DIMENSIONS = ("distance", "hdistance", "vdistance", "length", "radius", "diameter", "angle")
+_NAME_PREFIX = {"point": "p", "line": "line", "polyline": "line", "circle": "circle", "arc": "arc",
+                "rectangle": "rect", "polygon": "poly"}
+
+
+def _constrained_block(src, index):
+    """(sketch statement, `with Constrained() as c` statement, c's name) of feature `index`, or a reason why
+    the sketch editor can't open it."""
+    stmt = _feature_stmt(src, index)
+    if not (isinstance(stmt, ast.With) and _call_name(stmt.items[0].context_expr) == "BuildSketch"):
+        raise ValueError("This feature isn't a sketch.")
+    inner = [n for n in stmt.body if isinstance(n, ast.With) and _call_name(n.items[0].context_expr) == "Constrained"]
+    if len(stmt.body) != 1 or len(inner) != 1 or not isinstance(inner[0].items[0].optional_vars, ast.Name):
+        raise ValueError("Only constrained sketches (one `with Constrained() as c:` block) open in the sketch editor; "
+                         "edit this one in the code.")
+    return stmt, inner[0], inner[0].items[0].optional_vars.id
+
+
+def sketch_open(src, index, filename="part.py"):
+    """Start editing sketch `index`: keep the part's names as they are before it (parameters, the builder for a
+    face the sketch is on) and return the sketch's model (see _sketch_model)."""
+    stmt, _, _ = _constrained_block(src, index)
+    ns = {"__name__": "__caad__", "__file__": filename}
+    exec(compile(_truncate(src, filename, index - 1), filename, "exec"), ns)
+    globals()["_sketch_session"] = {"env": ns, "filename": filename}
+    model = _sketch_model(src, index)
+    model["plane"] = ast.get_source_segment(src, stmt.items[0].context_expr.args[0]) if stmt.items[0].context_expr.args else "Plane.XY"
+    model["name"] = stmt.items[0].optional_vars.id if isinstance(stmt.items[0].optional_vars, ast.Name) else None
+    return model
+
+
+def _sketch_run(src, index):
+    """Run the sketch's block on its own in the saved names: (block, c's name, the Constrained, error)."""
+    import caad
+    import linecache
+    session = globals()["_sketch_session"]
+    filename = session["filename"]
+    linecache.cache[filename] = (len(src), None, src.splitlines(True), filename)
+    _, block, cname = _constrained_block(src, index)
+    env = dict(session["env"])
+    sk = caad.Constrained()
+    sk._line = block.lineno
+    env[cname] = sk
+    error = None
+    try:
+        exec(compile(ast.Module(body=block.body, type_ignores=[]), filename, "exec"), env)
+        sk._build(strict=False)
+    except Exception as e:  # noqa: BLE001 - shown in the editor
+        error = {"line": _error_line(e, filename), "message": f"{type(e).__name__}: {e}"}
+    return block, cname, sk, env, error
+
+
+def _sketch_refs(block, cname, env):
+    """How the code can refer to each entity: {python id of the entity: expression}, shortest first."""
+    import caad
+    names = []
+    for st in block.body:
+        targets = st.targets if isinstance(st, ast.Assign) else []
+        for t in targets:
+            names += [t.id] if isinstance(t, ast.Name) else [e.id for e in getattr(t, "elts", []) if isinstance(e, ast.Name)]
+    exprs = [f"{cname}.origin", f"{cname}.x_axis", f"{cname}.y_axis"]
+    for n in names:
+        exprs += [n, f"{n}.start", f"{n}.end", f"{n}.center", *[f"{n}.corners[{i}]" for i in range(4)],
+                  f"{n}.bottom", f"{n}.right", f"{n}.top", f"{n}.left"]
+        obj = env.get(n)
+        for attr in ("lines", "points"):
+            for i in range(len(getattr(obj, attr, []) or [])):
+                exprs += [f"{n}.{attr}[{i}]", f"{n}.{attr}[{i}].start", f"{n}.{attr}[{i}].end"]
+        if isinstance(obj, (list, tuple)):
+            for i in range(len(obj)):
+                exprs += [f"{n}[{i}]", f"{n}[{i}].start", f"{n}[{i}].end"]
+    refs = {}
+    for e in exprs:
+        if f"{cname}." in e and not e.startswith(cname):
+            continue
+        try:
+            obj = eval(e, env)
+        except Exception:  # noqa: BLE001 - not every candidate exists
+            continue
+        if isinstance(obj, caad._Entity) and id(obj) not in refs:
+            refs[id(obj)] = e
+    return refs
+
+
+def _involves(prim):
+    """Entity ids a PlaneGCS constraint uses."""
+    ids = [v for k, v in prim.items() if k.endswith("_id") and k != "id"]
+    return ids + [prim[k]["o_id"] for k in ("param1", "param2") if isinstance(prim.get(k), dict)]
+
+
+def _sketch_model(src, index):
+    """The sketch as the editor sees it: entities (with the expression code uses for each), constraints
+    (dimensions with their expressions and values), PlaneGCS primitives for solving while dragging,
+    degrees of freedom, conflicts, and the block's statements."""
+    import caad
+    block, cname, sk, env, error = _sketch_run(src, index)
+    refs = _sketch_refs(block, cname, env)
+    stmt_of = lambda line: next((i for i, st in enumerate(block.body) if line and st.lineno <= line <= st.end_lineno), None)  # noqa: E731
+    entities = []
+    for e in sk._entities:
+        item = {"id": e.id, "kind": type(e).__name__.lower(), "ref": refs.get(id(e)), "stmt": stmt_of(e.line),
+                "construction": e.construction}
+        if isinstance(e, caad.Point):
+            item.update(x=e.x, y=e.y, fixed=e.fixed)
+        elif isinstance(e, caad.Line):
+            item.update(p1=e.start.id, p2=e.end.id)
+        elif isinstance(e, caad.Circle):
+            item.update(c=e.center.id, r=e.r)
+        elif isinstance(e, caad.Arc):
+            item.update(c=e.center.id, s=e.start.id, e=e.end.id, r=e.r)
+        entities.append(item)
+    constraints = []
+    for prim, line, text in sk._constraints:
+        i = stmt_of(line)
+        st = block.body[i] if i is not None else None
+        call = st.value if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call) else None
+        method = call.func.attr if call is not None and isinstance(call.func, ast.Attribute) else None
+        item = {"id": prim["id"], "type": prim["type"], "method": method, "stmt": i, "text": text,
+                "builtin": method is None, "involves": _involves(prim)}
+        if method in _DIMENSIONS and call.args:
+            value = next(prim[k] for k in ("distance", "difference", "radius", "diameter", "angle") if k in prim)
+            item["dim"] = {"expr": ast.get_source_segment(src, call.args[-1]),
+                           "value": math.degrees(value) if method == "angle" else value}
+        constraints.append(item)
+    return {"entities": entities, "constraints": constraints, "primitives": sk._primitives(),
+            "dof": sk.dof, "conflicting": sk.conflicting, "problem": sk.problem, "error": error, "c": cname,
+            "statements": [{"line": st.lineno, "end": st.end_lineno, "text": ast.get_source_segment(src, st)} for st in block.body]}
+
+
+def _free_name(src, prefix, taken=()):
+    used = {n.id for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Name)} | set(taken)
+    return next(f"{prefix}{i}" for i in range(1, 100000) if f"{prefix}{i}" not in used)
+
+
+def _fmt(v):
+    """A number for sketch code: up to 3 decimals, no trailing zeros."""
+    v = round(float(v), 3) + 0.0
+    return str(int(v)) if v == int(v) else f"{v:.3f}".rstrip("0")
+
+
+def _point_arg(p, made):
+    """An action's point: [x, y] for a new point, or an expression for an existing one ("$k" = made by action k)."""
+    if isinstance(p, str):
+        for k in sorted(range(len(made)), reverse=True):
+            p = p.replace(f"${k}", made[k])
+        return p
+    x, y = p
+    return f"({_fmt(x)}, {_fmt(y)})"
+
+
+def _block_append(src, block, lines):
+    """Source with statements added at the end of the Constrained block (replacing a lone `pass`)."""
+    t = _Text(src)
+    indent = t.lines[block.body[0].lineno - 1][: block.body[0].col_offset]
+    text = "".join(indent + line + "\n" for line in lines)
+    if len(block.body) == 1 and isinstance(block.body[0], ast.Pass):
+        st = block.body[0]
+        return src[: t.starts[st.lineno - 1]] + text + src[t.starts[st.end_lineno]:]
+    at = t.starts[block.body[-1].end_lineno]
+    if at == len(src) and not src.endswith("\n"):
+        text = "\n" + text
+    return src[:at] + text + src[at:]
+
+
+def _literal(node):
+    """The number in a literal (5, -3.5), else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        v = _literal(node.operand)
+        return -v if v is not None else None
+    return None
+
+
+def _sketch_moves(src, index, points, circles):
+    """Source with the geometry literals of the block's entity statements set to the editor's positions:
+    {point id: [x, y]}, {circle id: r}. Expressions are left alone; only numbers that change are touched."""
+    import caad
+    block, cname, sk, env, _ = _sketch_run(src, index)
+    t = _Text(src)
+    made = {}  # statement index -> entities it made, in order
+    for e in sk._entities:
+        for i, st in enumerate(block.body):
+            if e.line and st.lineno <= e.line <= st.end_lineno:
+                made.setdefault(i, []).append(e)
+    edits = []
+
+    def set_num(node, value):
+        if node is not None and _literal(node) is not None and _fmt(_literal(node)) != _fmt(value):
+            edits.append((t.start(node), t.end(node), _fmt(value)))
+
+    def set_pair(node, pt):
+        if isinstance(node, ast.Tuple) and len(node.elts) == 2 and pt.id in points:
+            x, y = points[pt.id]
+            set_num(node.elts[0], x)
+            set_num(node.elts[1], y)
+
+    for i, st in enumerate(block.body):
+        call = st.value if isinstance(st, (ast.Assign, ast.Expr)) else None
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == cname):
+            continue
+        kind, args, ents = call.func.attr, call.args, made.get(i, [])
+        pts = [e for e in ents if isinstance(e, caad.Point)]
+        if kind == "point" and len(args) == 2 and pts and pts[0].id in points:
+            set_num(args[0], points[pts[0].id][0])
+            set_num(args[1], points[pts[0].id][1])
+        elif kind == "rectangle" and len(args) >= 2 and len(pts) >= 3:
+            set_pair(args[0], pts[0])
+            set_pair(args[1], pts[2])
+        elif kind in ("line", "polyline", "polygon", "circle", "arc"):
+            new_pts = iter(pts)  # each (x, y) argument made one new point, in order
+            for a in args:
+                if isinstance(a, ast.Tuple):
+                    pt = next(new_pts, None)
+                    if pt is not None:
+                        set_pair(a, pt)
+            if kind == "circle" and len(args) >= 2:
+                circle = next((e for e in ents if isinstance(e, caad.Circle)), None)
+                if circle is not None and circle.id in circles:
+                    set_num(args[1], circles[circle.id])
+    for a, b, text in sorted(edits, reverse=True):
+        src = src[:a] + text + src[b:]
+    return src
+
+
+def _sketch_delete(src, index, entity_ids, constraint_ids):
+    """Source without the given entities and constraints, and everything that depends on them."""
+    model = _sketch_model(src, index)
+    _, block, _ = _constrained_block(src, index)
+    ents = {e["id"]: e for e in model["entities"]}
+    stmts = {c["stmt"] for c in model["constraints"] if c["id"] in constraint_ids and c["stmt"] is not None}
+    gone = set(entity_ids)
+    while True:  # an entity's statement goes, with all it made; then whatever uses those
+        stmts |= {ents[i]["stmt"] for i in gone if i in ents and ents[i]["stmt"] is not None}
+        gone_now = {e["id"] for e in model["entities"] if e["stmt"] in stmts}
+        gone_now |= {e["id"] for e in model["entities"] if {e.get("p1"), e.get("p2"), e.get("c"), e.get("s"), e.get("e")} & gone}
+        stmts |= {c["stmt"] for c in model["constraints"] if set(c["involves"]) & gone_now and c["stmt"] is not None}
+        if gone_now <= gone:
+            break
+        gone |= gone_now
+    t = _Text(src)
+    if len(stmts) == len(block.body):  # nothing left: the block keeps a `pass`
+        first, last = block.body[0], block.body[-1]
+        return src[: t.starts[first.lineno - 1]] + t.lines[first.lineno - 1][: first.col_offset] + "pass\n" + src[t.starts[last.end_lineno]:]
+    for i in sorted(stmts, reverse=True):
+        st = block.body[i]
+        src = src[: t.starts[st.lineno - 1]] + src[t.starts[st.end_lineno]:]
+    return src
+
+
+def sketch_action(src, index, actions):
+    """Apply editor actions to sketch `index` and return {src, model, made}. Actions, in order:
+      {"op": "add", "kind": point|line|polyline|circle|arc|rectangle|polygon, "args": [...], "construction": bool}
+         points are [x, y] (new) or expressions of existing ones ("p1", "rect1.corners[0]", "$0.end": made by
+         action 0); a circle's radius is a number
+      {"op": "constrain", "kind": method name, "refs": [expressions], "value": expression or None}
+      {"op": "dimension", "constraint": id, "expr": expression}   - a dimension's new value
+      {"op": "move", "points": {id: [x, y]}, "circles": {id: r}}  - geometry after dragging
+      {"op": "delete", "entities": [ids], "constraints": [ids]}
+    `made` lists the expression each add created (its name)."""
+    made = []
+    for a in actions:
+        a = dict(a)
+        op = a["op"]
+        _, block, cname = _constrained_block(src, index)
+        if op == "add":
+            kind = a["kind"]
+            args = list(a.get("args") or [])
+            if kind == "circle":
+                parts = [_point_arg(args[0], made), _fmt(args[1])]
+            elif kind == "point":
+                parts = [_fmt(args[0]), _fmt(args[1])]
+            else:
+                parts = [_point_arg(p, made) for p in args]
+            if kind == "polyline" and a.get("close"):
+                parts.append("close=True")
+            if a.get("construction"):
+                parts.append("construction=True")
+            if kind == "polyline":
+                n = len(args) - (0 if a.get("close") else 1)
+                names = []
+                for _ in range(n):
+                    names.append(_free_name(src, "line", names))
+                target = ", ".join(names) + ("," if n == 1 else "")
+                made.append(names[0] if n == 1 else f"[{', '.join(names)}]")
+            else:
+                target = _free_name(src, _NAME_PREFIX[kind])
+                made.append(target)
+            src = _block_append(src, block, [f"{target} = {cname}.{kind}({', '.join(parts)})"])
+        elif op == "constrain":
+            refs = [_point_arg(r, made) for r in a.get("refs") or []]
+            value = a.get("value")
+            if isinstance(value, str) and value.strip():
+                ast.parse(value, mode="eval")
+                refs.append(value.strip())
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                refs.append(_fmt(value))
+            src = _block_append(src, block, [f"{cname}.{a['kind']}({', '.join(refs)})"])
+        elif op == "dimension":
+            model = _sketch_model(src, index)
+            c = next((c for c in model["constraints"] if c["id"] == a["constraint"] and "dim" in c), None)
+            if c is None:
+                raise ValueError("That dimension isn't in the sketch any more.")
+            expr = a["expr"].strip()
+            try:
+                ast.parse(expr, mode="eval")
+            except SyntaxError as e:
+                raise ValueError(f"{e.msg} in {expr!r}") from None
+            node = block.body[c["stmt"]].value.args[-1]
+            t = _Text(src)
+            src = src[: t.start(node)] + expr + src[t.end(node):]
+        elif op == "move":
+            src = _sketch_moves(src, index, {k: v for k, v in dict(a.get("points") or {}).items()},
+                                {k: v for k, v in dict(a.get("circles") or {}).items()})
+        elif op == "delete":
+            src = _sketch_delete(src, index, set(a.get("entities") or []), set(a.get("constraints") or []))
+        else:
+            raise ValueError(f"Unknown sketch action '{op}'.")
+    ast.parse(src)
+    return {"src": src, "model": _sketch_model(src, index), "made": made}
 
 
 # --- Running ---------------------------------------------------------------------------------
