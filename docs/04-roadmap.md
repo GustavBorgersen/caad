@@ -72,7 +72,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 
 | # | Document | Status |
 | :-- | :-- | :-- |
-| 05 | [Feature model and code round-trip](05-feature-model.md) | Ready to build — slice 1 |
+| 05 | [Feature model and code round-trip](05-feature-model.md) | Slice 1 built; slice 2 next |
 | 06 | Sketches and constraints | To write before sketches v2 |
 | 07 | Project structure | To write in phase 1 |
 | 08 | Part studios and assemblies | To write before phase 2 |

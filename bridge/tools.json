@@ -83,7 +83,7 @@
   },
   {
     "name": "get_timeline",
-    "description": "The open part's timeline: one entry per feature (line range, label, status ok/error/skipped/rolled-back), the error if any, volume and bounding box.",
+    "description": "The open part's timeline: one entry per feature (line range, status ok/error/skipped/rolled-back, kind, label, sketch name and the earlier features it uses), the error if any, volume and bounding box.",
     "inputSchema": { "type": "object", "properties": {} }
   },
   {

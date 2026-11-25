@@ -6,9 +6,14 @@ const ICONS: Record<string, string> = {
   box: "▣", cylinder: "◎", sphere: "●", mirror: "⇋", loft: "⋈", sweep: "∿",
 };
 
+// A click rolls back, a double-click edits: wait this long so a double-click doesn't roll back first.
+const DOUBLE_CLICK_MS = 200;
+let clickTimer = 0;
+
 export type TimelineHandlers = {
   rollback: (upto: number | null) => void;
   hover: (feature: Feature | null) => void;
+  edit: (feature: Feature) => void;
 };
 
 export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: TimelineHandlers) {
@@ -17,10 +22,11 @@ export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: T
   const last = feats.length - 1;
   const rolledBack = result?.upto != null && result.upto < last;
 
+  if (rolledBack && result!.upto === -1) el.append(bar(() => h.rollback(null))); // before the first feature
   feats.forEach((f) => {
     const li = document.createElement("li");
     li.className = `feature ${f.status}`;
-    li.title = `${f.label}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here` +
+    li.title = `${f.label}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here · double-click to ${f.tier === "code" ? "show its code" : "edit"}` +
       (f.status === "error" && result?.error ? `\n${result.error.message}` : "");
     li.innerHTML = `<span class="icon"></span><span class="label"></span>`;
     li.querySelector(".icon")!.textContent = ICONS[f.kind] ?? "•";
@@ -31,7 +37,11 @@ export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: T
       msg.textContent = result.error.message;
       li.append(msg);
     }
-    li.onclick = () => h.rollback(f.index === last ? null : f.index);
+    li.onclick = (e) => {
+      clearTimeout(clickTimer);
+      if (e.detail === 1) clickTimer = window.setTimeout(() => h.rollback(f.index === last ? null : f.index), DOUBLE_CLICK_MS);
+    };
+    li.ondblclick = () => { clearTimeout(clickTimer); h.edit(f); };
     li.onmouseenter = () => h.hover(f);
     li.onmouseleave = () => h.hover(null);
     el.append(li);

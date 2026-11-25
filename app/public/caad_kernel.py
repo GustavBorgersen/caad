@@ -5,6 +5,8 @@ failing feature, and tessellates the result per face and edge for the 3D view.
 """
 
 import ast
+import enum
+import inspect
 import time
 import traceback
 
@@ -72,16 +74,374 @@ def _kind(stmt):
 
 
 def analyze(src, filename="part.py"):
-    """Timeline of a part file: list of features with line ranges, plus the part's name."""
+    """Timeline of a part file: features with line ranges, kind, tier, name and references."""
     tree = ast.parse(src, filename)
     block, name = _find_part_block(tree)
     if block is None:
         last = max((n.end_lineno for n in tree.body), default=1)
         return {"part": None, "block_line": None,
-                "features": [{"index": 0, "line": 1, "end": last, "label": "Custom code", "kind": "code"}]}
-    feats = [{"index": i, "line": s.lineno, "end": s.end_lineno, "label": _label(s, src), "kind": _kind(s)}
-             for i, s in enumerate(block.body)]
+                "features": [{"index": 0, "line": 1, "end": last, "label": "Custom code", "kind": "code",
+                              "tier": "code", "name": None, "refs": []}]}
+    feats, names, pending = [], set(), []
+    for i, s in enumerate(block.body):
+        f = {"index": i, "line": s.lineno, "end": s.end_lineno, "label": _label(s, src), "kind": _kind(s),
+             "tier": "code", "name": None,
+             "refs": sorted({n.id for n in ast.walk(s) if isinstance(n, ast.Name) and n.id in names})}
+        info = _feature_info(s, src)
+        if info:
+            f.update(tier=info["tier"], name=info.get("name"))
+            if info.get("implicit"):  # adds its faces to the builder's pending faces
+                f["implicit"] = True
+                pending.append(info.get("name") or f"sketch {i}")
+            if info.get("uses_pending"):  # an extrude/revolve without a sketch takes all pending ones
+                f["pending"], pending = pending, []
+            if info.get("label"):
+                f["label"] = info["label"](f.get("pending", []))
+        if f["name"]:
+            names.add(f["name"])
+        feats.append(f)
     return {"part": name, "block_line": block.lineno, "features": feats}
+
+
+# --- Features: code read back as editable features (docs/05-feature-model.md) ---------------
+
+def _choices(*pairs):
+    return [{"expr": e, "label": l} for e, l in pairs]
+
+
+_MODES = _choices((None, "Add"), ("Mode.SUBTRACT", "Remove"), ("Mode.INTERSECT", "Intersect"))
+_ALL_MODES = _MODES + _choices(("Mode.REPLACE", "Replace"), ("Mode.PRIVATE", "Private"))
+
+
+def _num(expr):
+    """An expression for a label: plain numbers get a unit."""
+    try:
+        float(expr)
+        return f"{expr} mm"
+    except (TypeError, ValueError):
+        return expr
+
+
+def _extrude_label(a, pending):
+    verb = {"Mode.SUBTRACT": "Cut", "Mode.INTERSECT": "Intersect"}.get(a.get("mode"), "Extrude")
+    sketch = (a.get("to_extrude") or "").removesuffix(".sketch") or ", ".join(pending)
+    depth = {"Until.LAST": "through all", "Until.NEXT": "up to next"}.get(a.get("until")) or _num(a.get("amount"))
+    return ", ".join(x for x in [f"{verb} {sketch}".strip(), depth, "symmetric" if a.get("both") == "True" else None] if x)
+
+
+# Feature types: tailored dialogs for known build123d calls. Arguments not listed here still show,
+# as plain expressions, when they are in the code.
+FEATURE_TYPES = {
+    "extrude": {
+        "fields": [
+            {"name": "to_extrude", "label": "Sketch", "type": "sketch"},
+            {"name": "until", "label": "End", "type": "choice",
+             "options": _choices((None, "Depth"), ("Until.LAST", "Through all"), ("Until.NEXT", "Up to next"))},
+            {"name": "amount", "label": "Depth", "type": "number", "show_if": {"until": None}},
+            {"name": "both", "label": "Symmetric", "type": "bool"},
+            {"name": "taper", "label": "Taper angle", "type": "number"},
+            {"name": "mode", "label": "Result", "type": "choice", "options": _MODES},
+        ],
+        "sketch_arg": "to_extrude",
+        "label": _extrude_label,
+    },
+    "fillet": {
+        "fields": [
+            {"name": "objects", "label": "Edges", "type": "edges"},
+            {"name": "radius", "label": "Radius", "type": "number"},
+        ],
+        "label": lambda a, p: f"Fillet r = {_num(a.get('radius'))}",
+    },
+    "chamfer": {
+        "fields": [
+            {"name": "objects", "label": "Edges", "type": "edges"},
+            {"name": "length", "label": "Distance", "type": "number"},
+            {"name": "length2", "label": "Second distance", "type": "number"},
+            {"name": "angle", "label": "Angle", "type": "number"},
+        ],
+        "label": lambda a, p: f"Chamfer {_num(a.get('length'))}",
+    },
+}
+
+
+def _signature(name):
+    """Signature of a build123d function, or of a class's constructor; None if it isn't one."""
+    import build123d
+    obj = getattr(build123d, name, None)
+    if not callable(obj):
+        return None
+    try:
+        if inspect.isclass(obj):
+            return inspect.Signature(list(inspect.signature(obj.__init__).parameters.values())[1:])
+        return inspect.signature(obj)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bind(call, sig):
+    """Map a call's arguments to parameter names: {name: (value node, whole node, is keyword)}.
+    None if the call can't be edited argument by argument (*args, **kwargs, wrong arguments)."""
+    if any(isinstance(a, ast.Starred) for a in call.args) or any(k.arg is None for k in call.keywords):
+        return None
+    try:
+        bound = sig.bind_partial(*range(len(call.args)), **{k.arg: k for k in call.keywords})
+    except TypeError:
+        return None
+    out = {}
+    for name, v in bound.arguments.items():
+        if sig.parameters[name].kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            return None
+        out[name] = (call.args[v], call.args[v], False) if isinstance(v, int) else (v.value, v, True)
+    return out
+
+
+def _call_of(stmt):
+    """The build123d call a statement consists of, with its signature and bound arguments."""
+    if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) and isinstance(stmt.value.func, ast.Name)):
+        return None
+    call = stmt.value
+    sig = _signature(call.func.id)
+    args = _bind(call, sig) if sig else None
+    return None if args is None else (call, sig, args)
+
+
+def _is_none(node):
+    return node is None or (isinstance(node, ast.Constant) and node.value is None)
+
+
+def _feature_info(stmt, src):
+    """Tier, name and label of a feature statement, or None for plain code."""
+    if isinstance(stmt, ast.With):
+        item = stmt.items[0]
+        if _call_name(item.context_expr) != "BuildSketch":
+            return None
+        mode = next((k.value for k in item.context_expr.keywords if k.arg == "mode"), None)
+        private = isinstance(mode, ast.Attribute) and mode.attr == "PRIVATE"
+        name = item.optional_vars.id if isinstance(item.optional_vars, ast.Name) else None
+        return {"tier": "code", "name": name, "implicit": not private}
+    found = _call_of(stmt)
+    if not found:
+        return None
+    call, sig, args = found
+    ftype = FEATURE_TYPES.get(call.func.id)
+    if not ftype:
+        return {"tier": "call"}
+    exprs = {n: ast.get_source_segment(src, v[0]) for n, v in args.items()}
+    info = {"tier": "type", "label": lambda pending: ftype["label"](exprs, pending)}
+    if "sketch_arg" in ftype and _is_none(args.get(ftype["sketch_arg"], (None,))[0]):
+        info["uses_pending"] = True
+    return info
+
+
+def _feature_stmt(src, index):
+    block, _ = _find_part_block(ast.parse(src))
+    if block is None or not 0 <= index < len(block.body):
+        raise ValueError(f"There is no feature {index}.")
+    return block.body[index]
+
+
+def _default_expr(value):
+    """A parameter default as code, for simple values; None for no default or complex ones."""
+    if value is inspect.Parameter.empty or value is None:
+        return None
+    if isinstance(value, enum.Enum):
+        return f"{type(value).__name__}.{value.name}"
+    if isinstance(value, (bool, int, float, str)):
+        return repr(value)
+    return None
+
+
+def _fields(name, sig):
+    """Dialog fields for a call: the feature type's fields, or generic ones from the signature."""
+    ftype = FEATURE_TYPES.get(name)
+    fields = [dict(f) for f in ftype["fields"]] if ftype else []
+    listed = {f["name"] for f in fields}
+    for p in sig.parameters.values():
+        if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        if p.name not in listed:
+            generic = ({"type": "choice", "options": _ALL_MODES} if p.name == "mode"
+                       else {"type": "bool"} if isinstance(p.default, bool) else {"type": "expr"})
+            fields.append({"name": p.name, "label": p.name.replace("_", " ").capitalize(), "extra": bool(ftype),
+                           **generic})
+    for f in fields:
+        p = sig.parameters[f["name"]]
+        f["required"] = p.default is inspect.Parameter.empty
+        f["default"] = _default_expr(p.default)
+    return fields
+
+
+def _describe_value(v):
+    """Short text for an evaluated parameter, shown next to its expression."""
+    from build123d import Shape, ShapeList
+    if isinstance(v, bool) or v is None:
+        return repr(v)
+    if isinstance(v, (int, float)):
+        return f"{round(v, 4):g}"
+    if isinstance(v, enum.Enum):
+        return v.name
+    if isinstance(v, ShapeList):
+        kinds = {type(x).__name__.lower() for x in v}
+        what = kinds.pop() if len(kinds) == 1 else "shape"
+        return f"{len(v)} {what}{'' if len(v) == 1 else 's'}"
+    if isinstance(v, Shape):
+        return f"{type(v).__name__} ({len(v.faces())} faces)" if v.faces() else type(v).__name__
+    text = repr(v)
+    return text if len(text) <= 60 else text[:59] + "…"
+
+
+def _evaluate(expr, env):
+    try:
+        return {"value": _describe_value(eval(expr, env)), "error": None}
+    except Exception as e:  # noqa: BLE001 - shown in the dialog
+        return {"value": None, "error": f"{type(e).__name__}: {e}"}
+
+
+def read_feature(src, index):
+    """A feature with its parameters as expressions, and their values in the latest run (the page
+    rolls back to just before the feature first, so values are what the feature sees)."""
+    stmt = _feature_stmt(src, index)
+    feat = analyze(src)["features"][index]
+    out = {"index": index, "kind": feat["kind"], "tier": feat["tier"], "label": feat["label"],
+           "name": feat["name"], "pending": feat.get("pending", [])}
+    found = _call_of(stmt)
+    if feat["tier"] == "code" or not found:
+        return out
+    call, sig, args = found
+    # The model before the feature, kept for feature_values: previews of the edit replace the latest run.
+    env = globals()["_edit_env"] = _env()
+    out["call"] = call.func.id
+    out["fields"] = _fields(call.func.id, sig)
+    for f in out["fields"]:
+        arg = args.get(f["name"])
+        f["expr"] = ast.get_source_segment(src, arg[0]) if arg else None
+        f.update(_evaluate(f["expr"], env) if f["expr"] is not None else {"value": None, "error": None})
+    return out
+
+
+def feature_values(exprs):
+    """Values of edited expressions {name: expr}, in the model the last read_feature saw."""
+    env = globals().get("_edit_env") or _env()
+    return {name: _evaluate(expr, env) for name, expr in dict(exprs).items() if isinstance(expr, str) and expr.strip()}
+
+
+class _Text:
+    """Source text with ast positions (line, UTF-8 byte column) turned into string offsets."""
+
+    def __init__(self, src):
+        self.src = src
+        self.lines = src.splitlines(keepends=True)
+        self.starts = [0]
+        for line in self.lines:
+            self.starts.append(self.starts[-1] + len(line))
+
+    def at(self, line, col):
+        return self.starts[line - 1] + len(self.lines[line - 1].encode()[:col].decode(errors="ignore"))
+
+    def start(self, node):
+        return self.at(node.lineno, node.col_offset)
+
+    def end(self, node):
+        return self.at(node.end_lineno, node.end_col_offset)
+
+    def own_lines(self, node):
+        """(start, end) of the whole lines `node` is alone on (apart from a comma and a comment), else None."""
+        before = self.src[self.starts[node.lineno - 1]:self.start(node)]
+        after = self.src[self.end(node):self.starts[node.end_lineno]].strip()
+        rest = after[1:].strip() if after.startswith(",") else after
+        if before.strip() or (rest and not rest.startswith("#")):
+            return None
+        return self.starts[node.lineno - 1], self.starts[node.end_lineno]
+
+
+def _is_default(expr, default):
+    """Does the expression equal the parameter's default? (Evaluated with build123d names only.)"""
+    import build123d
+    if default is inspect.Parameter.empty:
+        return False
+    try:
+        return eval(expr, vars(build123d).copy()) == default
+    except Exception:  # noqa: BLE001 - uses the part's names, so it can't be a default
+        return False
+
+
+def _patch_one(src, index, name, expr):
+    """Source with one argument of feature `index` changed, added or removed (expr None)."""
+    stmt = _feature_stmt(src, index)
+    call, sig, args = _call_of(stmt)
+    if name not in sig.parameters:
+        raise ValueError(f"{call.func.id}() has no argument '{name}'.")
+    param = sig.parameters[name]
+    if expr is not None:
+        expr = expr.strip()
+        try:
+            ast.parse(expr, mode="eval")
+        except SyntaxError as e:
+            raise ValueError(f"{name}: {e.msg} in {expr!r}") from None
+        if _is_default(expr, param.default):
+            expr = None
+    t = _Text(src)
+    arg = args.get(name)
+    items = sorted([a for a in call.args] + list(call.keywords), key=lambda n: (n.lineno, n.col_offset))
+    if expr is None:
+        if not arg:
+            return src
+        value, whole, keyword = arg
+        later_positional = [a for a in call.args if t.start(a) > t.start(whole)]
+        if later_positional:  # removing it would shift the others: write the default instead
+            d = _default_expr(param.default) if param.default is not None else "None"
+            if d is None:
+                raise ValueError(f"'{name}' can't be removed here; give it a value.")
+            return src[:t.start(value)] + d + src[t.end(value):]
+        if param.default is inspect.Parameter.empty:
+            raise ValueError(f"'{name}' is required.")
+        i = items.index(whole)
+        span = t.own_lines(whole)
+        if span and len(items) > 1:
+            a, b = span
+        elif i > 0:
+            a, b = t.end(items[i - 1]), t.end(whole)
+        elif len(items) > 1:
+            a, b = t.start(whole), t.start(items[1])
+        else:
+            a, b = t.start(whole), t.end(whole)
+        return src[:a] + src[b:]
+    if arg:
+        value = arg[0]
+        return src[:t.start(value)] + expr + src[t.end(value):]
+    new = f"{name}={expr}"
+    if not items:
+        at = src.index("(", t.end(call.func)) + 1
+        return src[:at] + new + src[at:]
+    last = items[-1]
+    end = t.end(last)
+    if t.own_lines(last) and last.lineno > call.lineno:  # one argument per line: add a line
+        indent = t.lines[last.lineno - 1][: len(t.lines[last.lineno - 1]) - len(t.lines[last.lineno - 1].lstrip())]
+        line_end = t.starts[last.end_lineno] - 1  # before the newline
+        has_comma = src[end:line_end].lstrip().startswith(",")
+        head = src[:end] + ("" if has_comma else ",") + src[end:line_end]
+        return head + f"\n{indent}{new}{',' if has_comma else ''}" + src[line_end:]
+    return src[:end] + f", {new}" + src[end:]
+
+
+def patch_feature(src, index, kind, changes):
+    """Source with feature `index`'s arguments changed: {name: expression, or None to remove}.
+    Only the changed arguments' text is touched. Refuses if the feature is no longer of `kind`."""
+    before = analyze(src)["features"]
+    if index >= len(before) or before[index]["kind"] != kind or before[index]["tier"] == "code":
+        raise ValueError("The file changed: this feature isn't there any more. Close the dialog and try again.")
+    out = src
+    for name, expr in changes.items():
+        expr = expr if isinstance(expr, str) else None  # JS null arrives as JsNull
+
+        out = _patch_one(out, index, name, expr)
+    try:
+        after = analyze(out)["features"]
+    except SyntaxError as e:
+        raise ValueError(f"The change would break the code ({e.msg}); nothing was written.") from None
+    if len(after) != len(before) or after[index]["kind"] != kind:
+        raise ValueError("The change would alter other features; nothing was written.")
+    return out
 
 
 # --- Running ---------------------------------------------------------------------------------
@@ -91,7 +451,7 @@ def _truncate(src, filename, upto):
     tree = ast.parse(src, filename)
     block, _ = _find_part_block(tree)
     if block is not None and upto is not None and upto < len(block.body) - 1:
-        block.body = block.body[: upto + 1]
+        block.body = block.body[: upto + 1] or [ast.copy_location(ast.Pass(), block.body[0])]  # upto -1: nothing
     return tree
 
 
@@ -121,7 +481,7 @@ def run(src, filename="part.py", upto=None):
                 "times": {"build": 0, "mesh": 0}}
     feats = info["features"]
     n = len(feats)
-    last = n - 1 if upto is None else min(upto, n - 1)
+    last = n - 1 if upto is None else max(-1, min(upto, n - 1))
     ns = {"__name__": "__caad__", "__file__": filename}
     error = None
     try:

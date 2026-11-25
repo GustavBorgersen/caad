@@ -11,6 +11,7 @@ npm run build:bridge # builds the agent bridge for all systems into public/bridg
 npm run test:bridge  # bridge protocol test
 npm run test:agent   # the real bridge + app in headless Chromium, every agent tool
 npm run test:sketch  # sketch mode: draw, cut, sketch on a face, new part
+npm run test:feature # feature dialog: double-click, edit with live preview, OK/Cancel
 ```
 
 The first start takes about a minute while the CAD kernel loads (see `../docs/02-spike-results.md`).
@@ -19,10 +20,11 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | :-- | :-- |
 | `src/main.ts` | Glue: project, building, saving, watching for outside edits |
 | `src/kernel.worker.ts` / `src/kernel.ts` | Pyodide + lean build123d in a worker; client that keeps only the latest request |
-| `public/caad_kernel.py` | Timeline from the code, rollback, errors per feature, per-face/edge mesh |
+| `public/caad_kernel.py` | Timeline from the code, rollback, errors per feature, per-face/edge mesh; reading and patching features |
 | `src/viewer.ts` | three.js view, Z up, face/edge picking and highlighting |
 | `src/editor.ts` | CodeMirror code panel with error and feature line marks |
-| `src/timeline.ts` | Timeline panel with rollback bar |
+| `src/timeline.ts` | Timeline panel with rollback bar; double-click edits a feature |
+| `src/feature-dialog.ts` | Feature dialog: fields from the kernel, live preview, surgical patch on OK (`../docs/05-feature-model.md`) |
 | `src/selection.ts` | Selection panel: properties and verified build123d selectors |
 | `src/project.ts` | Local folder (File System Access API) or the bundled examples |
 | `src/agent.ts` / `src/tools.ts` | Connection to the local bridge; the agent's tools, answered by the page |

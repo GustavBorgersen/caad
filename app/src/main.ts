@@ -2,7 +2,8 @@ import "./style.css";
 import { Agents, localAccess } from "./agent";
 import { setupAgentDialog } from "./agent-dialog";
 import { Editor } from "./editor";
-import { Kernel, type BuildResult, type Kind, type SelectInfo } from "./kernel";
+import { FeatureDialog } from "./feature-dialog";
+import { Kernel, type BuildResult, type Feature, type Kind, type SelectInfo } from "./kernel";
 import { canOpenFolders, examples, lastFolder, openFolder, reopen, type Project } from "./project";
 import { renderSelection } from "./selection";
 import { insertFeatures, newPartSource, sketchLines } from "./sketch-code";
@@ -55,8 +56,9 @@ async function rebuild(): Promise<BuildResult | null> {
   if (r.mesh) state.fitNext = false;
   restoreSelection(r.gen);
   renderTimeline($("timeline"), r, {
-    rollback: (upto) => { state.upto = upto; rebuild(); },
+    rollback: (upto) => { if (!featureDialog.open) { state.upto = upto; rebuild(); } },
     hover: (f) => editor.markFeature(f ? [f.line, f.end] : null, !!f),
+    edit: (f) => editFeature(f),
   });
   editor.markError(r.error?.line ?? null);
   const err = $("error");
@@ -153,6 +155,61 @@ async function applyCode(path: string, code: string): Promise<BuildResult | null
   editor.setText(code);
   state.modified = await state.project.modified(path);
   return rebuild();
+}
+
+// --- Editing features (docs/05-feature-model.md) ---------------------------------------------
+
+let editUpto: number | null = null; // where the rollback bar was before the dialog opened
+
+const featureDialog = new FeatureDialog($("feature-panel"), {
+  kernel,
+  source: () => editor.text,
+  async preview(src, upto) {
+    const r = await kernel.build(src, state.path!, upto);
+    if (!r) return null;
+    state.result = r; // what the view shows, so picking edges for the dialog works
+    viewer.setMesh(r.mesh, false);
+    return r.error?.message ?? null;
+  },
+  async apply(src) {
+    document.body.classList.remove("editing-feature");
+    state.upto = editUpto;
+    if (state.path) await applyCode(state.path, src);
+  },
+  cancel() {
+    document.body.classList.remove("editing-feature");
+    state.upto = editUpto;
+    rebuild();
+  },
+  selection(kind) { // only when everything selected is of this kind
+    const [info, ...more] = state.selection;
+    return info && !more.length && info.items[0]?.kind === kind ? info.selectors[0]?.expr ?? null : null;
+  },
+});
+
+/** Double-click in the timeline: roll back to just before the feature and open its dialog. */
+async function editFeature(f: Feature) {
+  if (featureDialog.open || sketcher.active || !state.path) return;
+  if (f.tier === "code") {
+    editor.markFeature([f.line, f.end], true);
+    status(f.kind === "sketch" ? "Sketches can't be reopened yet: edit the sketch in the code." : "This feature is code: edit it in the code panel.");
+    return;
+  }
+  if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
+  editUpto = state.upto;
+  state.upto = f.index - 1;
+  document.body.classList.add("editing-feature");
+  const r = await rebuild();
+  let detail;
+  try { detail = r ? await kernel.readFeature(editor.text, f.index) : null; }
+  catch (e) { status(`Can't edit this feature: ${(e as Error).message}`); }
+  if (!detail?.fields) {
+    document.body.classList.remove("editing-feature");
+    state.upto = editUpto;
+    rebuild();
+    return;
+  }
+  featureDialog.show(detail);
 }
 
 // --- Agent ------------------------------------------------------------------------------------
@@ -293,4 +350,4 @@ $("new-part").onclick = async () => {
 };
 
 // For tests and debugging in the console.
-Object.assign(window, { caad: { editor, viewer, kernel, state, rebuild, openPart, applyCode, agents, sketcher, startSketch } });
+Object.assign(window, { caad: { editor, viewer, kernel, state, rebuild, openPart, applyCode, agents, sketcher, startSketch, editFeature, featureDialog } });

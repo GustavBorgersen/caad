@@ -24,11 +24,12 @@ npm run test:bridge               # bridge protocol test
 npm run test:smoke                # headless Chromium (/usr/bin/chromium, override with CHROME=)
 npm run test:agent                # real bridge + app, every agent tool
 npm run test:sketch               # sketch mode end to end
+npm run test:feature              # editing features in the dialog end to end
 ```
 
 **Deployment**: `.github/workflows/deploy.yml` builds the bridge into `app/public/bridge`, runs the bridge test and deploys to Vercel (project `caad`, root directory `app`) with `vercel build` + `vercel deploy --prebuilt` — production on pushes to `main`, previews for pull requests. Vercel's own Git builds are off (`app/vercel.json`) since they can't build Go.
 
-The headless tests start their own Vite server on other ports. Kernel changes can be tested faster in Node: `spike/01-build123d-wasm/{kernel,select,agent,sketch}-test.mjs` (needs `node snapshot2.mjs` once there to fetch the wheels).
+The headless tests start their own Vite server on other ports. Kernel changes can be tested faster in Node: `spike/01-build123d-wasm/{kernel,select,agent,sketch,feature}-test.mjs` (needs `node snapshot2.mjs` once there to fetch the wheels).
 
 ## Conventions
 

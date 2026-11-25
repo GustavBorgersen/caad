@@ -14,7 +14,34 @@ export type Mesh = {
 export type Feature = {
   index: number; line: number; end: number; label: string; kind: string;
   status: "ok" | "error" | "skipped" | "rolled-back";
+  /** type: tailored dialog; call: generic dialog from the signature; code: edited as text (docs/05). */
+  tier: "type" | "call" | "code";
+  name: string | null; // `with BuildSketch() as name`
+  refs: string[]; // names of earlier features it uses
+  implicit?: boolean; // a sketch that adds its faces to the pending ones
+  pending?: string[]; // the pending sketches an extrude without a sketch uses
 };
+
+/** A dialog field with the argument's expression (Python's None arrives as undefined) and its value. */
+export type FeatureField = {
+  name: string; label: string;
+  type: "number" | "choice" | "bool" | "sketch" | "edges" | "faces" | "plane" | "expr";
+  options?: { expr?: string; label: string }[];
+  show_if?: Record<string, string | null>;
+  extra?: boolean; // not one of the feature type's own fields
+  required: boolean;
+  default?: string;
+  expr?: string;
+  value?: string;
+  error?: string;
+};
+
+export type FeatureDetail = {
+  index: number; kind: string; tier: Feature["tier"]; label: string; name?: string; pending: string[];
+  call?: string; fields?: FeatureField[]; gen: number;
+};
+
+export type Value = { value?: string; error?: string };
 
 export type BuildResult = {
   ok: boolean;
@@ -100,6 +127,21 @@ export class Kernel {
   /** The plane a sketch on a Plane expression or flat-face selector uses. */
   sketchPlane(expr: string): Promise<{ origin: number[]; x: number[]; y: number[]; z: number[]; error?: string; gen: number }> {
     return this.call("sketch_plane", [expr]);
+  }
+
+  /** A feature's parameters as expressions, with values in the latest run (roll back to before it first). */
+  readFeature(src: string, index: number): Promise<FeatureDetail> {
+    return this.call("read_feature", [src, index]);
+  }
+
+  /** Source with a feature's arguments changed ({name: expression, or null to remove}); rejects with the reason. */
+  async patchFeature(src: string, index: number, kind: string, changes: Record<string, string | null>): Promise<string> {
+    return (await this.call<{ value: string }>("patch_feature", [src, index, kind, changes])).value;
+  }
+
+  /** Values of edited expressions, in the model the last readFeature saw. */
+  featureValues(exprs: Record<string, string>): Promise<Record<string, Value>> {
+    return this.call("feature_values", [exprs]);
   }
 
   /** Resolves when the kernel has loaded. */

@@ -37,7 +37,11 @@ export function describeBuild(path: string, r: BuildResult | null): string {
   const feats = r.timeline?.features ?? [];
   if (feats.length) {
     lines.push(`Timeline${r.timeline?.part ? ` of '${r.timeline.part}'` : ""}:`);
-    for (const f of feats) lines.push(`  ${f.index}  L${f.line}${f.end > f.line ? `-${f.end}` : ""}  ${f.status.padEnd(11)} ${f.label}`);
+    for (const f of feats) {
+      const notes = [f.name && `as ${f.name}`, f.refs.length && `uses ${f.refs.join(", ")}`,
+        f.pending?.length && `uses pending sketch ${f.pending.join(", ")}`].filter(Boolean).join("; ");
+      lines.push(`  ${f.index}  L${f.line}${f.end > f.line ? `-${f.end}` : ""}  ${f.status.padEnd(11)} ${f.kind.padEnd(9)} ${f.label}${notes ? `  (${notes})` : ""}`);
+    }
   }
   return lines.join("\n");
 }

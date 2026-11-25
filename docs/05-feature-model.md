@@ -1,7 +1,7 @@
 # CAAD — Feature model and code round-trip
 
 **Date:** 2026-11-24, decisions added 2026-11-25
-**Status:** Ready to build — slice 1
+**Status:** Slice 1 built (2026-11-25); slice 2 next
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1
 
 ## Problem
@@ -122,6 +122,7 @@ All in `caad_kernel.py`, called through the worker like `select` and `resolve` t
 | :-- | :-- |
 | `analyze(src)` (exists, extended) | Per feature also `kind`, `tier` (`type` / `call` / `code`), `name` (the `as` name) and `refs`. AST only, runs on every build |
 | `read_feature(src, index)` | `kind`, `label`, `fields`, and per parameter: `expr` (source text or `null`), `value` (evaluated, see above), `error` |
+| `feature_values(exprs)` | Values of edited expressions, in the model `read_feature` saw (previews replace the latest run) |
 | `patch_feature(src, index, kind, changes)` | New source. `changes` maps a parameter to a new expression, or to `null` to remove it. Fails if the feature at `index` is no longer of `kind` — the file changed while the dialog was open (e.g. the agent edited it) |
 | `insert_feature(src, after, kind, params)` | New source with the canonical code of a new feature after feature `after` (the rollback bar) |
 
@@ -138,7 +139,7 @@ All in `caad_kernel.py`, called through the worker like `select` and `resolve` t
 
 ## Editing flow
 
-1. **Double-click a feature** in the timeline. Code features scroll the code panel to the feature; call features and feature types open a dialog (the sketch editor for sketches, from slice 2).
+1. **Double-click a feature** in the timeline (a single click still rolls back, after a short wait so a double-click doesn't roll back first). Code features scroll the code panel to the feature; call features and feature types open a dialog (the sketch editor for sketches, from slice 2).
 2. The view **rolls back to just before that feature**; the kernel reads it with `read_feature`.
 3. **Live preview**: every change builds the part up to this feature with the patched source — without saving. Errors show in the dialog.
 4. **OK** → `patch_feature` → the file is saved, the rollback bar returns to where it was, the part rebuilds. OK is allowed even when the preview has an error — like typing in the code panel, the code may be broken for a while; the error shows at the feature as usual.
@@ -168,7 +169,7 @@ The agent keeps writing code with `write_part` / `edit_part`. The build123d guid
 
 | Slice | Contents |
 | :-- | :-- |
-| **1 — Read and patch** | Registry with extrude, fillet and chamfer; call and code tiers; `analyze` extension, `read_feature`, `patch_feature`; Node tests; generic dialog in the page with live preview, opened by double-click |
+| **1 — Read and patch** (done) | Registry with extrude, fillet and chamfer; call and code tiers; `analyze` extension, `read_feature`, `patch_feature`; Node tests; generic dialog in the page with live preview, opened by double-click |
 | **2 — Named sketches** | Sketcher writes the named form; extrude's sketch field; `insert_feature` and a "+" at the rollback bar (fillet/chamfer from the selected edges); refs and safe delete |
 | **3 — More types, agent** | Revolve, hole, mirror; `edit_feature` tool; guide teaches the canonical forms |
 

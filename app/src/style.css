@@ -110,3 +110,22 @@ h2 .small { float: right; margin-top: -3px; padding: 0 6px; font-size: 11px; tex
 #sketch-panel .shape { display: inline-flex; gap: 4px; align-items: center; padding: 1px 4px; background: #fdf3ea; border-radius: 4px; }
 #sketch-panel .shape button { padding: 0 5px; border: none; background: none; }
 body.sketching #selection, body.sketching #view-tools, body.sketching #agent-note { display: none !important; }
+
+/* Feature dialog (docs/05-feature-model.md) */
+#feature-panel { position: absolute; top: 8px; right: 8px; width: min(380px, calc(100% - 16px)); padding: 8px 10px; background: rgba(255,255,255,0.97); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); font-size: 12px; }
+#feature-panel .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 13px; }
+#feature-panel .row { display: grid; grid-template-columns: 96px 1fr; gap: 2px 8px; align-items: center; margin: 4px 0; }
+#feature-panel .row label { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#feature-panel .input { display: flex; gap: 4px; min-width: 0; }
+#feature-panel input[type=text] { flex: 1; min-width: 0; font: 12px ui-monospace, monospace; padding: 2px 4px; border: 1px solid var(--line); border-radius: 3px; }
+#feature-panel input[type=checkbox] { margin: 0; }
+#feature-panel select { font: inherit; }
+#feature-panel .use { padding: 0 6px; font-size: 11px; white-space: nowrap; }
+#feature-panel .value { grid-column: 2; font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#feature-panel .value.error, #feature-panel .message.error { color: var(--error); }
+#feature-panel .add { display: block; margin: 6px 0 2px; color: var(--muted); }
+#feature-panel .message { margin-top: 6px; padding: 4px 6px; border-radius: 3px; background: var(--hover); white-space: pre-wrap; }
+#feature-panel .message.error { background: var(--error-bg); }
+#feature-panel .actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+#feature-panel button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+body.editing-feature #timeline, body.editing-feature #right, body.editing-feature #view-tools, body.editing-feature #parts { pointer-events: none; opacity: 0.6; }
