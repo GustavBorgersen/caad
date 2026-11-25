@@ -590,6 +590,10 @@ def sketch_open(src, index, filename="part.py"):
     model = _sketch_model(src, index)
     model["plane"] = ast.get_source_segment(src, stmt.items[0].context_expr.args[0]) if stmt.items[0].context_expr.args else "Plane.XY"
     model["name"] = stmt.items[0].optional_vars.id if isinstance(stmt.items[0].optional_vars, ast.Name) else None
+    # the part's numeric parameters, offered when typing a dimension
+    model["params"] = [{"name": n.targets[0].id, "value": ns[n.targets[0].id]} for n in ast.parse(src).body
+                       if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
+                       and isinstance(ns.get(n.targets[0].id), (int, float)) and not isinstance(ns.get(n.targets[0].id), bool)]
     return model
 
 

@@ -74,24 +74,72 @@ try {
   check((await code()) === saved0, "nothing is saved yet");
   check(/4 degrees of freedom/.test(await state()), `under-constrained: ${await state()}`);
   await page.screenshot({ path: `${OUT}/sketch-1-rect.png` });
+
+  let src;
+  // 1b. Dimension it: select a side, Length; the new dimension opens for its expression (parameters are offered).
+  const option = (kind) => page.click(`#sketch-panel button.option[data-option="${kind}"]`);
+  const typeDim = async (text) => {
+    await page.waitForSelector(".sketch-labels .dim-input", { timeout: 10_000 });
+    await page.$eval(".sketch-labels .dim-input", (i) => { i.value = ""; });
+    await page.type(".sketch-labels .dim-input", text);
+    await page.keyboard.press("Enter");
+    await idle();
+  };
+  const shiftClickAt = async (x, y) => { await page.keyboard.down("Shift"); await clickAt(x, y); await page.keyboard.up("Shift"); };
+  await tool("select");
+  await clickAt(-3, -6); // the bottom side
+  check((await page.$$eval("#sketch-panel button.option", (b) => b.map((x) => x.dataset.option))).join() === "horizontal,vertical,length",
+    `a line offers: ${await page.$$eval("#sketch-panel button.option", (b) => b.map((x) => x.title).join(", "))}`);
+  await option("length");
+  check(await page.$$eval("#sketch-params option", (o) => o.map((x) => x.value).join()) === "width,depth,thickness,hole_d", "the part's parameters are offered");
+  await typeDim("width / 4");
+  await clickAt(-10, 0); // the left side
+  await option("length");
+  await typeDim("12");
+  await clickAt(0, 0); // the origin, then the centre: distances go from the first to the second
+  await shiftClickAt(-3, 0);
+  await option("hdistance");
+  await typeDim("-5");
+  await clickAt(0, 0);
+  await shiftClickAt(-5, 0);
+  await option("vdistance");
+  await typeDim("0");
+  src = await sketchSrc();
+  check(["c.length(rect1.bottom, width / 4)", "c.length(rect1.left, 12)", "c.hdistance(c.origin, rect1.center, -5)", "c.vdistance(c.origin, rect1.center, 0)"].every((l) => src.includes(l)),
+    "dimensions written: width / 4, 12, and the centre from the origin", src.split("\n").filter((l) => /c\.(length|hdistance|vdistance)/.test(l)).join(" | "));
+  check(/Fully constrained/.test(await state()) && (await page.$$eval(".sketch-labels .dim", (d) => d.map((x) => x.textContent))).includes("width / 4 = 15"), `fully constrained; labels show "width / 4 = 15"`);
+  m = await model();
+  const corner0 = m.entities.find((e) => e.ref === "rect1.corners[0]");
+  check(Math.abs(corner0.x + 12.5) < 1e-6 && Math.abs(corner0.y + 6) < 1e-6, `solved: 15 x 12 centred at (-5, 0) (corner ${corner0.x}, ${corner0.y})`);
+  // A conflicting dimension shows red; select its label and delete it.
+  await clickAt(-5, 6);
+  await option("length");
+  await typeDim("99");
+  check(/Conflicting/.test(await state()) && (await page.$$(".sketch-labels .dim.conflict")).length === 2, `a second length on a side conflicts: ${await state()}`);
+  await page.evaluate(() => [...document.querySelectorAll(".sketch-labels .dim")].find((d) => d.textContent === "99").click());
+  await page.keyboard.press("Delete");
+  await idle();
+  check(/Fully constrained/.test(await state()) && !(await sketchSrc()).includes("99"), "deleted: fully constrained again");
+  await page.screenshot({ path: `${OUT}/sketch-1b-dimensions.png` });
   await done();
-  let src = await code();
-  check(src.includes("from caad import Constrained") && /with BuildSketch\(Plane\.XY, mode=Mode\.PRIVATE\) as sk1:\n\s+with Constrained\(\) as c:\n\s+rect1 = c\.rectangle\(\(-10, -6\), \(4, 6\)\)\n/.test(src), "Done saves the sketch");
+  src = await code();
+  check(src.includes("from caad import Constrained") && /with BuildSketch\(Plane\.XY, mode=Mode\.PRIVATE\) as sk1:\n\s+with Constrained\(\) as c:\n\s+rect1 = c\.rectangle\(/.test(src) && src.includes("c.length(rect1.bottom, width / 4)"), "Done saves the sketch");
   await extrude({ end: "Until.LAST", result: "Mode.SUBTRACT" });
   const v1 = await volume();
   check(v1 < v0, `cut through all (volume ${v0} -> ${v1})`);
 
-  // 2. Reopen it (double-click) and drag a corner: the numbers in the code follow.
+  // 2. Reopen it (double-click) and change a dimension (double-click its label).
   const sketchIndex = (await page.evaluate(() => window.caad.state.result.timeline.features.findIndex((f) => f.name === "sk1")));
   await dblclickFeature(sketchIndex);
   await opened();
   check(await page.evaluate((i) => window.caad.state.upto === i - 1, sketchIndex), "double-clicking the sketch opens it, rolled back to just before it");
-  await dragFrom([4, 6], [8, 10]);
-  check(/rect1 = c\.rectangle\(\(-10, -6\), \(8(\.\d+)?, 10(\.\d+)?\)\)/.test(await sketchSrc()), `dragging the corner moved it: ${(await sketchSrc()).match(/rect1 = .*/)?.[0]}`);
+  await page.evaluate(() => { const d = [...document.querySelectorAll(".sketch-labels .dim")].find((x) => x.textContent.startsWith("width / 4")); d.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+  await typeDim("width / 3");
+  check((await sketchSrc()).includes("c.length(rect1.bottom, width / 3)"), "the dimension's expression changed");
   await done();
   const v2 = await volume();
-  check(/rect1 = c\.rectangle\(\(-10, -6\), \(8/.test(await code()) && v2 < v1, `saved; the bigger cut removes more (${v1} -> ${v2})`);
-  await page.screenshot({ path: `${OUT}/sketch-2-dragged.png` });
+  check((await code()).includes("width / 3") && v2 < v1, `saved; the wider cut removes more (${v1} -> ${v2})`);
+  await page.screenshot({ path: `${OUT}/sketch-2-dimension.png` });
 
   // 3. A line chain on the front face: horizontal is inferred, ending on the first point closes the triangle.
   await page.evaluate(() => window.caad.startSketch("bracket.faces().sort_by(Axis.Y)[0]", "the front"));
@@ -107,11 +155,20 @@ try {
   console.log(src.split("\n").filter((l) => /line\d = |horizontal/.test(l)).map((l) => "   " + l.trim()).join("\n"));
   m = await model();
   check(m.dof === 5 && /5 degrees/.test(await state()), `a triangle with one constraint: 5 degrees of freedom (${m.dof})`);
+  // Drag the free top vertex: the code follows; the horizontal line stays horizontal.
+  await tool("select");
+  await dragFrom([-12, 6], [-12, 9]);
+  check(/line2 = c\.line\(line1\.end, \(-12(\.\d+)?, 9(\.\d+)?\)\)/.test(await sketchSrc()), `dragging the vertex moved it: ${(await sketchSrc()).match(/line2 = .*/)?.[0]}`);
+  // The horizontal constraint shows as a glyph: click it, Delete.
+  check((await page.$$eval(".sketch-labels .glyph", (g) => g.map((x) => x.textContent))).join() === "H", "the inferred constraint shows as a glyph: H");
+  await page.click(".sketch-labels .glyph");
+  await page.keyboard.press("Delete");
+  await idle();
+  check(!(await sketchSrc()).includes("c.horizontal(line1)") && (await model()).dof === 6, "selected through its glyph and deleted: 6 degrees of freedom");
   await page.screenshot({ path: `${OUT}/sketch-3-chain.png` });
 
   // 4. Select the second line and delete it: the third, which starts at its end, goes too.
-  await tool("select");
-  await clickAt(-8.5, 4.05);
+  await clickAt(-8.5, 5.55); // the middle of the second line, after the drag
   await page.keyboard.press("Delete");
   await idle();
   src = await sketchSrc();
@@ -136,6 +193,25 @@ try {
   const g = await gen();
   await page.click("#new-part");
   await waitBuild(g);
+  // 6a. A rectangle with a corner on the origin and its width set has one freedom left, its height: dragging a
+  // top corner (even a little sideways) changes the height.
+  await page.click("#sketch-button");
+  await page.click('#plane-choice [data-plane="Plane.XY"]');
+  await opened();
+  await clickAt(-50, 22);
+  await clickAt(0.2, 0.1); // snaps to the origin
+  await tool("select");
+  await clickAt(-25, 22); // the top side
+  await option("length");
+  await typeDim("50");
+  check((await model()).dof === 1 && (await sketchSrc()).includes("c.coincident(rect1.corners[1], c.origin)"), "a corner on the origin, the width set: 1 degree of freedom");
+  await dragFrom([0, 22], [1.5, 30]);
+  src = await sketchSrc();
+  check(/rect1 = c\.rectangle\(\(-50, 0\), \(0, 30(\.\d+)?\)\)/.test(src), `dragging the top corner sideways and up changes only the height: ${src.match(/rect1 = .*/)?.[0]}`);
+  await page.click("#sketch-panel button[title^='Leave']");
+  await page.waitForFunction(() => !window.caad.sketcher.active);
+
+  // 6b. A closed polyline, then its extrude.
   await page.click("#sketch-button");
   await page.click('#plane-choice [data-plane="Plane.XY"]');
   await opened();

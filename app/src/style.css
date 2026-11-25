@@ -150,3 +150,9 @@ body.left-compact .rollback-bar .add { display: none; }
 #sketch-panel .state { font-size: 11px; color: #1f6feb; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; }
 #sketch-panel .state.ok { color: var(--muted); }
 #sketch-panel .state.bad { color: var(--error); }
+.sketch-labels .glyph { position: absolute; left: 0; top: 0; min-width: 14px; padding: 0 3px; font: 10px ui-monospace, monospace; text-align: center; color: #1f6feb; background: rgba(255,255,255,0.92); border: 1px solid #b8cdf0; border-radius: 3px; pointer-events: auto; cursor: pointer; }
+.sketch-labels .glyph.selected { border-color: var(--accent); color: var(--accent); }
+.sketch-labels .glyph.conflict { border-color: var(--error); color: var(--error); }
+.sketch-labels .dim-input { position: absolute; left: 0; top: 0; width: 120px; font: 11px ui-monospace, monospace; padding: 1px 4px; border: 1px solid var(--accent); border-radius: 3px; pointer-events: auto; }
+#sketch-panel .sub button.option { padding: 0 6px; min-width: 24px; font-size: 12px; }
+#sketch-panel .sub button.option.dim { color: #1f6feb; }

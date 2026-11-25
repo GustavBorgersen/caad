@@ -68,6 +68,7 @@ export type SketchModel = {
   dof?: number; conflicting: string[]; problem?: string; error?: { line?: number; message: string };
   c: string; statements: { line: number; end: number; text: string }[];
   plane?: string; name?: string; // from sketchOpen
+  params?: { name: string; value: number }[]; // from sketchOpen: the part's numeric parameters
 };
 export type SketchAction =
   | { op: "add"; kind: "point" | "line" | "polyline" | "circle" | "arc" | "rectangle" | "polygon"; args: unknown[]; close?: boolean; construction?: boolean }

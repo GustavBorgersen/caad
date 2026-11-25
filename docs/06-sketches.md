@@ -1,7 +1,7 @@
 # CAAD — Sketches and constraints
 
 **Date:** 2026-11-25
-**Status:** 06a built; 06b: the editor works, constraints and dimensions next (2026-11-25)
+**Status:** 06a built; 06b built except converting plain sketches (2026-11-25)
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1 ("Sketches v2"); builds on [05 — Feature model](05-feature-model.md)
 
 ## Problem
@@ -107,7 +107,7 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 | Phase | Contents |
 | :-- | :-- |
 | **06a — Constrained sketches in code** (done) | The `caad` module: entities, shapes, constraints, dimensions, regions; PlaneGCS at build in the page (WebAssembly bridge) and outside (PyPI or stored geometry); errors at the sketch feature; the sketcher writes the constrained form (its rectangles, circles and polygons as shapes, with their sizes as dimensions); outlines and `get_timeline` status; guide and `api_help`. Node tests against the page's build123d |
-| **06b — The sketch editor** | Done: sketch sessions in the kernel (`sketch_open` / `sketch_action`); reopening sketches by double-click, new sketches in the same editor; line (chains), rectangle, circle, arc and point tools; snapping to points and the origin, with horizontal/vertical inferred for new lines; dragging with live solving (only what has to move moves); delete; dimension labels; degrees of freedom. Next: constraint buttons and the dimension tool with expressions; converting plain sketches on first edit |
+| **06b — The sketch editor** | Done: sketch sessions in the kernel (`sketch_open` / `sketch_action`); reopening sketches by double-click, new sketches in the same editor; line (chains), rectangle, circle, arc and point tools; snapping to points and the origin, with horizontal/vertical inferred for new lines; dragging with live solving (only what has to move moves); constraint and dimension buttons for the selection (a distance goes from the first selected point to the second), a new dimension opening for its expression with the part's parameters offered, double-click a label to change it; constraints shown as glyphs (select, delete); conflicts in red; degrees of freedom. Next: converting plain sketches on first edit |
 | **06c — References and tools** | Use the part's edges in a sketch (projected, referred to by selector) and constrain to them; trim, sketch fillet, mirror, pattern; choosing individual regions to extrude |
 
 ## Decided

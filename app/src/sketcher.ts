@@ -25,14 +25,22 @@ const COLOR = {
   free: 0x1f6feb, constrained: 0x1d2228, construction: 0x8a96a3, selected: 0xe06000, hover: 0xf0a040,
   conflict: 0xc62828, preview: 0xe67e22, grid: 0xdfe4ea, axis: 0xb0bac5,
 };
+// Constraints shown as small glyphs in the view (not the ones built into shapes).
+const GLYPHS: Record<string, string> = {
+  horizontal: "H", vertical: "V", parallel: "∥", perpendicular: "⊥", tangent: "⌒", equal: "=",
+  coincident: "●", on: "∈", midpoint: "M", symmetric: "⇋", fix: "⚓",
+};
 const SNAP_PX = 10; // the cursor snaps to points this close
 const PICK_PX = 7; // lines and circles are picked this close
 const HV_DEGREES = 4; // a new line this close to horizontal or vertical gets that constraint
+const PULL = 1000; // while dragging, the cursor's pull weighs this much more than other points staying put (small enough an error to round away)
 
 type XY = [number, number];
 /** A cursor position, snapped to an existing point when close: `ref` is how code refers to that point. */
 type Snap = { at: XY; ref?: string; id?: string };
 export type SketchSession = { src: string; index: number; model: SketchModel };
+/** A constraint or dimension the selection allows. */
+type Option = { icon: string; title: string; action: SketchAction; dim: boolean };
 export type SketchHost = {
   kernel: Kernel;
   done: (src: string) => void; // Done: the part's source with the edited sketch
@@ -57,12 +65,23 @@ export class Sketcher implements PointerTool {
   private dragging: { id: string; from: XY; moved: boolean } | null = null;
   private busy = false; // a kernel action is running
   private solver: ReturnType<typeof loadSolver> | null = null;
-  private labels = document.createElement("div"); // dimension labels over the view
+  private labels = document.createElement("div"); // dimension labels and constraint glyphs over the view
+  private params: { name: string; value: number }[] = []; // the part's parameters, offered in dimensions
+  private editing: string | null = null; // the dimension whose expression is being typed
+  private input = document.createElement("input"); // that expression (kept while the labels redraw)
 
   constructor(private viewer: Viewer, private panel: HTMLElement, private host: SketchHost) {
     this.group.matrixAutoUpdate = false;
     this.group.renderOrder = 2;
     this.labels.className = "sketch-labels";
+    this.input.className = "dim-input";
+    this.input.spellcheck = false;
+    this.input.setAttribute("list", "sketch-params");
+    this.input.onkeydown = (e) => {
+      if (e.key === "Enter") this.commitDimension();
+      else if (e.key === "Escape") { this.editing = null; this.placeLabels(); }
+      e.stopPropagation();
+    };
     window.addEventListener("keydown", (e) => {
       if (!this.active || (e.target as HTMLElement).tagName === "INPUT") return;
       if (e.key === "Escape") this.escape();
@@ -87,6 +106,8 @@ export class Sketcher implements PointerTool {
     this.plane = plane;
     this.label = label;
     this.session = session;
+    this.params = session.model.params ?? [];
+    this.editing = null;
     this.tool = session.model.entities.some((e) => this.drawn(e)) ? "select" : "rect";
     this.pending = [];
     this.chain = null;
@@ -149,6 +170,12 @@ export class Sketcher implements PointerTool {
     return [p?.x ?? 0, p?.y ?? 0];
   }
 
+  /** The sketch's origin, selectable for dimensions and constraints (code makes it when first used). */
+  private get origin(): SketchEntity {
+    const ref = `${this.model.c}.origin`;
+    return this.model.entities.find((e) => e.ref === ref) ?? { id: "origin", kind: "point", ref, x: 0, y: 0, fixed: true, construction: true };
+  }
+
   /** Entities drawn in the view: not the origin and its axes (the grid's axes show them). */
   private drawn(e: SketchEntity): boolean {
     const c = this.model.c;
@@ -184,8 +211,8 @@ export class Sketcher implements PointerTool {
     const px = this.px();
     let best: string | null = null;
     let bestD = SNAP_PX * px;
-    for (const e of this.model.entities) {
-      if (e.kind !== "point" || !this.drawn(e)) continue;
+    for (const e of [...this.model.entities.filter((x) => this.drawn(x)), this.origin]) {
+      if (e.kind !== "point") continue;
       const d = Math.hypot(e.x! - at[0], e.y! - at[1]);
       if (d < bestD) { best = e.id; bestD = d; }
     }
@@ -274,19 +301,20 @@ export class Sketcher implements PointerTool {
   }
 
   /**
-   * Solve with the dragged point (or a line's points, or a circle's radius) pulled to the cursor. The pull is
-   * a real constraint; every other point gets a temporary one to stay where it is, which PlaneGCS satisfies
-   * only as far as the rest allows — so only what has to move moves.
+   * Solve with the dragged point (or a line's points, or a circle's radius) pulled to the cursor, and every other
+   * point asked to stay where it is. Both are temporary constraints, which PlaneGCS satisfies as far as the
+   * sketch's own constraints allow; the pull weighs 1000 times more. So the point follows the cursor in the
+   * directions it is free to move (a corner fixed in x still follows in y), and only what has to move moves.
    */
   private async solveDrag(id: string, from: XY, to: XY) {
     const e = this.entity(id);
     if (!e || !this.solver) return;
     const prims = this.model.primitives.map((p) => ({ ...p }));
     const pulled = new Set<string>();
-    const set = (pid: string, x: number, y: number, temporary: boolean) => prims.push(
-      { id: `drag_x_${pid}`, type: "coordinate_x", p_id: pid, x, temporary },
-      { id: `drag_y_${pid}`, type: "coordinate_y", p_id: pid, y, temporary });
-    const pull = (pid: string, x: number, y: number) => { pulled.add(pid); set(pid, x, y, false); };
+    const set = (pid: string, x: number, y: number, scale: number) => prims.push(
+      { id: `drag_x_${pid}`, type: "coordinate_x", p_id: pid, x, temporary: true, scale },
+      { id: `drag_y_${pid}`, type: "coordinate_y", p_id: pid, y, temporary: true, scale });
+    const pull = (pid: string, x: number, y: number) => { pulled.add(pid); set(pid, x, y, PULL); };
     const [dx, dy] = [to[0] - from[0], to[1] - from[1]];
     const start = this.dragStart ??= Object.fromEntries(this.model.entities.filter((p) => p.kind === "point").map((p) => [p.id, [p.x!, p.y!] as XY]));
     if (e.kind === "point") pull(e.id, to[0], to[1]);
@@ -294,14 +322,14 @@ export class Sketcher implements PointerTool {
     else if (e.kind === "circle" || e.kind === "arc") {
       const c = this.xy(e.c);
       prims.push({ id: "drag_r", type: e.kind === "circle" ? "circle_radius" : "arc_radius", [e.kind === "circle" ? "c_id" : "a_id"]: e.id,
-        radius: Math.max(1e-3, Math.hypot(to[0] - c[0], to[1] - c[1])) });
+        radius: Math.max(1e-3, Math.hypot(to[0] - c[0], to[1] - c[1])), temporary: true, scale: PULL });
     }
     // Points of the drawn geometry stay, and points on their own; not ones derived from others (a rectangle's
     // centre must follow its corners: a stay there would hold the other corner back).
     const ofCurves = new Set(this.model.entities.flatMap((x) => [x.p1, x.p2, x.c, x.s, x.e]).filter(Boolean));
     const constrained = new Set(this.model.constraints.flatMap((c) => c.involves));
     for (const p of this.model.entities) {
-      if (p.kind === "point" && !p.fixed && !pulled.has(p.id) && (ofCurves.has(p.id) || !constrained.has(p.id))) set(p.id, start[p.id][0], start[p.id][1], true);
+      if (p.kind === "point" && !p.fixed && !pulled.has(p.id) && (ofCurves.has(p.id) || !constrained.has(p.id))) set(p.id, start[p.id][0], start[p.id][1], 1);
     }
     const solver = await this.solver;
     const r = JSON.parse(solver.solve(JSON.stringify(prims)));
@@ -396,8 +424,83 @@ export class Sketcher implements PointerTool {
     this.redraw();
   }
 
+  /**
+   * The constraints and dimensions the selection allows, in the order things were selected (a distance goes
+   * from the first point to the second); all selected entities need an expression in code.
+   */
+  private options(): Option[] {
+    const origin = this.origin;
+    const sel = [...this.selected].map((id) => (id === origin.id ? origin : this.entity(id))).filter((e): e is SketchEntity => !!e);
+    if (!sel.length || sel.some((e) => !e.ref)) return [];
+    const of = (k: string) => sel.filter((e) => e.kind === k);
+    const [P, L, C, A] = [of("point"), of("line"), of("circle"), of("arc")];
+    const n = sel.length, round = [...C, ...A];
+    const out: Option[] = [];
+    const add = (icon: string, title: string, kind: string, es: SketchEntity[], value?: number) =>
+      out.push({ icon, title, dim: value !== undefined, action: { op: "constrain", kind, refs: es.map((e) => e.ref!), value: value === undefined ? undefined : num(value) } });
+    const xy = (e: SketchEntity): XY => [e.x!, e.y!];
+    const ends = (l: SketchEntity): [XY, XY] => [this.xy(l.p1), this.xy(l.p2)];
+    if (P.length === 2 && n === 2) add("●", "Coincident", "coincident", P);
+    if ((L.length && n === L.length) || (P.length === 2 && n === 2)) { add("H", "Horizontal", "horizontal", sel); add("V", "Vertical", "vertical", sel); }
+    if (L.length === 2 && n === 2) { add("∥", "Parallel", "parallel", L); add("⊥", "Perpendicular", "perpendicular", L); }
+    if ((L.length >= 2 && n === L.length) || (round.length >= 2 && n === round.length)) add("=", "Equal", "equal", sel);
+    if (n === 2 && round.length >= 1 && !P.length) add("⌒", "Tangent", "tangent", sel);
+    if (P.length === 1 && n === 2 && L.length + round.length === 1) add("∈", "Point on it", "on", [P[0], ...L, ...round]);
+    if (P.length === 1 && L.length === 1 && n === 2) add("M", "Midpoint", "midpoint", [P[0], L[0]]);
+    if (P.length === 2 && L.length === 1 && n === 3) add("⇋", "Symmetric about the line", "symmetric", [...P, L[0]]);
+    if (P.length && n === P.length) add("⚓", "Fix where they are", "fix", P);
+    // Dimensions start at what they measure now.
+    if (L.length === 1 && n === 1) { const [a, b] = ends(L[0]); add("⟷", "Length", "length", L, Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    if (P.length === 2 && n === 2) {
+      const [a, b] = P.map(xy);
+      add("⟷", "Distance", "distance", P, Math.hypot(b[0] - a[0], b[1] - a[1]));
+      add("↔", "Horizontal distance", "hdistance", P, b[0] - a[0]);
+      add("↕", "Vertical distance", "vdistance", P, b[1] - a[1]);
+    }
+    if (P.length === 1 && L.length === 1 && n === 2) {
+      const [a, b] = ends(L[0]);
+      const p = xy(P[0]);
+      add("⟷", "Distance to the line", "distance", [P[0], L[0]], Math.abs((p[0] - a[0]) * (b[1] - a[1]) - (p[1] - a[1]) * (b[0] - a[0])) / (Math.hypot(b[0] - a[0], b[1] - a[1]) || 1));
+    }
+    if (L.length === 2 && n === 2) {
+      const [d1, d2] = L.map((l) => { const [a, b] = ends(l); return [b[0] - a[0], b[1] - a[1]]; });
+      add("∠", "Angle (counter-clockwise from the first line)", "angle", L, Math.atan2(d1[0] * d2[1] - d1[1] * d2[0], d1[0] * d2[0] + d1[1] * d2[1]) * 180 / Math.PI);
+    }
+    if (C.length === 1 && n === 1) add("⌀", "Diameter", "diameter", C, 2 * C[0].r!);
+    if (A.length === 1 && n === 1) add("R", "Radius", "radius", A, A[0].r!);
+    return out;
+  }
+
+  private async apply(o: Option) {
+    const before = new Set(this.model.constraints.map((c) => c.id));
+    this.selected.clear();
+    await this.act([o.action]);
+    const added = this.model.constraints.find((c) => !before.has(c.id) && c.dim);
+    if (o.dim && added) this.editDimension(added.id); // type its expression right away
+  }
+
+  /** Type a dimension's expression (parameters are offered); Enter applies it, Esc leaves it. */
+  editDimension(id: string) {
+    const c = this.model.constraints.find((x) => x.id === id);
+    if (!c?.dim) return;
+    this.editing = id;
+    this.input.value = c.dim.expr;
+    this.placeLabels();
+    this.input.focus();
+    this.input.select();
+  }
+
+  private async commitDimension() {
+    const id = this.editing;
+    const expr = this.input.value.trim();
+    this.editing = null;
+    const c = this.model.constraints.find((x) => x.id === id);
+    if (!id || !c?.dim || !expr || expr === c.dim.expr) { this.placeLabels(); return; }
+    await this.act([{ op: "dimension", constraint: id, expr }]);
+  }
+
   private deleteSelected() {
-    const ents = this.model.entities.map((e) => e.id).filter((id) => this.selected.has(id));
+    const ents = this.model.entities.filter((e) => !e.fixed).map((e) => e.id).filter((id) => this.selected.has(id));
     const cons = this.model.constraints.map((c) => c.id).filter((id) => this.selected.has(id));
     this.selected.clear();
     this.act([{ op: "delete", entities: ents, constraints: cons }]);
@@ -448,6 +551,9 @@ export class Sketcher implements PointerTool {
         colors.push(...new THREE.Color(this.color(e)).toArray());
       } else this.group.add(this.polyline(this.outline(e), this.color(e), e.construction));
     }
+    const o = this.origin; // drawn as a dot: selectable for dimensions
+    points.push(0, 0, 0);
+    colors.push(...new THREE.Color(this.selected.has(o.id) ? COLOR.selected : this.hover === o.id ? COLOR.hover : COLOR.constrained).toArray());
     const s = this.cursor;
     if (s && this.tool !== "select") {
       const from = this.chain ? this.chainAt() : this.pending[0]?.at;
@@ -478,23 +584,63 @@ export class Sketcher implements PointerTool {
     this.viewer.render();
   }
 
-  /** Dimension labels: the expression, and its value when that differs. */
+  /**
+   * Over the view: dimension labels (the expression, and its value when that differs; click selects, double-click
+   * edits) and a glyph per constraint statement (H, V, ∥…; click selects it, Delete removes it).
+   */
   private placeLabels() {
     if (!this.active) return;
-    this.labels.replaceChildren();
+    const list = document.createElement("datalist");
+    list.id = "sketch-params";
+    for (const p of this.params) list.append(Object.assign(document.createElement("option"), { value: p.name, label: `= ${num(p.value)}` }));
+    this.labels.replaceChildren(list);
+    const conflicting = new Set(this.model.conflicting);
+    const screen = (ids: string[], dy = 0, dx = 0) => {
+      const a = this.anchor(ids);
+      if (!a) return null;
+      const p = this.viewer.toScreen(new THREE.Vector3(a[0], a[1], 0).applyMatrix4(this.group.matrix));
+      return `translate(${p.x + dx}px, ${p.y + dy}px) translate(-50%, -50%)`;
+    };
+    const glyphs = new Map<number, typeof this.model.constraints>();
     for (const c of this.model.constraints) {
-      if (!c.dim) continue;
-      const anchor = this.anchor(c.involves);
-      if (!anchor) continue;
-      const world = new THREE.Vector3(anchor[0], anchor[1], 0).applyMatrix4(this.group.matrix);
-      const { x, y } = this.viewer.toScreen(world);
+      if (c.dim) {
+        // A horizontal and a vertical distance between the same points would overlap: nudge them apart.
+        const at = screen(c.involves, c.method === "hdistance" ? -11 : 0, c.method === "vdistance" ? 22 : 0);
+        if (!at) continue;
+        if (this.editing === c.id) {
+          this.input.style.transform = at;
+          this.labels.append(this.input);
+          continue;
+        }
+        const el = document.createElement("div");
+        el.className = `dim${this.selected.has(c.id) ? " selected" : ""}${conflicting.has(c.id) ? " conflict" : ""}`;
+        const value = num(c.dim.value);
+        el.textContent = c.dim.expr === value ? value : `${c.dim.expr} = ${value}`;
+        el.title = `${c.text} — double-click to change`;
+        el.style.transform = at;
+        el.onclick = (e) => this.select(c.id, e.shiftKey);
+        el.ondblclick = () => this.editDimension(c.id);
+        this.labels.append(el);
+      } else if (!c.builtin && c.method && GLYPHS[c.method] && c.stmt !== undefined) {
+        glyphs.set(c.stmt, [...(glyphs.get(c.stmt) ?? []), c]);
+      }
+    }
+    for (const group of glyphs.values()) {
+      const c = group[0];
+      const at = screen(c.involves, 16);
+      if (!at) continue;
+      const ids = group.map((g) => g.id);
       const el = document.createElement("div");
-      el.className = `dim${this.selected.has(c.id) ? " selected" : ""}${this.model.conflicting.includes(c.id) ? " conflict" : ""}`;
-      const value = num(c.dim.value);
-      el.textContent = c.dim.expr === value ? value : `${c.dim.expr} = ${value}`;
+      el.className = `glyph${ids.some((i) => this.selected.has(i)) ? " selected" : ""}${ids.some((i) => conflicting.has(i)) ? " conflict" : ""}`;
+      el.textContent = GLYPHS[c.method!];
       el.title = c.text;
-      el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
-      el.onclick = () => this.select(c.id, false);
+      el.style.transform = at;
+      el.onclick = (e) => {
+        if (!e.shiftKey) this.selected.clear();
+        for (const i of ids) this.selected.add(i);
+        this.renderPanel();
+        this.redraw();
+      };
       this.labels.append(el);
     }
   }
@@ -564,7 +710,14 @@ export class Sketcher implements PointerTool {
     actions.append(done, cancel);
     row.append(actions);
     const sub = el("div", { className: "sub" });
-    sub.append(el("span", { className: "hint muted", textContent: HINTS[this.tool] }));
+    const options = this.options();
+    sub.append(el("span", { className: "hint muted", textContent: this.selected.size ? (options.length ? "Constrain or dimension:" : "") : HINTS[this.tool] }));
+    for (const o of options) {
+      const b = el<HTMLButtonElement>("button", { textContent: o.icon, title: o.title, className: o.dim ? "option dim" : "option" });
+      b.dataset.option = o.action.op === "constrain" ? o.action.kind : "";
+      b.onclick = () => this.apply(o);
+      sub.append(b);
+    }
     if (this.selected.size) {
       const del = el("button", { textContent: `Delete ${this.selected.size}`, title: "Delete the selection and what depends on it (Delete)" });
       del.onclick = () => this.deleteSelected();
