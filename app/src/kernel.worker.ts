@@ -90,6 +90,7 @@ function handle(req: RunRequest) {
     transfer.push(m.positions.buffer, m.indices.buffer);
     for (const e of m.edges) { e.points = new Float32Array(e.points); transfer.push(e.points.buffer); }
   }
+  for (const s of result.sketches ?? []) for (const e of s.edges) { e.points = new Float32Array(e.points); transfer.push(e.points.buffer); }
   postMessage({ type: "result", id: req.id, gen, result }, transfer);
 }
 

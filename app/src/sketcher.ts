@@ -1,7 +1,7 @@
-// Sketch mode: draw rectangles, circles and polygons on a plane or flat face, edit their dimensions,
-// then extrude or cut. The result is plain build123d code (see sketch-code.ts).
+// Sketch mode: draw rectangles, circles and polygons on a plane or flat face and edit their dimensions.
+// Done adds a named sketch to the part (see sketch-code.ts); what to do with it is a separate feature.
 import * as THREE from "three";
-import { num, type Operation, type Shape } from "./sketch-code";
+import { num, type Shape } from "./sketch-code";
 import type { PointerTool, SketchPlane, Viewer } from "./viewer";
 
 type Tool = "rect" | "circle" | "poly";
@@ -13,7 +13,7 @@ const HINTS: Record<Tool, string> = {
 const COLOR = { shape: 0xd35400, preview: 0xe67e22, grid: 0xc9d1d9, axis: 0x9aa5b1 };
 const STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
 
-export type SketchDone = (shapes: Shape[], op: Operation) => void;
+export type SketchDone = (shapes: Shape[]) => void;
 
 export class Sketcher implements PointerTool {
   private group = new THREE.Group();
@@ -24,7 +24,6 @@ export class Sketcher implements PointerTool {
   private cursor: [number, number] | null = null;
   private plane!: SketchPlane;
   private step = 1;
-  private op: Operation = { op: "extrude", amount: 10, both: false, through: false };
   private onDone: SketchDone = () => {};
   private onCancel: () => void = () => {};
   active = false;
@@ -48,7 +47,6 @@ export class Sketcher implements PointerTool {
     this.onCancel = onCancel;
     this.shapes = [];
     this.pending = [];
-    this.op = { op: "extrude", amount: 10, both: false, through: false }; // every sketch starts as a plain extrude
     this.active = true;
     const [x, y, z, o] = [plane.x, plane.y, plane.z, plane.origin].map((v) => new THREE.Vector3(...v));
     this.group.matrix.makeBasis(x, y, z).setPosition(o);
@@ -192,16 +190,8 @@ export class Sketcher implements PointerTool {
       l.append(i);
       return l;
     };
-    const check = (label: string, key: "both" | "through") => {
-      const l = el("label");
-      const c = el<HTMLInputElement>("input", { type: "checkbox", checked: this.op[key] });
-      c.onchange = () => { this.op[key] = c.checked; this.renderPanel(); };
-      l.append(c, " " + label);
-      return l;
-    };
-    const sep = () => el("span", { className: "sep" });
 
-    // Row 1: where, tools, operation, actions
+    // Row 1: where, tools, actions
     const row = el("div", { className: "row" });
     const title = el("b", { textContent: "Sketch", title: `Sketching on ${this.label}` });
     const tools = el("span", { className: "group tools" });
@@ -213,21 +203,9 @@ export class Sketcher implements PointerTool {
       tools.append(b);
     }
     row.append(tools);
-    const op = el("span", { className: "group op" });
-    op.append(sep());
-    for (const [value, label] of [["extrude", "Extrude"], ["cut", "Cut"]] as const) {
-      const b = el("button", { textContent: label });
-      b.classList.toggle("on", this.op.op === value);
-      b.onclick = () => { this.op.op = value; this.renderPanel(); };
-      op.append(b);
-    }
-    if (!(this.op.op === "cut" && this.op.through)) op.append(field("depth", this.op.amount, (v) => (this.op.amount = v), 0));
-    op.append(check("both ways", "both"));
-    if (this.op.op === "cut") op.append(check("through all", "through"));
-    row.append(op);
     const actions = el("span", { className: "group actions" });
-    const apply = el("button", { textContent: this.op.op === "cut" ? "Cut" : "Extrude", className: "primary", disabled: !this.shapes.length, title: "Add the sketch and the operation to the part" });
-    apply.onclick = () => { const shapes = this.shapes; const o = { ...this.op }; this.stop(); this.onDone(shapes, o); };
+    const apply = el("button", { textContent: "Done", className: "primary", disabled: !this.shapes.length, title: "Close the sketch: add it to the part (then extrude or cut it with + Extrude)" });
+    apply.onclick = () => { const shapes = this.shapes; this.stop(); this.onDone(shapes); };
     const cancel = el("button", { textContent: "Cancel", title: "Leave the sketch (Esc)" });
     cancel.onclick = () => this.cancel();
     actions.append(apply, cancel);

@@ -134,8 +134,8 @@ body.editing-feature #timeline, body.editing-feature #right, body.editing-featur
 .feature:hover .del { visibility: visible; }
 .feature .del:hover { color: var(--error); background: none !important; }
 body.left-compact .feature .del { display: none; }
-.rollback-bar { display: flex; align-items: center; gap: 6px; }
-.rollback-bar > span:first-child { flex: 1; cursor: pointer; }
+.rollback-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; white-space: normal !important; }
+.rollback-bar > span:first-child { flex: 1; cursor: pointer; white-space: nowrap; }
 .rollback-bar .add { display: inline-flex; gap: 3px; }
 .rollback-bar .add button { padding: 0 5px; font-size: 11px; }
 body.left-compact .rollback-bar .add { display: none; }

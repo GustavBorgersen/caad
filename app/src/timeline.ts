@@ -15,7 +15,7 @@ export type TimelineHandlers = {
   hover: (feature: Feature | null) => void;
   edit: (feature: Feature) => void;
   remove: (feature: Feature) => void;
-  add: (kind: "fillet" | "chamfer") => void; // a new feature at the rollback bar
+  add: (kind: "extrude" | "fillet" | "chamfer") => void; // a new feature at the rollback bar
 };
 
 export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: TimelineHandlers) {
@@ -67,10 +67,10 @@ function bar(toEnd: (() => void) | null, h: TimelineHandlers) {
   if (toEnd) text.onclick = toEnd;
   const add = document.createElement("span");
   add.className = "add";
-  for (const kind of ["fillet", "chamfer"] as const) {
+  for (const kind of ["extrude", "fillet", "chamfer"] as const) {
     const b = document.createElement("button");
     b.textContent = `+ ${kind[0].toUpperCase()}${kind.slice(1)}`;
-    b.title = `Add a ${kind} here, on the edges selected in the view`;
+    b.title = kind === "extrude" ? "Extrude or cut the latest sketch, here" : `Add a ${kind} here, on the edges selected in the view`;
     b.onclick = () => h.add(kind);
     add.append(b);
   }

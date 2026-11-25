@@ -5,7 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
-import type { Mesh } from "./kernel";
+import type { Mesh, SketchOutline } from "./kernel";
 
 export type SketchPlane = { origin: number[]; x: number[]; y: number[]; z: number[] };
 
@@ -27,6 +27,7 @@ const COLORS = {
   edgeSelected: new THREE.Color(0xe06000),
   edgeAgent: new THREE.Color(0x1a7fd0),
 };
+const SKETCH_COLOR = 0x1f6feb; // outlines of sketches no feature uses yet
 const EDGE_PICK_PX = 6;
 const MARKED_EDGE_PX = 3; // selected/hovered/highlighted edges are drawn this wide (WebGL lines are always 1 px)
 
@@ -133,6 +134,34 @@ export class Viewer {
 
   /** Highlight geometry on behalf of the agent (shown in blue until the user clicks). */
   highlight(picks: Pick[]) { this.agent = picks; this.recolor(); this.render(); }
+
+  private sketchLines: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | null = null;
+
+  /** Outlines of the sketches no feature uses yet. `fit` frames them (a part without a solid yet). */
+  setSketches(sketches: SketchOutline[], fit: boolean) {
+    if (this.sketchLines) {
+      this.scene.remove(this.sketchLines);
+      this.sketchLines.geometry.dispose();
+      this.sketchLines.material.dispose();
+      this.sketchLines = null;
+    }
+    const segs: number[] = [];
+    for (const s of sketches) for (const e of s.edges) for (let k = 0; k + 5 < e.points.length; k += 3) segs.push(...e.points.subarray(k, k + 6));
+    if (segs.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(segs), 3));
+      // Drawn on top of the part: a sketch often lies on or inside it.
+      this.sketchLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: SKETCH_COLOR, depthTest: false }));
+      this.sketchLines.renderOrder = 3;
+      this.scene.add(this.sketchLines);
+      if (fit) {
+        geo.computeBoundingBox();
+        const { min, max } = geo.boundingBox!;
+        this.fit([min.x, min.y, min.z, max.x, max.y, max.z]);
+      }
+    }
+    this.render();
+  }
 
   fit(bbox: number[]) {
     const [x0, y0, z0, x1, y1, z1] = bbox;

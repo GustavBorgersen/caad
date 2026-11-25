@@ -68,7 +68,8 @@ r = call("read_feature", bracket, 1);
 check(field(r, "amount").expr === "thickness" && field(r, "amount").value === "8", "extrude depth: 'thickness' = 8");
 check(field(r, "to_extrude").expr == null && JSON.stringify(r.pending) === '["base"]', "extrude without a sketch shows the pending one");
 check(field(r, "mode").default === "Mode.ADD" && field(r, "both").default === "False" && field(r, "taper").default === "0.0", "defaults from the signature");
-check(field(r, "dir").extra && !field(r, "amount").extra, "arguments the type doesn't list are extra fields");
+check(field(r, "clean").extra && !field(r, "amount").extra, "arguments the type doesn't list are extra fields");
+check(field(r, "dir").type === "flip" && field(r, "dir").of === "to_extrude" && field(r, "dir").template === "-{}.faces()[0].normal_at()", "Opposite direction flips the sketch's normal");
 r = call("read_feature", example("pump_body.py"), 0);
 check(r.tier === "call" && ["radius", "height", "arc_size", "rotation", "align", "mode"].every((n) => field(r, n)) && field(r, "radius").required && !field(r, "mode").required,
   "call feature: generic fields from Cylinder's signature");
@@ -153,8 +154,8 @@ let built = call("run", ins.src, "part.py");
 check(built.ok && Math.abs(built.summary.volume - 4000) < 1e-6, `the inserted sketch + extrude build (volume ${built.summary?.volume})`);
 ins = call("insert_feature", ins.src, null, "sketch", { plane: "part.faces().sort_by(Axis.Z)[-1]", body: ["Circle(3)"] });
 check(ins.name === "sk2" && ins.index === 2, "the next sketch is sk2, at the end");
-ins = call("insert_feature", ins.src, 2, "extrude", { to_extrude: "sk2.sketch", until: "Until.LAST", dir: "(0, 0, -1)", mode: "Mode.SUBTRACT" });
-check(ins.src.includes("extrude(sk2.sketch, until=Until.LAST, mode=Mode.SUBTRACT, dir=(0, 0, -1))"), "keywords in the dialog's order, extra ones after", ins.src.split("\n").at(-2));
+ins = call("insert_feature", ins.src, 2, "extrude", { to_extrude: "sk2.sketch", until: "Until.LAST", dir: "-sk2.sketch.faces()[0].normal_at()", mode: "Mode.SUBTRACT", clean: "False" });
+check(ins.src.includes("extrude(sk2.sketch, until=Until.LAST, dir=-sk2.sketch.faces()[0].normal_at(), mode=Mode.SUBTRACT, clean=False)"), "keywords in the dialog's order, extra ones after", ins.src.split("\n").at(-2));
 built = call("run", ins.src, "part.py");
 check(built.ok && Math.abs(built.summary.volume - (4000 - Math.PI * 9 * 5)) < 0.01, `cut through all from a face, into the part (volume ${built.summary?.volume?.toFixed(2)})`);
 let ins2 = call("insert_feature", bracket, 2, "fillet", { objects: "bracket.edges().filter_by(Axis.Z)", radius: "1" });
@@ -167,6 +168,19 @@ check(/no argument/.test(tryCall("insert_feature", bracket, null, "fillet", { ob
 r = call("read_feature", ins.src, 3);
 check(JSON.stringify(r.sketches) === '["sk1","sk2"]', `an extrude can use the named sketches before it: ${JSON.stringify(r.sketches)}`);
 check(JSON.stringify(call("read_feature", bracket, 3).sketches) === "[]", "implicit sketches aren't offered by name");
+
+// --- Sketch outlines for the view: named sketches no feature uses yet ---
+const sketchOnly = call("insert_feature", empty, null, "sketch", { plane: "Plane.XZ", body: ["Circle(4)"] }).src;
+let run1 = call("run", sketchOnly, "part.py");
+check(run1.ok && !run1.mesh && run1.sketches.length === 1 && run1.sketches[0].name === "sk1" && run1.sketches[0].edges.length === 1,
+  "a part with only a sketch: no solid, one outline");
+const ys = run1.sketches[0].edges[0].points.filter((_, i) => i % 3 === 1);
+check(ys.every((y) => Math.abs(y) < 1e-9) && run1.sketches[0].edges[0].points.length > 30, "the outline lies in its plane (XZ: y = 0), as a polyline");
+run1 = call("run", named, "part.py");
+check(run1.sketches.length === 0, "used sketches aren't drawn (one by name, one pending)");
+run1 = call("run", named, "part.py", 1);
+check(JSON.stringify(run1.sketches.map((x) => x.name)) === '["sk1","loose"]', "rolled back before their extrudes, both are drawn again");
+check(call("run", bracket, "bracket.py").sketches.length === 0 && call("run", bracket, "bracket.py", 0).sketches[0]?.name === "base", "the bracket's base sketch shows when rolled back to it");
 
 // --- Deleting features ---
 let del = tryCall("delete_feature", ins.src, 0);

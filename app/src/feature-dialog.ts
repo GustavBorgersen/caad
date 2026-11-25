@@ -49,6 +49,12 @@ export class FeatureDialog {
     this.schedule(0);
   }
 
+  /** A flip field's expression for the current value of the field it flips, or null without one. */
+  private flipped(f: FeatureField): string | null {
+    const of = this.exprs.get(f.of!) ?? null;
+    return of ? f.template!.replace("{}", of) : null;
+  }
+
   private visible(f: FeatureField): boolean {
     const own = this.detail!.tier === "type" ? !f.extra : f.required;
     if (!own && this.exprs.get(f.name) == null && !this.added.has(f.name)) return false;
@@ -72,11 +78,15 @@ export class FeatureDialog {
     this.el.querySelectorAll<HTMLElement>("[data-field]").forEach((row) => {
       const name = row.dataset.field!;
       const input = row.querySelector<HTMLInputElement | HTMLSelectElement>("input, select")!;
+      const field = fields.find((f) => f.name === name)!;
       const read = () => input instanceof HTMLInputElement && input.type === "checkbox"
-        ? (input.checked ? "True" : null)
+        ? (input.checked ? (field.type === "flip" ? this.flipped(field) : "True") : null)
         : (input.value.trim() || null);
       input.addEventListener(input instanceof HTMLSelectElement || input.type === "checkbox" ? "change" : "input", () => {
+        // A flip of this field follows it (another sketch: flip that one instead).
+        const flips = fields.filter((g) => g.type === "flip" && g.of === name && this.exprs.get(g.name) != null && this.exprs.get(g.name) === this.flipped(g));
         this.exprs.set(name, read());
+        for (const g of flips) this.exprs.set(g.name, this.flipped(g));
         if (input instanceof HTMLSelectElement || input.type === "checkbox") this.render(); // may show or hide fields
         this.schedule();
       });
@@ -117,6 +127,8 @@ export class FeatureDialog {
       input = `<select>${opts.map((o) => `<option value="${esc(o.expr ?? "")}"${(o.expr ?? null) === expr ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
     } else if (f.type === "bool" && (expr === null || expr === "True" || expr === "False")) {
       input = `<input type="checkbox"${expr === "True" ? " checked" : ""}>`;
+    } else if (f.type === "flip" && (expr === null || expr === this.flipped(f))) {
+      input = `<input type="checkbox"${expr !== null ? " checked" : ""}${this.flipped(f) ? "" : ' disabled title="Choose a sketch first"'}>`;
     } else {
       const placeholder = f.type === "sketch" && this.detail!.pending.length ? `pending: ${this.detail!.pending.join(", ")}`
         : f.required ? "required" : f.default ?? "";
@@ -124,7 +136,7 @@ export class FeatureDialog {
       if (f.type === "edges" || f.type === "faces") input += `<button class="use" title="Use the ${f.type} selected in the view">Use selection</button>`;
     }
     const value = changed ? "" : f.error ? `<span class="value error" title="${esc(f.error)}">${esc(f.error)}</span>`
-      : f.value !== undefined && f.type !== "bool" && f.type !== "choice" && f.value !== expr ? `<span class="value">= ${esc(f.value)}</span>` : "";
+      : f.value !== undefined && !["bool", "choice", "flip"].includes(f.type) && f.value !== expr ? `<span class="value">= ${esc(f.value)}</span>` : "";
     return `<div class="row" data-field="${esc(f.name)}" data-type="${f.type}"><label title="${esc(f.name)}">${esc(f.label)}</label><span class="input">${input}</span>${value}</div>`;
   }
 
@@ -132,7 +144,8 @@ export class FeatureDialog {
   private changes(): Record<string, string | null> {
     const out: Record<string, string | null> = {};
     for (const f of this.detail!.fields!) {
-      const now = this.exprs.get(f.name) ?? null;
+      const shown = Object.entries(f.show_if ?? {}).every(([k, v]) => (this.exprs.get(k) ?? null) === (v ?? null));
+      const now = shown ? this.exprs.get(f.name) ?? null : null; // hidden by another field (depth for through all): not written
       if (now !== (f.expr ?? null)) out[f.name] = now;
     }
     return out;
@@ -160,7 +173,7 @@ export class FeatureDialog {
     if (seq !== this.seq || !this.detail) return;
     this.el.querySelectorAll<HTMLElement>("[data-field]").forEach((row) => {
       const v = values[row.dataset.field!];
-      if (!v || row.dataset.type === "bool" || row.dataset.type === "choice") return;
+      if (!v || ["bool", "choice", "flip"].includes(row.dataset.type!)) return;
       row.querySelector(".value")?.remove();
       const span = document.createElement("span");
       span.className = `value${v.error ? " error" : ""}`;

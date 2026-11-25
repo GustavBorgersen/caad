@@ -6,7 +6,7 @@ import { FeatureDialog } from "./feature-dialog";
 import { Kernel, type BuildResult, type Feature, type Kind, type SelectInfo } from "./kernel";
 import { canOpenFolders, examples, lastFolder, openFolder, reopen, type Project } from "./project";
 import { renderSelection } from "./selection";
-import { extrudeArgs, newPartSource, sketchBody } from "./sketch-code";
+import { newPartSource, sketchBody } from "./sketch-code";
 import { Sketcher } from "./sketcher";
 import { renderTimeline } from "./timeline";
 import { makeTools } from "./tools";
@@ -53,7 +53,8 @@ async function rebuild(): Promise<BuildResult | null> {
   if (!r) return null; // replaced by a newer build
   state.result = r;
   viewer.setMesh(r.mesh, state.fitNext && !!r.mesh);
-  if (r.mesh) state.fitNext = false;
+  viewer.setSketches(r.sketches, state.fitNext && !r.mesh); // a part with only sketches: frame those
+  if (r.mesh || r.sketches.length) state.fitNext = false;
   restoreSelection(r.gen);
   renderTimeline($("timeline"), r, {
     rollback: (upto) => { if (!featureDialog.open) { state.upto = upto; rebuild(); } },
@@ -175,9 +176,10 @@ const featureDialog = new FeatureDialog($("feature-panel"), {
   source: () => editor.text,
   async preview(src, upto) {
     const r = await kernel.build(src, state.path!, upto);
-    if (!r) return null;
-    state.result = r; // what the view shows, so picking edges for the dialog works
+    if (!r || !featureDialog.open) return null; // replaced by a newer build, or the dialog closed meanwhile
+    state.result = { ...r, preview: true }; // what the view shows, so picking edges for the dialog works
     viewer.setMesh(r.mesh, false);
+    viewer.setSketches(r.sketches, false);
     return r.error?.message ?? null;
   },
   async apply(src) {
@@ -223,16 +225,30 @@ async function openDialog(src: string, index: number) {
   featureDialog.show(detail, src === editor.text ? undefined : src);
 }
 
-/** "+ Fillet" / "+ Chamfer" at the rollback bar: a new feature on the selected edges, in its dialog. */
-async function addFeature(kind: "fillet" | "chamfer") {
+/**
+ * "+ Extrude" / "+ Fillet" / "+ Chamfer" at the rollback bar: a new feature in its dialog. An extrude uses the
+ * latest sketch before the bar (preferring one nothing uses yet), fillets and chamfers the selected edges.
+ */
+async function addFeature(kind: "extrude" | "fillet" | "chamfer") {
   if (featureDialog.open || sketcher.active || !state.path) return;
-  const edges = selected("edge");
-  if (!edges) { status(`Select the edges to ${kind} in the view first (Shift+click for more).`); return; }
-  if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
-  const last = (state.result?.timeline?.features.length ?? 0) - 1;
+  const feats = state.result?.timeline?.features ?? [];
+  const last = feats.length - 1;
   const after = state.upto != null && state.upto < last ? state.upto : null;
+  let params: Record<string, string>;
+  if (kind === "extrude") {
+    const sketches = feats.filter((f) => f.kind === "sketch" && f.name && !f.implicit && f.index <= (after ?? last));
+    const unused = sketches.filter((s) => !feats.some((f) => f.index > s.index && f.index <= (after ?? last) && f.refs.includes(s.name!)));
+    const sketch = (unused.length ? unused : sketches).at(-1);
+    if (!sketch) { status("Draw a sketch first (✎ Sketch), then extrude or cut it."); return; }
+    params = { to_extrude: `${sketch.name}.sketch`, amount: "10" };
+  } else {
+    const edges = selected("edge");
+    if (!edges) { status(`Select the edges to ${kind} in the view first (Shift+click for more).`); return; }
+    params = { objects: edges, [kind === "fillet" ? "radius" : "length"]: "1" };
+  }
+  if (!(await kernel.whenReady(1000))) { status("The CAD kernel is still loading."); return; }
   let ins;
-  try { ins = await kernel.insertFeature(editor.text, after, kind, { objects: edges, [kind === "fillet" ? "radius" : "length"]: "1" }); }
+  try { ins = await kernel.insertFeature(editor.text, after, kind, params); }
   catch (e) { status((e as Error).message); return; }
   editReturn = { ok: after === null ? null : after + 1, cancel: state.upto };
   await openDialog(ins.src, ins.index);
@@ -361,22 +377,18 @@ async function startSketch(planeExpr: string, label: string) {
   const upto = state.upto, path = state.path!;
   $("plane-choice").hidden = true;
   document.body.classList.add("sketching");
-  const onFace = !/^Plane\.\w+$/.test(planeExpr);
-  sketcher.start(plane, label, size, async (shapes, op) => {
+  sketcher.start(plane, label, size, async (shapes) => {
     document.body.classList.remove("sketching");
     const last = (state.result?.timeline?.features.length ?? 0) - 1;
-    let src;
-    try { // a named sketch, then the extrude or cut that uses it (docs/05-feature-model.md)
-      const sk = await kernel.insertFeature(editor.text, upto, "sketch", { plane: planeExpr, body: sketchBody(shapes) });
-      const into = onFace ? plane.z.map((v) => -v) : null;
-      src = (await kernel.insertFeature(sk.src, sk.index, "extrude", { to_extrude: `${sk.name}.sketch`, ...extrudeArgs(op, into) })).src;
-    } catch (e) { status(`Couldn't add the sketch: ${(e as Error).message}`); return; }
-    // Stay rolled back if we were, but include the two new features.
-    state.upto = upto != null && upto < last ? upto + 2 : null;
+    let sk;
+    try { sk = await kernel.insertFeature(editor.text, upto, "sketch", { plane: planeExpr, body: sketchBody(shapes) }); }
+    catch (e) { status(`Couldn't add the sketch: ${(e as Error).message}`); return; }
+    state.upto = upto != null && upto < last ? upto + 1 : null; // stay rolled back if we were, with the sketch
     viewer.setSelection([]);
     state.selection = [];
-    const res = await applyCode(path, src);
-    if (res && !res.ok) status(`The new feature failed: ${res.error?.message ?? ""}`);
+    const res = await applyCode(path, sk.src);
+    if (res && !res.ok) status(`The sketch failed: ${res.error?.message ?? ""}`);
+    else status(`Added sketch ${sk.name}. Extrude or cut it with + Extrude in the timeline.`);
   }, () => { document.body.classList.remove("sketching"); });
 }
 

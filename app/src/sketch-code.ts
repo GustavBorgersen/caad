@@ -1,11 +1,9 @@
-// Turning a GUI sketch into build123d: the sketch body and the extrude's arguments (the kernel writes the features).
+// Turning a GUI sketch into build123d: the sketch's body (the kernel writes the named sketch feature).
 
 export type Shape =
   | { kind: "rect"; x: number; y: number; w: number; h: number } // centre and size, in sketch coordinates
   | { kind: "circle"; x: number; y: number; r: number }
   | { kind: "poly"; pts: [number, number][] };
-
-export type Operation = { op: "extrude" | "cut"; amount: number; both: boolean; through: boolean };
 
 /** Short number for code: up to 3 decimals, no trailing zeros. */
 export const num = (v: number) => String(Math.round(v * 1000) / 1000 || 0);
@@ -23,17 +21,6 @@ export function sketchBody(shapes: Shape[]): string[] {
     else out.push(`with Locations((${num(s.x)}, ${num(s.y)})):`, `    ${call}`);
   }
   return out;
-}
-
-/**
- * Arguments of the extrude or cut that uses the sketch. `into` is the direction into the part when the
- * sketch is on a face: its normal points out, so a cut through all must be told to go the other way.
- */
-export function extrudeArgs(op: Operation, into: number[] | null): Record<string, string> {
-  const both: Record<string, string> = op.both ? { both: "True" } : {};
-  if (op.op === "extrude") return { amount: num(op.amount), ...both };
-  if (op.through) return { until: "Until.LAST", mode: "Mode.SUBTRACT", ...(into ? { dir: `(${into.map(num).join(", ")})` } : {}) };
-  return { amount: num(op.both ? op.amount : -op.amount), ...both, mode: "Mode.SUBTRACT" };
 }
 
 export function newPartSource(name: string): string {

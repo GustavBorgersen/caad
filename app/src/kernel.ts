@@ -25,7 +25,8 @@ export type Feature = {
 /** A dialog field with the argument's expression (Python's None arrives as undefined) and its value. */
 export type FeatureField = {
   name: string; label: string;
-  type: "number" | "choice" | "bool" | "sketch" | "edges" | "faces" | "plane" | "expr";
+  type: "number" | "choice" | "bool" | "sketch" | "edges" | "faces" | "plane" | "expr" | "flip";
+  of?: string; template?: string; // flip: the expression is template with {} = field `of`'s expression
   options?: { expr?: string; label: string }[];
   show_if?: Record<string, string | null>;
   extra?: boolean; // not one of the feature type's own fields
@@ -44,15 +45,20 @@ export type FeatureDetail = {
 
 export type Value = { value?: string; error?: string };
 
+export type SketchOutline = { name: string; index: number; edges: { points: Float32Array }[] };
+
 export type BuildResult = {
   ok: boolean;
   timeline: { part: string | null; block_line: number | null; features: Feature[] } | null;
   upto: number | null;
   error: { feature: number | null; line: number | null; message: string } | null;
   mesh: Mesh | null;
+  /** Named sketches no feature uses yet (up to the rollback bar): drawn as outlines. */
+  sketches: SketchOutline[];
   summary: { type: string; faces: number; edges: number; bbox: number[]; volume?: number } | null;
   times: { build: number; mesh: number };
   gen: number;
+  preview?: boolean; // set by the page: built from unsaved source for the feature dialog
 };
 
 export type Kind = "face" | "edge";

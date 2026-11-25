@@ -24,7 +24,8 @@ try {
 
   const code = () => page.evaluate(() => window.caad.editor.text);
   const gen = () => page.evaluate(() => window.caad.state.result?.gen ?? 0);
-  const waitBuild = (g) => page.waitForFunction((x) => (window.caad.state.result?.gen ?? 0) > x, { timeout: 60_000 }, g);
+  // A build after `g` of the saved code (the dialog's previews don't count).
+  const waitBuild = (g) => page.waitForFunction((x) => (window.caad.state.result?.gen ?? 0) > x && !window.caad.state.result.preview, { timeout: 60_000 }, g);
   const panelOpen = () => page.waitForSelector("#feature-panel:not([hidden]) .row", { timeout: 30_000 });
   const panelClosed = () => page.waitForSelector("#feature-panel[hidden]", { timeout: 30_000 });
   const dblclick = async (index) => {

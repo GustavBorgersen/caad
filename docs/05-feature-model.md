@@ -1,7 +1,7 @@
 # CAAD — Feature model and code round-trip
 
 **Date:** 2026-11-24, decisions added 2026-11-25
-**Status:** Slices 1 and 2 built (2026-11-25); slice 3 next
+**Status:** Slices 1 and 2 built (2026-11-25), sketching on its own added; slice 3 next
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1
 
 ## Problem
@@ -81,7 +81,7 @@ First set of feature types and their canonical forms:
 | Kind | Canonical code | Notes |
 | :-- | :-- | :-- |
 | **Sketch** | `with BuildSketch(<plane>, mode=Mode.PRIVATE) as skN:` + body | The body is edited in the sketch editor; its format is design doc 06 |
-| **Extrude** | `extrude(skN.sketch, amount=…, [both=True], [taper=…], [mode=Mode.SUBTRACT/INTERSECT])` | *Through all*: `until=Until.LAST`. A sketch on a face has its normal pointing out of the part, so a cut through all from a face also gets `dir=` into the part (verified: without it, build123d finds no intersection) |
+| **Extrude** | `extrude(skN.sketch, amount=…, [both=True], [dir=…], [taper=…], [mode=Mode.SUBTRACT/INTERSECT])` | *Through all*: `until=Until.LAST`. *Opposite direction*: `dir=-skN.sketch.faces()[0].normal_at()` — a sketch on a face has its normal pointing out of the part, so cutting into it needs this (verified: without it build123d finds no intersection) |
 | **Revolve** | `revolve(skN.sketch, axis=…, revolution_arc=…, [mode=…])` | |
 | **Fillet / Chamfer** | `fillet(<edges>, radius=…)` / `chamfer(<edges>, length=…, [length2=…])` | Edges as a selector |
 | **Hole** | `with Locations(<points or faces>):` + `Hole(…)` / `CounterBoreHole(…)` / `CounterSinkHole(…)` | |
@@ -122,6 +122,7 @@ All in `caad_kernel.py`, called through the worker like `select` and `resolve` t
 | :-- | :-- |
 | `analyze(src)` (exists, extended) | Per feature also `kind`, `tier` (`type` / `call` / `code`), `name` (the `as` name) and `refs`. AST only, runs on every build |
 | `read_feature(src, index)` | `kind`, `label`, `fields`, and per parameter: `expr` (source text or `null`), `value` (evaluated, see above), `error` |
+| `run(…)` (exists, extended) | Also `sketches`: outlines of the named sketches up to the rollback bar that no feature there uses yet — a private sketch adds no material, so the view draws these as lines |
 | `feature_values(exprs)` | Values of edited expressions, in the model `read_feature` saw (previews replace the latest run) |
 | `patch_feature(src, index, kind, changes)` | New source. `changes` maps a parameter to a new expression, or to `null` to remove it. Fails if the feature at `index` is no longer of `kind` — the file changed while the dialog was open (e.g. the agent edited it) |
 | `insert_feature(src, after, kind, params)` | `{src, index, name}`: the canonical code of a new feature after feature `after` (the rollback bar; `None` = at the end, `-1` = first). A sketch takes `{plane, body}` and gets the next free `skN` |
@@ -145,6 +146,8 @@ All in `caad_kernel.py`, called through the worker like `select` and `resolve` t
 3. **Live preview**: every change builds the part up to this feature with the patched source — without saving. Errors show in the dialog.
 4. **OK** → `patch_feature` → the file is saved, the rollback bar returns to where it was, the part rebuilds. OK is allowed even when the preview has an error — like typing in the code panel, the code may be broken for a while; the error shows at the feature as usual.
 5. **Cancel** → nothing is written.
+
+**Sketching is its own step.** The sketch editor's *Done* adds only the named sketch; the view draws it as an outline until a feature uses it. *+ Extrude* at the rollback bar then opens the extrude dialog on the latest sketch before the bar (preferring one nothing uses yet), where depth, through all, symmetric, opposite direction and add/remove/intersect are chosen. A field another field hides (depth when *through all* is chosen) is not written.
 
 **Inserting** a new feature: at the rollback bar, with `insert_feature`. **Deleting**: refused (with an explanation) if a later feature refers to its name; otherwise the statement is removed. **Renaming** a sketch updates its references (later).
 

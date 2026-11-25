@@ -10,7 +10,7 @@ import inspect
 import time
 import traceback
 
-from build123d import Axis, BuildPart, CenterOf, GeomType, Part
+from build123d import Axis, BuildPart, BuildSketch, CenterOf, GeomType, Part
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRep import BRep_Tool
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -139,6 +139,9 @@ FEATURE_TYPES = {
              "options": _choices((None, "Depth"), ("Until.LAST", "Through all"), ("Until.NEXT", "Up to next"))},
             {"name": "amount", "label": "Depth", "type": "number", "show_if": {"until": None}},
             {"name": "both", "label": "Symmetric", "type": "bool"},
+            # A sketch on a face has its normal pointing out of the part: cutting into it needs the opposite.
+            {"name": "dir", "label": "Opposite direction", "type": "flip", "of": "to_extrude",
+             "template": "-{}.faces()[0].normal_at()"},
             {"name": "taper", "label": "Taper angle", "type": "number"},
             {"name": "mode", "label": "Result", "type": "choice", "options": _MODES},
         ],
@@ -564,7 +567,7 @@ def run(src, filename="part.py", upto=None):
     try:
         info = analyze(src, filename)
     except SyntaxError as e:
-        return {"ok": False, "timeline": None, "mesh": None,
+        return {"ok": False, "timeline": None, "mesh": None, "sketches": [],
                 "error": {"feature": None, "line": e.lineno, "message": f"SyntaxError: {e.msg}"},
                 "times": {"build": 0, "mesh": 0}}
     feats = info["features"]
@@ -599,6 +602,7 @@ def run(src, filename="part.py", upto=None):
     t2 = time.perf_counter()
     globals()["_current"] = {"ns": ns, "shape": shape, "part": info["part"]}
     return {"ok": error is None, "timeline": info, "upto": last, "error": error, "mesh": mesh,
+            "sketches": _sketch_outlines(ns, feats, last),
             "summary": _summary(shape) if mesh else None,
             "times": {"build": round(t1 - t0, 3), "mesh": round(t2 - t1, 3)}}
 
@@ -626,6 +630,26 @@ def _edge_points(edge, tol, angular):
     for i in range(1, sampler.NbPoints() + 1):
         p = sampler.Value(i)
         out += [p.X(), p.Y(), p.Z()]
+    return out
+
+
+def _sketch_outlines(ns, feats, last, tol=0.05, angular=0.2):
+    """Outlines of the named sketches up to feature `last` that no feature up to there uses yet,
+    for the view: a private sketch adds no material, so it would be invisible otherwise."""
+    out = []
+    for f in feats[: last + 1]:
+        name = f["name"]
+        if f["kind"] != "sketch" or not name or not isinstance(ns.get(name), BuildSketch):
+            continue
+        if any(name in g["refs"] or name in g.get("pending", []) for g in feats[f["index"] + 1: last + 1]):
+            continue
+        try:
+            sketch = ns[name].sketch
+        except Exception:  # noqa: BLE001 - a sketch that failed half-way: nothing to show
+            continue
+        if sketch is not None:
+            out.append({"name": name, "index": f["index"],
+                        "edges": [{"points": _edge_points(e, tol, angular)} for e in sketch.edges()]})
     return out
 
 
