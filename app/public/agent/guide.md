@@ -64,6 +64,38 @@ with BuildPart() as part:
 - Planes: `Plane.XY`, `Plane.XZ`, `Plane.YZ`, `Plane.XY.offset(10)`, or a planar face.
 - `extrude(amount=..., mode=Mode.SUBTRACT)` cuts; `extrude(amount=-5)` goes the other way; `both=True` extrudes symmetrically; `until=Until.NEXT` extrudes up to the next face; `taper=5` adds draft (degrees).
 
+## Constrained sketches (the form CAAD's sketch editor uses)
+
+For a sketch the user will edit in CAAD, or with design intent (dimensions from parameters, shapes related to each other), write a **named private sketch** with a `Constrained` block, and extrude it by name. CAAD solves it with PlaneGCS at every build.
+
+```python
+from build123d import *
+from caad import Constrained
+
+width = 60
+depth = 40
+hole_d = 10
+
+with BuildPart() as plate:
+    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:
+        with Constrained() as c:
+            r = c.rectangle((0, 0), (60, 40))         # geometry: where it is drawn
+            h = c.circle((15, 20), 5)
+            c.coincident(r.corners[0], c.origin)      # constraints and dimensions: separate calls
+            c.length(r.bottom, width)
+            c.length(r.left, depth)
+            c.radius(h, hole_d / 2)
+            c.vdistance(r.corners[0], h.center, depth / 2)
+            c.hdistance(r.corners[0], h.center, 15)
+    extrude(sk1.sketch, amount=5)
+```
+
+- Numbers in entity and shape calls (`c.point`, `c.line`, `c.circle`, `c.arc`, `c.rectangle`, `c.polygon`) are **geometry**: where it is drawn, the solver's starting point. Write sensible positions.
+- Constraints and dimensions are separate calls; dimension values are any expression. Shared points are coincident (`c.polyline` and `c.rectangle` share their corners).
+- A loop inside a loop is a hole; crossing loops merge. `construction=True` entities only guide.
+- A fully constrained sketch has 0 degrees of freedom; `get_timeline` reports what's left, and conflicting constraints fail at the sketch, naming them.
+- Full API: `api_help("Constrained")`.
+
 ## Lines and profiles
 
 ```python

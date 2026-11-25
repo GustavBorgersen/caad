@@ -1,6 +1,6 @@
 // The agent's tools, answered by the page. Definitions (names, schemas) are in ../../bridge/tools.json.
 import { text, type ToolHandler, type ToolResult } from "./agent";
-import type { BuildResult, Kernel, SelectInfo } from "./kernel";
+import type { BuildResult, Feature, Kernel, SelectInfo } from "./kernel";
 import type { Project } from "./project";
 import type { Pick, Viewer } from "./viewer";
 
@@ -39,11 +39,17 @@ export function describeBuild(path: string, r: BuildResult | null): string {
     lines.push(`Timeline${r.timeline?.part ? ` of '${r.timeline.part}'` : ""}:`);
     for (const f of feats) {
       const notes = [f.name && `as ${f.name}`, f.refs.length && `uses ${f.refs.join(", ")}`,
-        f.pending?.length && `uses pending sketch ${f.pending.join(", ")}`].filter(Boolean).join("; ");
+        f.pending?.length && `uses pending sketch ${f.pending.join(", ")}`, f.sketch && sketchStatus(f.sketch)].filter(Boolean).join("; ");
       lines.push(`  ${f.index}  L${f.line}${f.end > f.line ? `-${f.end}` : ""}  ${f.status.padEnd(11)} ${f.kind.padEnd(9)} ${f.label}${notes ? `  (${notes})` : ""}`);
     }
   }
   return lines.join("\n");
+}
+
+/** A constrained sketch's state, for the timeline and the agent. */
+export function sketchStatus(s: NonNullable<Feature["sketch"]>): string {
+  const dof = s.dof === undefined ? "" : s.dof === 0 ? "fully constrained" : `${s.dof} degree${s.dof === 1 ? "" : "s"} of freedom left`;
+  return [dof, s.message].filter(Boolean).join(". ");
 }
 
 export function makeTools(app: App): Record<string, ToolHandler> {

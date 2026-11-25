@@ -2,6 +2,9 @@
 // The CAD kernel: Pyodide + a lean build123d + caad_kernel.py, in a Web Worker so the UI stays responsive.
 // Lean = build123d without the packages modelling doesn't need (see docs/02-spike-results.md, spike 1b).
 
+import gcsWasm from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
+import { loadSolver } from "./gcs-solve";
+
 export {}; // a module, so names don't clash with DOM globals
 
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v314.0.8/full/";
@@ -56,11 +59,15 @@ async function boot() {
   setStatus("Loading Python…");
   const { loadPyodide } = await import(/* @vite-ignore */ PYODIDE + "pyodide.mjs");
   py = await loadPyodide({ indexURL: PYODIDE });
+  // Constrained sketches (caad.py) solve with PlaneGCS: the WebAssembly one, called from Python.
+  py.registerJsModule("caad_gcs", await loadSolver(gcsWasm));
   py.setStdout({ batched: (s: string) => postMessage({ type: "log", text: s }) });
   py.setStderr({ batched: (s: string) => postMessage({ type: "log", text: s }) });
   await py.loadPackage(["micropip", "numpy"]);
   setStatus(`Installing build123d… (${seconds()} s)`);
   await py.runPythonAsync(INSTALL);
+  const site = py.runPython("import site; site.getsitepackages()[0]");
+  py.FS.writeFile(`${site}/caad.py`, await (await fetch(new URL("/caad.py", self.location.origin))).text());
   setStatus(`Starting OpenCascade… (${seconds()} s)`);
   py.runPython(await (await fetch(new URL("/caad_kernel.py", self.location.origin))).text());
   run = py.globals.get("run");

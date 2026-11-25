@@ -7,6 +7,7 @@ failing feature, and tessellates the result per face and edge for the 3D view.
 import ast
 import enum
 import inspect
+import sys
 import time
 import traceback
 
@@ -19,6 +20,7 @@ from OCP.TopAbs import TopAbs_REVERSED
 from OCP.TopLoc import TopLoc_Location
 
 MAX_LABEL = 48
+_SKETCH_SHAPES = ("rectangle", "polygon", "circle", "arc", "line", "polyline", "point")  # caad.Constrained
 
 
 # --- Timeline -------------------------------------------------------------------------------
@@ -54,6 +56,9 @@ def _label(stmt, src):
         kind = names[0]
         nice = {"BuildSketch": "Sketch", "BuildLine": "Line", "Locations": "Locations",
                 "GridLocations": "Grid", "PolarLocations": "Polar"}.get(kind, kind)
+        if any(isinstance(n, ast.With) and _call_name(n.items[0].context_expr) == "Constrained" for n in ast.walk(stmt)):
+            shapes = [_call_name(n) for n in ast.walk(stmt) if isinstance(n, ast.Call) and _call_name(n) in _SKETCH_SHAPES]
+            return f"{nice}: {', '.join(dict.fromkeys(shapes))}" if shapes else nice
         inner = [_call_name(n.value) for n in ast.walk(stmt) if isinstance(n, ast.Expr)]
         detail = ", ".join(dict.fromkeys(n for n in inner if n))
         return f"{nice}: {detail}" if detail else nice
@@ -475,6 +480,21 @@ def _create(kind, params):
     return [f"{kind}({', '.join(args)})"]
 
 
+def _ensure_import(src, module, name):
+    """Source with `from module import name`, added after the file's first imports if it's missing."""
+    tree = ast.parse(src)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module == module and any(a.name in (name, "*") for a in n.names):
+            return src
+    imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+    lines = src.splitlines(True)
+    at = imports[-1].end_lineno if imports else 0
+    if at and not lines[at - 1].endswith("\n"):
+        lines[at - 1] += "\n"
+    lines.insert(at, f"from {module} import {name}\n")
+    return "".join(lines)
+
+
 def insert_feature(src, after, kind, params):
     """Source with a new feature after feature `after` (None: at the end, -1: first), in canonical form.
     A sketch gets the next free name `skN`; params are {"plane": expr, "body": [lines]} for a sketch,
@@ -486,6 +506,10 @@ def insert_feature(src, after, kind, params):
     params = dict(params)
     after = after if isinstance(after, int) else None  # JS null arrives as JsNull
     name = None
+    if kind == "sketch" and any("Constrained()" in line for line in params.get("body") or []):
+        src = _ensure_import(src, "caad", "Constrained")
+        tree = ast.parse(src)
+        block, _ = _find_part_block(tree)
     if kind == "sketch":
         name = _free_sketch_name(src)
         body = list(params.get("body") or ["pass"])
@@ -575,6 +599,11 @@ def run(src, filename="part.py", upto=None):
     last = n - 1 if upto is None else max(-1, min(upto, n - 1))
     ns = {"__name__": "__caad__", "__file__": filename}
     error = None
+    import linecache
+    linecache.cache[filename] = (len(src), None, src.splitlines(True), filename)  # caad quotes the user's lines
+    caad = sys.modules.get("caad")
+    if caad is not None:
+        caad.solves.clear()
     try:
         exec(compile(_truncate(src, filename, last), filename, "exec"), ns)
     except Exception as e:  # noqa: BLE001 - any error in user code is reported, not raised
@@ -582,6 +611,11 @@ def run(src, filename="part.py", upto=None):
         fi = next((f["index"] for f in feats if line and f["line"] <= line <= f["end"]), None)
         error = {"feature": fi, "line": line, "message": f"{type(e).__name__}: {e}"}
     t1 = time.perf_counter()
+    caad = sys.modules.get("caad")
+    for s in caad.solves if caad is not None else []:  # constrained sketches: degrees of freedom, warnings
+        f = next((f for f in feats if f["kind"] == "sketch" and f["line"] <= (s["line"] or 0) <= f["end"]), None)
+        if f is not None:
+            f["sketch"] = {"dof": s["dof"], "message": s["message"]}
 
     builder = ns.get(info["part"]) if info["part"] else None
     shape = None
@@ -889,11 +923,32 @@ _API_CLASSES = ["Shape", "ShapeList", "Part", "Sketch", "Curve", "Solid", "Face"
                 "Vector", "Plane", "Location", "Axis", "BuildPart", "BuildSketch", "BuildLine"]
 
 
+def _caad_help(name):
+    """api_help for CAAD's own module: constrained sketches (caad.Constrained and its methods)."""
+    import caad
+    parts = name.removeprefix("caad.").split(".")
+    obj = caad
+    for part in parts:
+        obj = getattr(obj, part, None)
+        if obj is None:
+            return f"caad has no '{name}'. See api_help('Constrained')."
+    if obj is caad.Constrained:
+        methods = [f"  c.{m}{inspect.signature(f)} — {(inspect.getdoc(f) or '').splitlines()[0]}".replace("(self, ", "(").replace("(self)", "()")
+                   for m, f in vars(caad.Constrained).items() if not m.startswith("_") and callable(f)]
+        props = [f"  c.{m} — {inspect.getdoc(f)}" for m, f in vars(caad.Constrained).items() if isinstance(f, property)]
+        return "\n\n".join([f"caad.Constrained (from caad import Constrained)", inspect.getdoc(caad),
+                             "Methods:\n" + "\n".join(methods), "References:\n" + "\n".join(props)])
+    sig = str(inspect.signature(obj)).replace("(self, ", "(").replace("(self)", "()") if callable(obj) else ""
+    return f"caad.{name.removeprefix('caad.')}{sig}\n\n{inspect.getdoc(obj) or ''}"
+
+
 def api_help(name):
-    """Signature and docs of a build123d name, from the build123d the page runs."""
+    """Signature and docs of a build123d name, from the build123d the page runs (and CAAD's caad module)."""
     import inspect
     import build123d
     name = name.strip().removeprefix("build123d.")
+    if name.split(".")[0] in ("Constrained", "caad"):
+        return _caad_help(name)
     obj = build123d
     try:
         for part in name.split("."):

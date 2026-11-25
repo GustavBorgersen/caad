@@ -20,6 +20,7 @@ export type Feature = {
   refs: string[]; // names of earlier features it uses
   implicit?: boolean; // a sketch that adds its faces to the pending ones
   pending?: string[]; // the pending sketches an extrude without a sketch uses
+  sketch?: { dof?: number; message?: string }; // a constrained sketch: degrees of freedom left (none without a solver)
 };
 
 /** A dialog field with the argument's expression (Python's None arrives as undefined) and its value. */

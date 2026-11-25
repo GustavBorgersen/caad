@@ -139,3 +139,5 @@ body.left-compact .feature .del { display: none; }
 .rollback-bar .add { display: inline-flex; gap: 3px; }
 .rollback-bar .add button { padding: 0 5px; font-size: 11px; }
 body.left-compact .rollback-bar .add { display: none; }
+.feature.under .icon { color: #1f6feb; } /* a constrained sketch with degrees of freedom left */
+.feature.warn .label { text-decoration: underline wavy #d08a00; }

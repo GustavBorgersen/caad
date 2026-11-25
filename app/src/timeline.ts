@@ -1,5 +1,6 @@
 // Timeline panel: one row per feature statement, with a rollback bar like Onshape's.
 import type { BuildResult, Feature } from "./kernel";
+import { sketchStatus } from "./tools";
 
 const ICONS: Record<string, string> = {
   sketch: "✎", extrude: "⬆", revolve: "↻", fillet: "◜", chamfer: "◸", hole: "◉", group: "⌗", code: "{}",
@@ -27,8 +28,8 @@ export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: T
   if (rolledBack && result!.upto === -1) el.append(bar(() => h.rollback(null), h)); // before the first feature
   feats.forEach((f) => {
     const li = document.createElement("li");
-    li.className = `feature ${f.status}`;
-    li.title = `${f.label}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here · double-click to ${f.tier === "code" ? "show its code" : "edit"}` +
+    li.className = `feature ${f.status}${f.sketch?.dof ? " under" : ""}${f.sketch?.message ? " warn" : ""}`;
+    li.title = `${f.label}${f.sketch ? ` — ${sketchStatus(f.sketch)}` : ""}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here · double-click to ${f.tier === "code" ? "show its code" : "edit"}` +
       (f.status === "error" && result?.error ? `\n${result.error.message}` : "");
     li.innerHTML = `<span class="icon"></span><span class="label"></span><button class="del" title="Delete this feature">×</button>`;
     li.querySelector<HTMLButtonElement>(".del")!.onclick = (e) => { e.stopPropagation(); h.remove(f); };

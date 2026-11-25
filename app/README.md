@@ -21,6 +21,7 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | `src/main.ts` | Glue: project, building, saving, watching for outside edits |
 | `src/kernel.worker.ts` / `src/kernel.ts` | Pyodide + lean build123d in a worker; client that keeps only the latest request |
 | `public/caad_kernel.py` | Timeline from the code, rollback, errors per feature, per-face/edge mesh; reading and patching features |
+| `public/caad.py` / `src/gcs-solve.ts` | Constrained sketches (`from caad import Constrained`), solved by PlaneGCS (WebAssembly, called from Python) |
 | `src/viewer.ts` | three.js view, Z up, face/edge picking and highlighting, outlines of unused sketches |
 | `src/editor.ts` | CodeMirror code panel with error and feature line marks |
 | `src/timeline.ts` | Timeline panel with rollback bar; double-click edits a feature, × deletes one, + Extrude / + Fillet / + Chamfer at the bar add one |

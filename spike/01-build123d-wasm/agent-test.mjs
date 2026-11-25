@@ -1,11 +1,7 @@
 // Test the agent helpers in caad_kernel.py and every code example in app/public/agent/guide.md.
-import { loadPyodide } from "pyodide";
 import { readFileSync } from "node:fs";
-const py = await loadPyodide();
-const site = py.runPython("import site; site.getsitepackages()[0]");
-for (const w of JSON.parse(readFileSync("wheels/list.json"))) py.unpackArchive(new Uint8Array(readFileSync("wheels/" + w)), "zip", { extractDir: site });
-py.runPython(readFileSync("snapshot2.mjs", "utf8").match(/const STUB_FINDER = `([\s\S]*?)`;/)[1]);
-py.runPython(readFileSync("../../app/public/caad_kernel.py", "utf8"));
+import { bootKernel } from "./kernel-env.mjs";
+const py = await bootKernel(); // with PlaneGCS and caad.py: the guide has a constrained sketch
 const js = (r) => (r?.toJs ? r.toJs({ dict_converter: Object.fromEntries }) : r);
 const run = py.globals.get("run");
 

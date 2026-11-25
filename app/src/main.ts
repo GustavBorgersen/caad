@@ -175,6 +175,7 @@ const featureDialog = new FeatureDialog($("feature-panel"), {
   kernel,
   source: () => editor.text,
   async preview(src, upto) {
+    if (!featureDialog.open) return null; // never replace the rebuild of the saved code
     const r = await kernel.build(src, state.path!, upto);
     if (!r || !featureDialog.open) return null; // replaced by a newer build, or the dialog closed meanwhile
     state.result = { ...r, preview: true }; // what the view shows, so picking edges for the dialog works

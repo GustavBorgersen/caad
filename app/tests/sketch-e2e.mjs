@@ -59,9 +59,12 @@ try {
   const before = await code();
   await done();
   let src = await code();
-  const added = src.slice(src.indexOf("    with BuildSketch(Plane.XY"));
-  check(src.includes("    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:\n        with Locations((") && !/extrude\(sk1/.test(src) && src.split("\n").length === before.split("\n").length + 3,
-    "Done adds only the named sketch");
+  check(src.includes("    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            rect1 = c.rectangle((") && !/extrude\(sk1/.test(src),
+    "Done adds only the named sketch, as a constrained sketch");
+  check(src.includes("from build123d import *\nfrom caad import Constrained\n") && /c\.length\(rect1\.bottom, [\d.]+\)\n\s+c\.length\(rect1\.left, [\d.]+\)\n\s+c\.hdistance\(c\.origin, rect1\.center, -?[\d.]+\)\n\s+c\.vdistance\(c\.origin, rect1\.center, -?[\d.]+\)/.test(src),
+    "with the import, its size as dimensions and its position from the origin");
+  console.log(src.split("\n").filter((l) => l.includes("rect1")).join("\n"));
+  check(await page.evaluate(() => window.caad.state.result.timeline.features.at(-1).sketch?.dof === 0), "fully constrained (0 degrees of freedom)");
   check(JSON.stringify(await sketches()) === '["sk1"]' && (await volume()) === v0, "the sketch shows as an outline; the part is unchanged");
   await page.screenshot({ path: `${OUT}/sketch-2-sketch.png` });
   await extrude({ end: "Until.LAST", result: "Mode.SUBTRACT" });
@@ -80,7 +83,7 @@ try {
   await done();
   await extrude();
   src = await code();
-  check(src.includes("with BuildSketch(bracket.faces().filter_by(Axis.Y).sort_by(Axis.Z)[-1], mode=Mode.PRIVATE) as sk2:") && src.includes("Circle(5)") && src.includes("extrude(sk2.sketch, amount=10)"), "sketch on a face with its selector, extruded");
+  check(src.includes("with BuildSketch(bracket.faces().filter_by(Axis.Y).sort_by(Axis.Z)[-1], mode=Mode.PRIVATE) as sk2:") && src.includes("circle1 = c.circle((12, 6), 5)\n            c.radius(circle1, 5)") && src.includes("extrude(sk2.sketch, amount=10)"), "sketch on a face with its selector, extruded");
   const v2 = await volume();
   check(v2 > v1, "the extrude added material");
   await page.screenshot({ path: `${OUT}/sketch-4-face.png` });
@@ -107,7 +110,7 @@ try {
   await page.evaluate(() => window.caad.sketcher.addShape({ kind: "poly", pts: [[0, 0], [30, 0], [30, 10], [10, 20], [0, 20]] }));
   await done();
   src = await code();
-  check(!src.includes("pass") && src.includes("Polygon((0, 0), (30, 0)") && (await volume()) === null && JSON.stringify(await sketches()) === '["sk1"]',
+  check(!src.includes("pass") && src.includes("poly1 = c.polygon((0, 0), (30, 0), (30, 10), (10, 20), (0, 20))\n            c.fix(*poly1.points)") && (await volume()) === null && JSON.stringify(await sketches()) === '["sk1"]',
     "the sketch replaced `pass`: no solid yet, just the outline");
   await page.screenshot({ path: `${OUT}/sketch-5-only-sketch.png` });
   await extrude();

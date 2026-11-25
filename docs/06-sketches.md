@@ -1,7 +1,7 @@
 # CAAD — Sketches and constraints
 
 **Date:** 2026-11-25
-**Status:** Agreed — ready to build 06a
+**Status:** 06a built (2026-11-25); 06b next
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1 ("Sketches v2"); builds on [05 — Feature model](05-feature-model.md)
 
 ## Problem
@@ -83,7 +83,7 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 
 - Leaving `with Constrained()` collects the entities and constraints, solves, turns the result into edges, loops and regions, and adds the regions to the enclosing `BuildSketch`.
 - **In CAAD**: PlaneGCS WebAssembly, through a module the kernel worker registers with Pyodide (verified above). The `caad` module is served with the page (`app/public/caad.py`, like `caad_kernel.py`) and importable in the kernel.
-- **Outside CAAD** (`python part.py`): the same `caad` module uses PyPI's `planegcs` when it's installed (Linux x86-64, Windows). Without it, the sketch is built from the stored geometry, with a warning if that doesn't satisfy the constraints (e.g. a parameter changed since the last solve). The file always builds. How a project carries `caad` outside CAAD (a pip package or a copy in the project) is decided in design doc 07.
+- **Outside CAAD** (`python part.py`): the sketch is built from the stored geometry, with a warning naming the constraints it doesn't satisfy (e.g. a parameter changed since the last solve) — the module checks every constraint type itself. The file always builds. Re-solving with PyPI's `planegcs` where it's installed (Linux x86-64, Windows; its Python API needs a mapping per constraint type) is a later step. How a project carries `caad` outside CAAD (a pip package or a copy in the project) is decided in design doc 07.
 - **Errors** show at the sketch feature, naming the constraints: "c.length(r.bottom, 70) conflicts with c.length(r.bottom, width)". An under-constrained sketch is fine; it solves near its stored geometry.
 
 ## The sketch editor
@@ -106,7 +106,7 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 
 | Phase | Contents |
 | :-- | :-- |
-| **06a — Constrained sketches in code** | The `caad` module: entities, shapes, constraints, dimensions, regions; PlaneGCS at build in the page (WebAssembly bridge) and outside (PyPI or stored geometry); errors at the sketch feature; the sketcher writes the constrained form (its rectangles, circles and polygons as shapes, with their sizes as dimensions); outlines and `get_timeline` status; guide and `api_help`. Node tests against the page's build123d |
+| **06a — Constrained sketches in code** (done) | The `caad` module: entities, shapes, constraints, dimensions, regions; PlaneGCS at build in the page (WebAssembly bridge) and outside (PyPI or stored geometry); errors at the sketch feature; the sketcher writes the constrained form (its rectangles, circles and polygons as shapes, with their sizes as dimensions); outlines and `get_timeline` status; guide and `api_help`. Node tests against the page's build123d |
 | **06b — The sketch editor** | Reopen sketches (`read_sketch` / `write_sketch`); line, arc and point tools; snapping with inferred constraints; constraint buttons and the dimension tool with expressions; live solving; status colours; converting plain sketches on first edit |
 | **06c — References and tools** | Use the part's edges in a sketch (projected, referred to by selector) and constrain to them; trim, sketch fillet, mirror, pattern; choosing individual regions to extrude |
 
@@ -117,5 +117,5 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 | One form or two? | **One** — the constrained form, with shape helpers so simple sketches stay short. Plain build123d sketches build as before and are converted (checked) when first edited in the editor |
 | Numbers in the block | **Geometry in entity and shape calls, dimensions as separate calls** — one rule everywhere |
 | Module and import | **`from caad import Constrained`**; served with the page; outside CAAD per design doc 07 |
-| Outside CAAD without `planegcs` | **Build from the stored geometry and warn** when it doesn't satisfy the constraints, rather than fail |
+| Outside CAAD | **Build from the stored geometry and warn** when it doesn't satisfy the constraints, rather than fail; re-solving with PyPI's `planegcs` later |
 | Regions | **Even-odd nesting** (holes and islands), like Onshape |

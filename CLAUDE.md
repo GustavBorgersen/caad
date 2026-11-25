@@ -8,6 +8,7 @@ A browser CAD program for build123d (static site) plus a small agent bridge. Doc
 | :-- | :-- |
 | `app/` | The web app (Vite + TypeScript, no UI framework). `src/main.ts` is the glue |
 | `app/public/caad_kernel.py` | Python run inside Pyodide: timeline from code, rollback, errors per feature, tessellation, selectors, agent helpers |
+| `app/public/caad.py` | The `caad` module part files import: constrained sketches (`Constrained`), solved by PlaneGCS (`app/src/gcs-solve.ts` in the page); must also build outside CAAD |
 | `app/public/agent/guide.md` | build123d guide served to agents — every code example must build (test them) |
 | `bridge/` | `caad-mcp`, the Go MCP bridge (stdio ↔ WebSocket on 127.0.0.1:7337+). `tools.json` and `instructions.md` are the agent's tool definitions and instructions; the page imports `tools.json` too |
 | `examples/` | Example parts, bundled into the app |
@@ -29,7 +30,7 @@ npm run test:feature              # editing features in the dialog end to end
 
 **Deployment**: `.github/workflows/deploy.yml` builds the bridge into `app/public/bridge`, runs the bridge test and deploys to Vercel (project `caad`, root directory `app`) with `vercel build` + `vercel deploy --prebuilt` — production on pushes to `main`, previews for pull requests. Vercel's own Git builds are off (`app/vercel.json`) since they can't build Go.
 
-The headless tests start their own Vite server on other ports. Kernel changes can be tested faster in Node: `spike/01-build123d-wasm/{kernel,select,agent,sketch,feature}-test.mjs` (needs `node snapshot2.mjs` once there to fetch the wheels).
+The headless tests start their own Vite server on other ports. Kernel changes can be tested faster in Node: `spike/01-build123d-wasm/{kernel,select,agent,sketch,feature,caad}-test.mjs` (needs `node snapshot2.mjs` once there to fetch the wheels; `kernel-env.mjs` boots the kernel as the page does).
 
 ## Conventions
 

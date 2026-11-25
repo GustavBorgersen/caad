@@ -165,6 +165,8 @@ export class FeatureDialog {
     let src: string;
     try { src = await this.host.kernel.patchFeature(this.created?.src ?? this.host.source(), d.index, d.kind, changes); }
     catch (e) { if (seq === this.seq) this.say((e as Error).message, true); return; }
+    // Closed or changed meanwhile: a stale preview build would replace the rebuild that OK started.
+    if (seq !== this.seq) return;
     const error = await this.host.preview(src, d.index);
     if (seq !== this.seq || !this.detail) return;
     this.say(error ? `Preview: ${error}` : "", !!error);
