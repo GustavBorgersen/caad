@@ -17,7 +17,7 @@ Everything else (assemblies, mates, more sketch tools, GitHub repos) comes after
 
 | Topic | Decision | Why |
 | :-- | :-- | :-- |
-| Where | `CAAD/app/` (web app), `CAAD/bridge/` (caad-mcp), `CAAD/examples/` (test parts) | Moves to its own repo later |
+| Where | `app/` (web app), `bridge/` (caad-mcp), `examples/` (test parts) | Moved to its own repo (github.com/GustavBorgersen/caad) on 2026-11-25 |
 | App stack | Vite + TypeScript, no UI framework | Static build for Vercel; few dependencies; easy for contributors |
 | Kernel | Pyodide + lean build123d in a module Web Worker (from the spikes) | UI stays responsive; start-up hidden |
 | Kernel logic | Our own Python module `caad_kernel.py`, run inside Pyodide | Timeline analysis, rollback, tessellation and selectors are easiest in Python, next to build123d |
@@ -53,7 +53,7 @@ with BuildPart() as bracket:                    # the part
 
 | # | Milestone | Done when |
 | :-- | :-- | :-- |
-| **M1** | **Shell and kernel.** Layout (parts + timeline · 3D view · code); kernel worker with lean build123d; open a folder, list parts, build and show one | Opening `CAAD/examples` in Chrome shows the pump body, rotatable, with face and edge lines |
+| **M1** | **Shell and kernel.** Layout (parts + timeline · 3D view · code); kernel worker with lean build123d; open a folder, list parts, build and show one | Opening `examples` in Chrome shows the pump body, rotatable, with face and edge lines |
 | **M2** | **Timeline and editing.** Features from the code, rollback by clicking, errors at the failing feature; edit in the code panel → save to file → rebuild; external edits (the agent) rebuild automatically | Breaking a fillet turns that feature red and the view shows the part before it; an edit from Claude Code shows up within ~2 s |
 | **M3** | **Selection.** Pick faces and edges (hover highlight, click to select, multi-select); info panel: type, position, normal, radius, area; a **verified build123d selector** for the selection | Clicking the top face shows `bracket.faces().sort_by(Axis.Z)[-1]` |
 | **M4** | **Agent package.** The page gives the agent everything it needs, so it needs no local build123d or Python: MCP *instructions* (CAAD conventions), `build123d_guide`, `api_help` (signatures and docs from the page's own build123d), `run_snippet`, `list_parts`/`read_part`/`write_part`/`edit_part` (the page writes the file, rebuilds and returns the result), `get_timeline`, `get_selection`, `highlight`, `render`. The **bridge** is a small self-contained program (Go, ~5 MB, no runtime needed), downloadable from the page for each OS, with the `claude mcp add` line shown; it accepts only the CAAD page's origin | With only the page and the bridge, Claude Code (in any folder) can answer "what have I selected?", look up the API, and add a fillet to the selected edges — and the change shows up in the file and the timeline |
@@ -63,10 +63,10 @@ with BuildPart() as bracket:                    # the part
 
 | # | State |
 | :-- | :-- |
-| M1 | **Done** (2026-11-23): `CAAD/app`, kernel in a worker, examples built in; headless smoke test passes |
+| M1 | **Done** (2026-11-23): `app`, kernel in a worker, examples built in; headless smoke test passes |
 | M2 | **Done** (2026-11-23): timeline, rollback, errors per feature, editing with save and rebuild; outside edits (the agent) show up in ~2 s — confirmed in Chrome with a real folder |
 | M3 | **Done** (2026-11-23): hover/click/Shift-click selection; panel with type, area/length, radius, centre, normal/axis; up to three **verified** selectors (each is evaluated and must return exactly the selection; position-based ones are labelled); the selection is found again after every rebuild |
-| M4 | **Done** (2026-11-24), to be tried with real Claude Code: Go bridge (`CAAD/bridge`, 6–7 MB per OS, origin allowlist, tool list from the page), 13 tools answered by the page, MCP instructions, tested build123d guide, Agent dialog with downloads and setup commands; end-to-end test with the real bridge and app passes |
+| M4 | **Done** (2026-11-24), to be tried with real Claude Code: Go bridge (`bridge`, 6–7 MB per OS, origin allowlist, tool list from the page), 13 tools answered by the page, MCP instructions, tested build123d guide, Agent dialog with downloads and setup commands; end-to-end test with the real bridge and app passes |
 | M5a | **Done** (2026-11-24): sketch mode on Top/Front/Right or a selected flat face (by its verified selector); rectangle, circle, polygon with grid snapping and editable dimensions; extrude/cut (depth, both directions, through all); writes plain build123d code after the timeline position; **+ New part** |
 | M5b | Next, needs a design decision: constraints that stay in the code (coincident, horizontal, tangent, equal, dimensions referencing parameters), solved by PlaneGCS in the browser and in Python |
 

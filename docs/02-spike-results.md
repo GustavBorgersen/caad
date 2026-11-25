@@ -1,7 +1,7 @@
 # CAAD — Feasibility spike results
 
 **Date:** 2026-11-23
-**Code:** `CAAD/spike/` (each folder runs on its own; see the commands below)
+**Code:** `spike/` (each folder runs on its own; see the commands below)
 
 Three questions decide whether the architecture in [01 — Concept](01-concept.md) holds. All three: **yes**. Start-up takes ~45–60 s once per session, which is accepted.
 
@@ -131,10 +131,10 @@ The architecture holds: **static site + build123d in WebAssembly + PlaneGCS on b
 ## Running the spikes
 
 ```bash
-cd CAAD/spike/01-build123d-wasm && npm install && node run.mjs   # also: analyze.mjs, lean.mjs, lean-noscipy.mjs, where.mjs
+cd spike/01-build123d-wasm && npm install && node run.mjs   # also: analyze.mjs, lean.mjs, lean-noscipy.mjs, where.mjs
 node snapshot2.mjs   # run three times: fetch wheels, make snapshot, restore (fails, see 1d)
-cd CAAD/spike/04-browser && python3 -m http.server 8765   # open http://127.0.0.1:8765 in Chrome
-cd CAAD/spike/02-planegcs && npm install && node sketch.mjs
+cd spike/04-browser && python3 -m http.server 8765   # open http://127.0.0.1:8765 in Chrome
+cd spike/02-planegcs && npm install && node sketch.mjs
 python3 -m venv .venv && .venv/bin/pip install planegcs && .venv/bin/python sketch.py
-cd CAAD/spike/03-mcp-bridge && npm install && node test.mjs
+cd spike/03-mcp-bridge && npm install && node test.mjs
 ```

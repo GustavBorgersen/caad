@@ -1,4 +1,4 @@
-module github.com/GustavBorgersen/caad-mcp
+module github.com/GustavBorgersen/caad/bridge
 
 go 1.27.4
 

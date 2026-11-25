@@ -11,7 +11,14 @@ const check = (ok, what) => { console.log(`${ok ? "PASS" : "FAIL"}: ${what}`); i
 const client = new Client({ name: "bridge-test", version: "0" }, { capabilities: {} });
 let toolsChanged = false;
 client.setNotificationHandler(ToolListChangedNotificationSchema, () => { toolsChanged = true; });
-await client.connect(new StdioClientTransport({ command: BIN, args: ["--allow-origin", "https://caad.example.com"], stderr: "ignore" }));
+const transport = new StdioClientTransport({ command: BIN, args: ["--allow-origin", "https://caad.example.com"], stderr: "pipe" });
+// The bridge takes the first free port from 7337 up (another agent session may already have 7337).
+const port = new Promise((resolve) => {
+  let log = "";
+  transport.stderr.on("data", (d) => { log += d; const m = log.match(/ws:\/\/127\.0\.0\.1:(\d+)/); if (m) resolve(Number(m[1])); });
+});
+await client.connect(transport);
+const PORT = await port;
 check(client.getInstructions()?.includes("CAAD"), "instructions sent on connect");
 const tools = (await client.listTools()).tools.map((t) => t.name);
 check(tools.includes("get_selection") && tools.includes("write_part"), `embedded tools listed (${tools.length})`);
@@ -22,7 +29,7 @@ r = await client.callTool({ name: "get_selection", arguments: {} });
 check(r.isError, "other tools fail clearly without a page");
 
 const connect = (origin) => new Promise((resolve) => {
-  const ws = new WebSocket("ws://127.0.0.1:7337", { headers: { origin } });
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}`, { headers: { origin } });
   ws.on("open", () => resolve(ws));
   ws.on("error", () => resolve(null));
   ws.on("unexpected-response", () => resolve(null));

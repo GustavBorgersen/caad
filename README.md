@@ -13,3 +13,7 @@ Working name. The MVP works end to end; see the [roadmap](docs/04-roadmap.md).
 | [05 — Feature model](docs/05-feature-model.md) | Reading code back as editable features |
 
 Code: `app/` (the web app), `bridge/` (the agent bridge), `examples/`, `spike/`.
+
+## Licence
+
+[MIT](LICENSE). CAAD builds on [build123d](https://github.com/gumyr/build123d) (Apache-2.0), [OCP.wasm](https://github.com/yeicor/OCP.wasm) (MIT), [Pyodide](https://pyodide.org) (MPL-2.0), [three.js](https://threejs.org) and [CodeMirror](https://codemirror.net) (MIT).
