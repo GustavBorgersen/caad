@@ -28,10 +28,10 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 
 | Item | What | Design doc |
 | :-- | :-- | :-- |
-| **Feature model** | Each feature type (sketch, extrude, revolve, fillet, chamfer, hole…) defines its code form, how to read its parameters back, and its dialog. Unknown code stays a "code" feature | [05 — Feature model](05-feature-model.md) |
-| **Timeline editing** | Double-click a feature to edit it in its dialog (sketch editor for sketches), with a live preview at its place in the timeline; insert at the rollback bar; delete | 05 |
-| **Sketch and extrude as separate features** | A sketch is its own named feature (`sk1`); extrude, revolve etc. refer to it and can reuse it | 05 |
-| **Sketches v2** | Free drawing (no grid), then constraints and dimensions like in Onshape; dimensions can use parameters; solved by PlaneGCS in the browser and at rebuild | [06 — Sketches and constraints](06-sketches.md) |
+| **Feature model** | **Done 2026-11-26:** typed features with dialogs (extrude, revolve, hole, fillet, chamfer, mirror), generic dialogs for any build123d call, everything else stays code; surgical patching; `edit_feature` for the agent | [05](05-feature-model.md) |
+| **Timeline editing** | **Done:** double-click a feature to edit it with a live preview (the sketch editor for sketches); add features at the rollback bar; delete (refused while used) | 05 |
+| **Sketch and extrude as separate features** | **Done:** named private sketches (`sk1`); Done in the sketch editor adds only the sketch; *+ Extrude* / *+ Revolve* refer to it | 05 |
+| **Sketches v2** | **Done (06a, 06b):** constrained sketches in code, solved by PlaneGCS in the page; the sketch editor with free drawing, snapping, constraints and dimensions (expressions); plain sketches converted when first edited. Next: 06c (part edges in sketches, trim, fillet) | [06](06-sketches.md) |
 | **Project structure and project browser** | **Done 2026-11-25:** a workspace with several projects (`pyproject.toml` with `[tool.caad]`), a browser by project and kind, shared code between a project's parts, *New project* | [07 — Project structure](07-project-structure.md) |
 | **Export** | **Done 2026-11-25:** STEP and STL into the project's `exports/` (or a download), and an `export_part` agent tool ([07](07-project-structure.md)) | 07 |
 | **Contrast fixes** | Clear marking of the selected/hovered feature in the timeline and the code, stronger colours — the quick part of the visual work | — |
@@ -72,7 +72,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 
 | # | Document | Status |
 | :-- | :-- | :-- |
-| 05 | [Feature model and code round-trip](05-feature-model.md) | Slices 1–2 built; slice 3 next |
+| 05 | [Feature model and code round-trip](05-feature-model.md) | Built |
 | 06 | [Sketches and constraints](06-sketches.md) | 06a, 06b built; 06c (references, sketch tools) later |
 | 07 | [Project structure](07-project-structure.md) | Built |
 | 08 | Part studios and assemblies | To write before phase 2 |

@@ -36,6 +36,19 @@
     "inputSchema": { "type": "object", "properties": {} }
   },
   {
+    "name": "edit_feature",
+    "description": "Change a feature's arguments by name, the way the user's feature dialog does: only those arguments' text changes (comments and layout stay), then the part saves and rebuilds. `changes` maps argument names to new expressions (\"12\", \"width / 2\", \"Mode.SUBTRACT\") or null to remove one (back to its default). Works for features that are a build123d call (extrude, revolve, fillet, chamfer, mirror, Box…) and holes (`kind`: Hole / CounterBoreHole / CounterSinkHole, `locations`: the Locations arguments). Feature numbers and kinds come from get_timeline. Returns the feature's new code and the build result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "feature": { "type": "integer", "description": "Index in the timeline (0 = the first)" },
+        "changes": { "type": "object", "description": "{argument name: expression, or null to remove}", "additionalProperties": { "type": ["string", "null"] } },
+        "path": { "type": "string", "description": "The part; default: the open part" }
+      },
+      "required": ["feature", "changes"]
+    }
+  },
+  {
     "name": "export_part",
     "description": "Export a part as STEP (exact geometry, for other CAD programs) or STL (a mesh, for slicers) into its project's exports/ folder (exports/<part>.step or .stl), where the user can download it. Exports the whole part, all features, even when the view is rolled back. A part in no project is downloaded in the user's browser instead. Opens the part first if `path` is another one.",
     "inputSchema": {

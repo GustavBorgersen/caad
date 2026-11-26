@@ -703,7 +703,7 @@ export class Sketcher implements PointerTool {
     row.append(state);
     const actions = el("span", { className: "group actions" });
     const done = el<HTMLButtonElement>("button", { textContent: "Done", className: "primary", title: "Close the sketch and save it" });
-    done.disabled = !m.entities.some((e) => this.drawn(e) && e.kind !== "point");
+    done.disabled = !m.entities.some((e) => this.drawn(e)); // points alone are a sketch too (holes go there)
     done.onclick = () => { const src = this.session.src; this.stop(); this.host.done(src); };
     const cancel = el("button", { textContent: "Cancel", title: "Leave the sketch without saving" });
     cancel.onclick = () => { this.stop(); this.host.cancel(); };

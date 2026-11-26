@@ -22,7 +22,7 @@ import math
 import sys
 import warnings
 
-__all__ = ["Constrained"]
+__all__ = ["Constrained", "points"]
 
 TOLERANCE = 1e-3  # stored geometry is rounded to 0.001 mm
 solves = []  # per solved sketch: {"line", "dof", "solver", "message"}; CAAD shows it in the timeline
@@ -41,9 +41,10 @@ class _Entity:
 class Point(_Entity):
     """A point; `x`, `y` are its position (after leaving the block: the solved one)."""
 
-    def __init__(self, sketch, x, y, fixed=False):
+    def __init__(self, sketch, x, y, fixed=False, placed=False):
         super().__init__(sketch, True)
         self.x, self.y, self.fixed = _number(x, "x"), _number(y, "y"), fixed
+        self.placed = placed  # drawn as a point (c.point), not a corner or an end: where points() puts holes
 
     def __repr__(self):
         return f"Point({self.x:g}, {self.y:g})"
@@ -133,10 +134,10 @@ class Rectangle:
 
     def __init__(self, sketch, corner, opposite, construction):
         (x0, y0), (x1, y1) = _pair(corner), _pair(opposite)
-        self.corners = [sketch.point(x, y) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+        self.corners = [Point(sketch, x, y) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
         self.lines = sketch.polyline(*self.corners, close=True, construction=construction)
         self.bottom, self.right, self.top, self.left = self.lines
-        self.center = sketch.point((x0 + x1) / 2, (y0 + y1) / 2)
+        self.center = Point(sketch, (x0 + x1) / 2, (y0 + y1) / 2)
         sketch.horizontal(self.bottom, self.top)
         sketch.vertical(self.left, self.right)
         sketch.symmetric(self.corners[0], self.corners[2], self.center)
@@ -175,8 +176,8 @@ class Constrained:
     # Entities and shapes. Numbers here are geometry: where it is drawn.
 
     def point(self, x, y):
-        """A point at (x, y)."""
-        return Point(self, x, y)
+        """A point at (x, y). Points drawn this way are where `points(sketch)` puts holes."""
+        return Point(self, x, y, placed=True)
 
     def line(self, start, end, construction=False):
         """A line between two points (points or (x, y) pairs)."""
@@ -339,7 +340,7 @@ class Constrained:
         if isinstance(p, Point):
             return p
         x, y = _pair(p)
-        return self.point(x, y)
+        return Point(self, x, y)
 
     def _axis(self):
         if self._axes is None:
@@ -370,6 +371,10 @@ class Constrained:
     def _build(self, strict=True):
         """Solve and add the regions. CAAD's sketch editor builds with strict=False: problems are kept in
         `conflicting` (constraint ids) and `problem` instead of raised, and no regions are made."""
+        from build123d import BuildSketch
+        sketch = BuildSketch._get_context(log=False)
+        if sketch is not None:
+            sketch._caad_sketch = self  # for points(sketch)
         self.conflicting, self.problem = [], None
         result = _solver()(self._primitives())
         info = {"line": self._line, "dof": None, "solver": None, "message": None}
@@ -418,6 +423,40 @@ class Constrained:
                 e.x, e.y = p["x"], p["y"]
             elif isinstance(e, Circle):
                 e.r = p["radius"]
+
+
+def points(sketch, reverse=False, far=None):
+    """Where the points drawn in a constrained sketch (with c.point) are, as locations turned like the sketch:
+    `with Locations(*points(sk1)): Hole(radius=2.5)` makes a hole at each point. A hole starts at its location and
+    drills against the sketch plane's normal: into the face the sketch is on.
+
+    reverse: drill the other way (along the normal) — for a sketch on a plane under the part, or between two extrudes.
+    far: the part (its builder, e.g. `far=plate`): start each hole where its line leaves the part on the far side and
+         drill back toward the sketch, so a counterbore or countersink is on that face."""
+    from build123d import Axis, Location, Plane
+    c = getattr(sketch, "_caad_sketch", None)
+    if c is None:
+        raise TypeError(f"points() takes a sketch with a Constrained block (`with BuildSketch(...) as sk1:`), not {sketch!r}.")
+    placed = [e for e in c._entities if isinstance(e, Point) and e.placed]
+    if not placed:
+        raise ValueError("The sketch has no points to use: draw them with c.point(x, y) (the point tool).")
+    locations = [pl * Location((p.x, p.y)) for pl in sketch.output_placements for p in placed]
+    if reverse:  # turned over: the hole's -Z (its drilling direction) flips
+        locations = [loc * Location((0, 0, 0), (180, 0, 0)) for loc in locations]
+    if far is None:
+        return locations
+    shape = getattr(far, "part", far)
+    out = []
+    for loc in locations:
+        plane = Plane(loc)
+        drill = -plane.z_dir
+        ahead = [pt for pt, _ in shape.find_intersection_points(Axis(plane.origin, drill)) if (pt - plane.origin).dot(drill) > 1e-6]
+        if not ahead:
+            raise ValueError(f"A hole at ({plane.origin.X:g}, {plane.origin.Y:g}, {plane.origin.Z:g}) doesn't go through the part, "
+                             "so it has no far side: drill the other way, or leave out far=.")
+        exit_ = max(ahead, key=lambda pt: (pt - plane.origin).dot(drill))
+        out.append(Location(Plane(origin=exit_, x_dir=plane.x_dir, z_dir=drill)))  # drills back (its -Z) toward the sketch
+    return out
 
 
 # --- Solving ------------------------------------------------------------------------------------

@@ -1,12 +1,8 @@
 // Test the feature model in app/public/caad_kernel.py (docs/05-feature-model.md): tiers, the current
 // sketch + extrude form, read_feature values, and surgical patch_feature edits. Node + lean wheels.
-import { loadPyodide } from "pyodide";
 import { readFileSync } from "node:fs";
-const py = await loadPyodide();
-const site = py.runPython("import site; site.getsitepackages()[0]");
-for (const w of JSON.parse(readFileSync("wheels/list.json"))) py.unpackArchive(new Uint8Array(readFileSync("wheels/" + w)), "zip", { extractDir: site });
-py.runPython(readFileSync("snapshot2.mjs", "utf8").match(/const STUB_FINDER = `([\s\S]*?)`;/)[1]);
-py.runPython(readFileSync("../../app/public/caad_kernel.py", "utf8"));
+import { bootKernel } from "./kernel-env.mjs";
+const py = await bootKernel(); // as the page has it: PlaneGCS and caad.py (sketches with points, for holes)
 
 let failures = 0;
 const check = (ok, what, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"}: ${what}${!ok && detail ? `\n      ${detail}` : ""}`); if (!ok) failures++; };
@@ -33,7 +29,7 @@ const diff = (a, b) => {
 // --- Tiers and the current sketch + extrude form ---
 const bracket = example("bracket.py");
 let f = features(bracket);
-check(JSON.stringify(f.map((x) => `${x.kind}/${x.tier}`)) === JSON.stringify(["sketch/code", "extrude/type", "sketch/code", "extrude/type", "group/code", "fillet/type"]),
+check(JSON.stringify(f.map((x) => `${x.kind}/${x.tier}`)) === JSON.stringify(["sketch/code", "extrude/type", "sketch/code", "extrude/type", "hole/type", "fillet/type"]),
   "bracket: kinds and tiers", JSON.stringify(f.map((x) => `${x.kind}/${x.tier}`)));
 check(f[0].implicit && f[0].name === "base" && f[2].name === "wall", "implicit sketches with their names");
 check(JSON.stringify(f[1].pending) === '["base"]' && JSON.stringify(f[3].pending) === '["wall"]', "each extrude takes the pending sketch before it");
@@ -194,6 +190,69 @@ check(features(out).length === 2 && call("run", out, "part.py").ok, "delete the 
 out = call("delete_feature", "from build123d import *\n\nwith BuildPart() as part:\n    Box(1, 1, 1)  # cube\n", 0);
 check(out === "from build123d import *\n\nwith BuildPart() as part:\n    pass\n", "deleting the only feature leaves pass", out);
 check(/shares its line/.test(tryCall("delete_feature", "from build123d import *\n\nwith BuildPart() as part:\n    Box(1, 1, 1); Box(2, 2, 2)\n", 0).error ?? ""), "refuses a feature sharing its line");
+
+// --- Slice 3: holes, revolve, mirror ---
+f = features(bracket);
+check(f[4].label === "Hole r = hole_d / 2", `the bracket's hole is a hole feature: "${f[4].label}"`);
+call("run", bracket, "bracket.py", 3);
+r = call("read_feature", bracket, 4);
+check(field(r, "kind").expr === "Hole" && field(r, "locations").expr === "(0, -6, thickness)" && field(r, "radius").value === "5" && field(r, "depth").expr == null && field(r, "depth").placeholder === "through all",
+  "its fields: type, position, radius = 5, depth empty (through all)");
+check(field(r, "counter_bore_radius").show_if.kind === "CounterBoreHole" && !field(r, "counter_bore_radius").required, "counterbore fields only show for a counterbore hole");
+const vol = (src) => call("run", src, "part.py").summary?.volume;
+out = patch(bracket, 4, { depth: "4" });
+check(out.includes("        Hole(hole_d / 2, depth=4)") && vol(out) > vol(bracket), "a depth: Hole(hole_d / 2, depth=4), less removed");
+out = patch(bracket, 4, { kind: "CounterBoreHole" });
+check(out.includes("        CounterBoreHole(radius=hole_d / 2, counter_bore_radius=10, counter_bore_depth=5)") && vol(out) < vol(bracket),
+  "switching to a counterbore keeps the radius and starts its own sizes from it", out.split("\n")[17]);
+out = patch(out, 4, { kind: "Hole", counter_bore_radius: null, counter_bore_depth: null });
+check(out.includes("        Hole(radius=hole_d / 2)\n") && Math.abs(vol(out) - vol(bracket)) < 1e-6, "and back to a simple hole (its hidden fields dropped)");
+out = patch(bracket, 4, { locations: "(0, -6, thickness), (20, -6, thickness)" });
+check(out.includes("with Locations((0, -6, thickness), (20, -6, thickness)):") && Math.abs(vol(bracket) - vol(out) - Math.PI * 25 * 8) < 0.01, "two positions: two holes");
+check(/required/.test(tryCall("patch_feature", bracket, 4, "hole", { locations: null }).error ?? ""), "a hole needs a position");
+const withPoints = bracket.replace("from build123d import *\n", "from build123d import *\nfrom caad import Constrained\n") + `    with BuildSketch(bracket.faces().filter_by(Axis.Z).sort_by(Axis.Z)[0], mode=Mode.PRIVATE) as sk1:
+        with Constrained() as c:
+            p1 = c.point(-20, -5)
+            p2 = c.point(20, -5)
+`;
+check(features(withPoints)[6].points === 2, "a sketch counts its drawn points");
+ins = call("insert_feature", withPoints, null, "hole", { kind: "Hole", locations: "*points(sk1)", radius: "2.5" });
+check(ins.src.includes("\nfrom build123d import *\nfrom caad import Constrained, points\n") && ins.src.endsWith("    with Locations(*points(sk1)):\n        Hole(radius=2.5)\n"),
+  "+ Hole at a sketch's points: with Locations(*points(sk1)): Hole(radius=2.5), and the import grows", ins.src.split("\n").slice(0, 3).join(" | "));
+check(features(ins.src)[7].label === "Hole r = 2.5 mm at sk1" && features(ins.src)[7].refs.includes("sk1") && Math.abs(vol(withPoints) - vol(ins.src) - 2 * Math.PI * 6.25 * 8) < 0.01,
+  `two holes through the base ("${features(ins.src)[7].label}")`);
+call("run", ins.src, "bracket.py", 6);
+r = call("read_feature", ins.src, 7);
+check(JSON.stringify(field(r, "locations").options) === JSON.stringify([{ expr: "*points(sk1)", label: "sk1 (2 points)" }]), "At offers the sketches with points");
+// Direction flags: read from and written to the points() call; + Hole drills toward the part by default.
+const xyPart = `from build123d import *\nfrom caad import Constrained\n\nwith BuildPart() as plate:\n    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            c.rectangle((-30, -20), (30, 20))\n            p1 = c.point(10, 5)\n    extrude(sk1.sketch, amount=10)\n`;
+ins = call("insert_feature", xyPart, null, "hole", { kind: "Hole", locations: "*points(sk1)", radius: "2" });
+check(ins.src.includes("    with Locations(*points(sk1, reverse=True)):\n        Hole(radius=2)\n"), "+ Hole with the sketch on XY under the part: drills up into it (reverse=True)", ins.src.split("\n").slice(-3).join(" | "));
+check(call("insert_feature", withPoints, null, "hole", { kind: "Hole", locations: "*points(sk1)", radius: "2" }).src.endsWith("    with Locations(*points(sk1)):\n        Hole(radius=2)\n"),
+  "a sketch on a face: the plain direction (into the face)");
+call("run", ins.src, "plate.py", 1);
+r = call("read_feature", ins.src, 2);
+check(field(r, "locations").expr === "*points(sk1)" && field(r, "reverse").expr === "True" && field(r, "far").expr == null, "the dialog reads: At sk1, Drill the other way, not from the far side");
+out = patch(ins.src, 2, { kind: "CounterBoreHole", far: "True" });
+check(out.includes("    with Locations(*points(sk1, reverse=True, far=plate)):\n        CounterBoreHole(radius=2, counter_bore_radius=4, counter_bore_depth=2)\n"), "Start at the far side: far=plate (the part)", out.split("\n").slice(-3).join(" | "));
+out = patch(out, 2, { reverse: null, far: null });
+check(out.includes("    with Locations(*points(sk1)):\n"), "and both off again");
+check(!call("read_feature", bracket, 4).fields.some((x) => x.name === "reverse"), "a hole at explicit positions has no direction checkboxes");
+const onlyPoints = call("run", withPoints, "bracket.py");
+check(onlyPoints.sketches[0]?.name === "sk1" && onlyPoints.sketches[0].points.length === 6 && onlyPoints.sketches[0].edges.length === 0, "a sketch of points shows them (no edges)");
+const ring = `from build123d import *\n\nwith BuildPart() as p:\n    with BuildSketch(Plane.XZ, mode=Mode.PRIVATE) as sk1:\n        with Locations((12.5, 2.5)):\n            Rectangle(5, 5)\n`;
+ins = call("insert_feature", ring, null, "revolve", { profiles: "sk1.sketch", axis: "Axis.Z" });
+check(ins.src.endsWith("    revolve(sk1.sketch)\n") && features(ins.src)[1].label === "Revolve sk1, 360°" && Math.abs(vol(ins.src) - Math.PI * (225 - 100) * 5) < 0.01,
+  "+ Revolve: revolve(sk1.sketch) (Z is the default axis), a ring");
+out = patch(ins.src, 1, { revolution_arc: "90" });
+check(out.endsWith("    revolve(sk1.sketch, revolution_arc=90)\n") && features(out)[1].label === "Revolve sk1, 90°" && Math.abs(vol(out) - Math.PI * 125 * 5 / 4) < 0.01, "90°: a quarter ring");
+r = call("read_feature", out, 1);
+check(field(r, "profiles").type === "sketch" && field(r, "axis").options.map((o) => o.expr).join() === "Axis.Z,Axis.X,Axis.Y", "revolve fields: sketch, axis (Z, X, Y), angle");
+const box = `from build123d import *\n\nwith BuildPart() as p:\n    with Locations((10, 0, 0)):\n        Box(4, 4, 4)\n`;
+ins = call("insert_feature", box, null, "mirror", { about: "Plane.YZ" });
+check(ins.src.endsWith("    mirror(about=Plane.YZ)\n") && features(ins.src)[1].label === "Mirror about YZ" && Math.abs(vol(ins.src) - 128) < 1e-6, "+ Mirror about YZ: mirror(about=Plane.YZ), twice the volume");
+out = patch(ins.src, 1, { about: "Plane.XZ" });
+check(out.endsWith("    mirror()\n") && features(out)[1].label === "Mirror about XZ", "XZ is the default: mirror()");
 
 // --- Shared code: the open part's project is importable (set_project, docs/07) ---
 const plateSrc = readFileSync("../../examples/caad-examples/parts/plate.py", "utf8");

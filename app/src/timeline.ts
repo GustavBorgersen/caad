@@ -11,12 +11,19 @@ const ICONS: Record<string, string> = {
 const DOUBLE_CLICK_MS = 200;
 let clickTimer = 0;
 
+export type AddKind = "extrude" | "revolve" | "hole" | "fillet" | "chamfer" | "mirror";
+const ADD_TITLES: Record<AddKind, string> = {
+  extrude: "Extrude or cut the latest sketch, here", revolve: "Revolve the latest sketch, here",
+  hole: "Holes at the points of the latest sketch with points, here", fillet: "A fillet on the edges selected in the view, here",
+  chamfer: "A chamfer on the edges selected in the view, here", mirror: "Mirror the part so far, here",
+};
+
 export type TimelineHandlers = {
   rollback: (upto: number | null) => void;
   hover: (feature: Feature | null) => void;
   edit: (feature: Feature) => void;
   remove: (feature: Feature) => void;
-  add: (kind: "extrude" | "fillet" | "chamfer") => void; // a new feature at the rollback bar
+  add: (kind: AddKind) => void; // a new feature at the rollback bar
 };
 
 export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: TimelineHandlers) {
@@ -68,10 +75,10 @@ function bar(toEnd: (() => void) | null, h: TimelineHandlers) {
   if (toEnd) text.onclick = toEnd;
   const add = document.createElement("span");
   add.className = "add";
-  for (const kind of ["extrude", "fillet", "chamfer"] as const) {
+  for (const kind of Object.keys(ADD_TITLES) as AddKind[]) {
     const b = document.createElement("button");
     b.textContent = `+ ${kind[0].toUpperCase()}${kind.slice(1)}`;
-    b.title = kind === "extrude" ? "Extrude or cut the latest sketch, here" : `Add a ${kind} here, on the edges selected in the view`;
+    b.title = ADD_TITLES[kind];
     b.onclick = () => h.add(kind);
     add.append(b);
   }

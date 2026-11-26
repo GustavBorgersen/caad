@@ -130,8 +130,7 @@ export class FeatureDialog {
     } else if (f.type === "flip" && (expr === null || expr === this.flipped(f))) {
       input = `<input type="checkbox"${expr !== null ? " checked" : ""}${this.flipped(f) ? "" : ' disabled title="Choose a sketch first"'}>`;
     } else {
-      const placeholder = f.type === "sketch" && this.detail!.pending.length ? `pending: ${this.detail!.pending.join(", ")}`
-        : f.required ? "required" : f.default ?? "";
+      const placeholder = f.placeholder ?? (f.required ? "required" : f.default ?? "");
       input = `<input type="text" spellcheck="false" value="${esc(expr ?? "")}" placeholder="${esc(placeholder)}">`;
       if (f.type === "edges" || f.type === "faces") input += `<button class="use" title="Use the ${f.type} selected in the view">Use selection</button>`;
     }

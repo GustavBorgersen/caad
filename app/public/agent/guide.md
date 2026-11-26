@@ -107,6 +107,35 @@ with BuildPart() as plate:
 - A fully constrained sketch has 0 degrees of freedom; `get_timeline` reports what's left, and conflicting constraints fail at the sketch, naming them.
 - Full API: `api_help("Constrained")`.
 
+## Features the user can edit in dialogs
+
+CAAD reads these forms back as features with a dialog (double-click in the timeline); other code still works but is edited as code. Write them this way when the user will keep working on the part, and change their arguments with `edit_feature` (it keeps the rest of the line as it is).
+
+```python
+from build123d import *
+
+radius = 20
+height = 12
+bolt_r = 2.5
+
+with BuildPart() as hub:
+    with BuildSketch(Plane.XZ, mode=Mode.PRIVATE) as sk1:      # the profile, beside the Z axis
+        with Locations((radius / 2, height / 2)):
+            Rectangle(radius, height)
+    revolve(sk1.sketch, axis=Axis.Z)                          # revolve: the sketch, axis, revolution_arc (degrees)
+    with Locations((radius + 6, 0, 2)):                       # a lug on one side…
+        Box(14, 10, 4)
+    mirror(about=Plane.YZ)                                     # …mirrored to the other (adds the mirror image)
+    with Locations((radius + 8, 0, 4), (-radius - 8, 0, 4)):  # hole: positions (or a face), then one hole
+        CounterBoreHole(radius=bolt_r, counter_bore_radius=2 * bolt_r, counter_bore_depth=1.5)
+    fillet(hub.edges().filter_by(GeomType.CIRCLE).sort_by(Axis.Z)[-1:], radius=1)
+```
+
+- **Extrude** `extrude(sk1.sketch, amount=…, both=True, until=Until.LAST, mode=Mode.SUBTRACT, dir=…)`; **revolve** `revolve(sk1.sketch, axis=Axis.Z, revolution_arc=90)`: refer to a named private sketch.
+- **Hole** at the points of a sketch: draw the positions as points in a constrained sketch on the face (`p1 = c.point(10, 5)`, dimensioned like anything else), then `with Locations(*points(sk2)): Hole(radius=…, depth=…)` (`from caad import Constrained, points`; no depth: through all). Each hole drills into the face the sketch is on (against the sketch plane's normal); `points(sk2, reverse=True)` drills the other way (a sketch on a plane under the part, or between two extrudes), and `points(sk2, far=<the part's builder>)` starts each hole where it leaves the part on the far side, so a counterbore or countersink is on that face. Also `CounterBoreHole(radius, counter_bore_radius, counter_bore_depth)` and `CounterSinkHole(radius, counter_sink_radius, counter_sink_angle=82)`; explicit positions `with Locations((x, y, z), …)` work too.
+- **Fillet / chamfer** `fillet(<edges selector>, radius=…)`, `chamfer(<edges>, length=…)`; **mirror** `mirror(about=Plane.YZ)` adds the mirror image of everything so far (so mirror before the features that should stay on one side only).
+- Any other single build123d call (`Box(…)`, `Cylinder(…)`) gets a generic dialog from its signature.
+
 ## Lines and profiles
 
 ```python

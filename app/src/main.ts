@@ -9,7 +9,7 @@ import { canOpenFolders, examples, indexWorkspace, lastFolder, openFolder, proje
 import { renderSelection } from "./selection";
 import { newPartSource } from "./sketch-code";
 import { Sketcher } from "./sketcher";
-import { renderTimeline } from "./timeline";
+import { renderTimeline, type AddKind } from "./timeline";
 import { makeTools } from "./tools";
 import { Viewer, type Pick } from "./viewer";
 
@@ -361,18 +361,26 @@ async function openDialog(src: string, index: number) {
  * "+ Extrude" / "+ Fillet" / "+ Chamfer" at the rollback bar: a new feature in its dialog. An extrude uses the
  * latest sketch before the bar (preferring one nothing uses yet), fillets and chamfers the selected edges.
  */
-async function addFeature(kind: "extrude" | "fillet" | "chamfer") {
+async function addFeature(kind: AddKind) {
   if (featureDialog.open || sketcher.active || !state.path) return;
   const feats = state.result?.timeline?.features ?? [];
   const last = feats.length - 1;
   const after = state.upto != null && state.upto < last ? state.upto : null;
   let params: Record<string, string>;
-  if (kind === "extrude") {
+  if (kind === "extrude" || kind === "revolve") {
     const sketches = feats.filter((f) => f.kind === "sketch" && f.name && !f.implicit && f.index <= (after ?? last));
     const unused = sketches.filter((s) => !feats.some((f) => f.index > s.index && f.index <= (after ?? last) && f.refs.includes(s.name!)));
     const sketch = (unused.length ? unused : sketches).at(-1);
-    if (!sketch) { status("Draw a sketch first (✎ Sketch), then extrude or cut it."); return; }
-    params = { to_extrude: `${sketch.name}.sketch`, amount: "10" };
+    if (!sketch) { status(`Draw a sketch first (✎ Sketch), then ${kind} it.`); return; }
+    params = kind === "extrude" ? { to_extrude: `${sketch.name}.sketch`, amount: "10" } : { profiles: `${sketch.name}.sketch` };
+  } else if (kind === "hole") { // at the points of the latest sketch with points (preferring one nothing uses yet)
+    const withPoints = feats.filter((f) => f.kind === "sketch" && f.name && f.points && f.index <= (after ?? last));
+    const unused = withPoints.filter((s) => !feats.some((f) => f.index > s.index && f.index <= (after ?? last) && f.refs.includes(s.name!)));
+    const sketch = (unused.length ? unused : withPoints).at(-1);
+    if (!sketch) { status("Draw the hole positions as points in a sketch first (✎ Sketch, the • tool), then + Hole."); return; }
+    params = { kind: "Hole", locations: `*points(${sketch.name})`, radius: "2.5" };
+  } else if (kind === "mirror") {
+    params = { about: "Plane.YZ" };
   } else {
     const edges = selected("edge");
     if (!edges) { status(`Select the edges to ${kind} in the view first (Shift+click for more).`); return; }
@@ -404,6 +412,7 @@ const agents = new Agents(makeTools({
   workspace: () => state.workspace,
   index: () => state.index,
   exportPart,
+  source: () => editor.text,
   path: () => state.path,
   result: () => state.result,
   selection: () => state.selection,

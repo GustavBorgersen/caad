@@ -26,7 +26,7 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | `public/caad.py` / `src/gcs-solve.ts` | Constrained sketches (`from caad import Constrained`), solved by PlaneGCS (WebAssembly, called from Python) |
 | `src/viewer.ts` | three.js view, Z up, face/edge picking and highlighting, outlines of unused sketches |
 | `src/editor.ts` | CodeMirror code panel with error and feature line marks |
-| `src/timeline.ts` | Timeline panel with rollback bar; double-click edits a feature, × deletes one, + Extrude / + Fillet / + Chamfer at the bar add one |
+| `src/timeline.ts` | Timeline panel with rollback bar; double-click edits a feature, × deletes one, + Extrude / Revolve / Hole / Fillet / Chamfer / Mirror at the bar add one |
 | `src/feature-dialog.ts` | Feature dialog: fields from the kernel, live preview, surgical patch on OK (`../docs/05-feature-model.md`) |
 | `src/selection.ts` | Selection panel: properties and verified build123d selectors |
 | `src/project.ts` | The workspace (a local folder via the File System Access API, or the bundled examples), its projects and their files by kind |

@@ -82,6 +82,50 @@ const xz = call("run", part("c.rectangle((0, 0), (20, 10))", { plane: "Plane.XZ"
 const plain = call("run", "from build123d import *\nwith BuildPart() as p:\n    with BuildSketch(Plane.XZ, mode=Mode.PRIVATE) as s:\n        with Locations((10, 5)):\n            Rectangle(20, 10)\n    extrude(s.sketch, amount=5)\n", "part.py");
 check(xz.ok && JSON.stringify(xz.summary.bbox.map((v) => +v.toFixed(3))) === JSON.stringify(plain.summary.bbox.map((v) => +v.toFixed(3))), `on Plane.XZ it lands where a plain build123d sketch does (${xz.summary?.bbox})`);
 
+// --- points(sketch): where holes go ---
+const holes = (body, hole = "Hole(radius=2)") => `from build123d import *
+from caad import Constrained, points
+
+with BuildPart() as p:
+    Box(40, 30, 10)
+    with BuildSketch(p.faces().sort_by(Axis.Z)[-1], mode=Mode.PRIVATE) as sk1:
+        with Constrained() as c:
+${body.trim().split("\n").map((l) => "            " + l.trim()).join("\n")}
+    with Locations(*points(sk1)):
+        ${hole}
+`;
+r = call("run", holes("p1 = c.point(10, 5)\np2 = c.point(-10, 5)\nc.rectangle((-15, -10), (-5, -2), construction=True)"), "part.py");
+check(r.ok && near(40 * 30 * 10 - r.summary.volume, 2 * Math.PI * 4 * 10, 0.01), `two drawn points: two holes through the top (rectangle corners and centre don't count) (${r.error?.message ?? ""})`);
+r = call("run", holes("p1 = c.point(10, 5)", "Hole(radius=2, depth=3)"), "part.py");
+check(r.ok && near(40 * 30 * 10 - r.summary.volume, Math.PI * 4 * 3, 0.01), "drilled into the face the sketch is on (depth 3)");
+check(call("run", holes("p1 = c.point(10, 5)"), "part.py").timeline.features[2].refs.includes("sk1"), "the hole refers to the sketch (it shows it's used)");
+r = call("run", holes("c.rectangle((-15, -10), (-5, -2))"), "part.py");
+check(!r.ok && /no points to use/.test(r.error.message) && r.error.feature === 2, "a sketch without points: a clear error at the hole");
+r = call("run", "from build123d import *\nfrom caad import points\nwith BuildPart() as p:\n    Box(4, 4, 4)\n    with Locations(*points(p)):\n        Hole(1)\n", "part.py");
+check(!r.ok && /takes a sketch with a Constrained block/.test(r.error.message), "points() of something that isn't a constrained sketch: a clear error");
+
+// Direction: a sketch on XY under a part drills away from it; reverse drills into it; far starts on the far side.
+const under = (args, hole) => `from build123d import *
+from caad import Constrained, points
+
+with BuildPart() as p:
+    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:
+        with Constrained() as c:
+            p1 = c.point(10, 5)
+    Box(40, 30, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    with Locations(*points(sk1${args})):
+        ${hole}
+`;
+const cb = "CounterBoreHole(radius=2, counter_bore_radius=4, counter_bore_depth=2)";
+const removedBy = (args, hole) => { const x = call("run", under(args, hole), "part.py"); return x.ok ? 40 * 30 * 10 - x.summary.volume : x.error.message; };
+const through = Math.PI * 4 * 10, recess = Math.PI * 12 * 2;
+check(!near(removedBy("", cb), through + recess), `on XY under the part, the plain direction drills away from it: no proper counterbore (${(+removedBy("", cb)).toFixed(2)} removed)`);
+check(near(removedBy(", reverse=True", cb), through + recess), "reverse=True: drilled up into the part, the counterbore on the bottom face");
+check(near(removedBy(", reverse=True, far=p", cb), through + recess), "far=p: started at the top face, the counterbore there");
+const capAt = (args) => { call("run", under(args, cb), "part.py"); return pyval("round(max(f.center().Z for f in _current['shape'].faces() if f.geom_type.name == 'CYLINDER' and abs(f.radius - 4) < 1e-6), 3)"); };
+check(capAt(", reverse=True") < 5 && capAt(", reverse=True, far=p") > 5, `the counterbore is at the bottom (${capAt(", reverse=True")}) or the top (${capAt(", reverse=True, far=p")})`);
+check(/no far side/.test(removedBy(", far=p", cb)), "far side when drilling away from the part: a clear error");
+
 // --- Arcs and tangency: a slot ---
 r = call("run", part(`
 a, b, e, f = c.point(0, 0), c.point(30, 0), c.point(30, 10), c.point(0, 10)

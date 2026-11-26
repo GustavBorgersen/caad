@@ -1,7 +1,7 @@
 # CAAD — Feature model and code round-trip
 
 **Date:** 2026-11-24, decisions added 2026-11-25
-**Status:** Slices 1 and 2 built (2026-11-25), sketching on its own added; slice 3 next
+**Status:** Built: slices 1–3 (2026-11-26)
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1
 
 ## Problem
@@ -175,7 +175,7 @@ The agent keeps writing code with `write_part` / `edit_part`. The build123d guid
 | :-- | :-- |
 | **1 — Read and patch** (done) | Registry with extrude, fillet and chamfer; call and code tiers; `analyze` extension, `read_feature`, `patch_feature`; Node tests; generic dialog in the page with live preview, opened by double-click |
 | **2 — Named sketches** (done) | Sketcher writes the named form; extrude's sketch field; `insert_feature` and a "+" at the rollback bar (fillet/chamfer from the selected edges); refs and safe delete |
-| **3 — More types, agent** | Revolve, hole, mirror; `edit_feature` tool; guide teaches the canonical forms |
+| **3 — More types, agent** (done) | Revolve, hole (`with Locations(…): Hole/CounterBoreHole/CounterSinkHole(…)`: its type and position are dialog fields that aren't call arguments; switching the type rewrites just the hole call), mirror; *+ Revolve*, *+ Hole* (on the selected face), *+ Mirror* at the rollback bar; `edit_feature` tool; guide teaches the canonical forms |
 
 ## Tests
 

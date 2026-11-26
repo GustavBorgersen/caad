@@ -84,6 +84,10 @@ try {
   r = await call("render", { view: "iso" });
   writeFileSync(`${OUT}/agent-render-plate.png`, Buffer.from(r.content.find((c) => c.type === "image").data, "base64"));
   await page.screenshot({ path: `${OUT}/agent-page.png` });
+  r = await call("edit_feature", { feature: 5, changes: { radius: "6" }, path: "caad-examples/parts/bracket.py" });
+  check(/^Feature 5 is now:\n    fillet\(bracket\.edges\(\)[^\n]*radius=6\)/.test(r.text) && r.text.includes("built OK"), "edit_feature: " + r.text.split("\n").slice(0, 2).join(" | "));
+  r = await call("edit_feature", { feature: 0, changes: { amount: "3" } });
+  check(r.isError && /plain code|no argument|isn't there/.test(r.text), "edit_feature refuses what isn't a feature with arguments: " + r.text.slice(0, 80));
   r = await call("export_part", { format: "step", path: "caad-examples/parts/bracket.py" });
   check(/^Exported caad-examples\/exports\/bracket\.step: STEP, \d+ kB; the whole part/.test(r.text), "export_part: " + r.text);
   r = await call("open_part", { path: "caad-examples/parts/bracket.py", rollback: 1 });

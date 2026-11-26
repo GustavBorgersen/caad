@@ -96,11 +96,14 @@ def analyze(src, filename="part.py"):
         info = _feature_info(s, src)
         if info:
             f.update(tier=info["tier"], name=info.get("name"))
+            if info.get("kind"):
+                f["kind"] = info["kind"]
             if info.get("implicit"):  # adds its faces to the builder's pending faces
                 f["implicit"] = True
                 pending.append(info.get("name") or f"sketch {i}")
             if info.get("constrained"):  # opens in the sketch editor; plain sketches are converted first
                 f["constrained"] = True
+                f["points"] = info["points"]  # drawn points: where points(sketch) puts holes
             if info.get("uses_pending"):  # an extrude/revolve without a sketch takes all pending ones
                 f["pending"], pending = pending, []
             if info.get("label"):
@@ -156,6 +159,45 @@ FEATURE_TYPES = {
         "sketch_arg": "to_extrude",
         "label": _extrude_label,
     },
+    "revolve": {
+        "fields": [
+            {"name": "profiles", "label": "Sketch", "type": "sketch"},
+            {"name": "axis", "label": "Axis", "type": "choice",
+             "options": _choices(("Axis.Z", "Z"), ("Axis.X", "X"), ("Axis.Y", "Y"))},
+            {"name": "revolution_arc", "label": "Angle", "type": "number"},
+            {"name": "mode", "label": "Result", "type": "choice", "options": _MODES},
+        ],
+        "sketch_arg": "profiles",
+        "label": lambda a, p: ", ".join(x for x in [f"Revolve {(a.get('profiles') or '').removesuffix('.sketch') or ', '.join(p)}".strip(),
+                                                    f"{a.get('revolution_arc') or 360}°"] if x),
+    },
+    "mirror": {
+        "fields": [
+            {"name": "about", "label": "About", "type": "choice",
+             "options": _choices(("Plane.XZ", "XZ (front)"), ("Plane.YZ", "YZ (right)"), ("Plane.XY", "XY (top)"))},
+            {"name": "mode", "label": "Result", "type": "choice", "options": _MODES},
+        ],
+        "label": lambda a, p: f"Mirror about {(a.get('about') or 'Plane.XZ').removeprefix('Plane.')}",
+    },
+    # `with Locations(...): Hole(...)`: "kind" (the class) and "locations" aren't call arguments (see _patch_hole)
+    "hole": {
+        "fields": [
+            {"name": "kind", "label": "Type", "type": "choice", "pseudo": True,
+             "options": _choices(("Hole", "Simple"), ("CounterBoreHole", "Counterbore"), ("CounterSinkHole", "Countersink"))},
+            {"name": "locations", "label": "At", "type": "choice", "pseudo": True},  # options: the sketches with points
+            {"name": "reverse", "label": "Drill the other way", "type": "bool", "pseudo": True},   # points(sk, reverse=True)
+            {"name": "far", "label": "Start at the far side", "type": "bool", "pseudo": True},     # points(sk, far=<part>)
+            {"name": "radius", "label": "Radius", "type": "number"},
+            {"name": "counter_bore_radius", "label": "Counterbore radius", "type": "number", "show_if": {"kind": "CounterBoreHole"}},
+            {"name": "counter_bore_depth", "label": "Counterbore depth", "type": "number", "show_if": {"kind": "CounterBoreHole"}},
+            {"name": "counter_sink_radius", "label": "Countersink radius", "type": "number", "show_if": {"kind": "CounterSinkHole"}},
+            {"name": "counter_sink_angle", "label": "Countersink angle", "type": "number", "show_if": {"kind": "CounterSinkHole"}},
+            {"name": "depth", "label": "Depth", "type": "number", "placeholder": "through all"},
+        ],
+        "label": lambda a, p: f"{ {'CounterBoreHole': 'Counterbore hole', 'CounterSinkHole': 'Countersink hole'}.get(a.get('kind'), 'Hole')}"
+                              f" r = {_num(a.get('radius'))}" + (f", depth {_num(a['depth'])}" if a.get("depth") else "")
+                              + (f" at {a['at'][len('*points('):-1]}" if (a.get("at") or "").startswith("*points(") else ""),
+    },
     "fillet": {
         "fields": [
             {"name": "objects", "label": "Edges", "type": "edges"},
@@ -206,11 +248,30 @@ def _bind(call, sig):
     return out
 
 
-def _call_of(stmt):
-    """The build123d call a statement consists of, with its signature and bound arguments."""
-    if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) and isinstance(stmt.value.func, ast.Name)):
+_HOLES = ("Hole", "CounterBoreHole", "CounterSinkHole")
+
+
+def _hole_parts(stmt):
+    """(Locations call, hole call) of a `with Locations(...): Hole(...)` statement, else None."""
+    if not (isinstance(stmt, ast.With) and len(stmt.items) == 1 and len(stmt.body) == 1 and not stmt.items[0].optional_vars):
         return None
-    call = stmt.value
+    loc, inner = stmt.items[0].context_expr, stmt.body[0]
+    if not (isinstance(loc, ast.Call) and isinstance(loc.func, ast.Name) and loc.func.id == "Locations" and loc.args and not loc.keywords):
+        return None
+    if isinstance(inner, ast.Expr) and isinstance(inner.value, ast.Call) and isinstance(inner.value.func, ast.Name) and inner.value.func.id in _HOLES:
+        return loc, inner.value
+    return None
+
+
+def _call_of(stmt):
+    """The build123d call a statement consists of (a hole's call, for a hole), with its signature and bound arguments."""
+    hole = _hole_parts(stmt)
+    if hole:
+        call = hole[1]
+    elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) and isinstance(stmt.value.func, ast.Name):
+        call = stmt.value
+    else:
+        return None
     sig = _signature(call.func.id)
     args = _bind(call, sig) if sig else None
     return None if args is None else (call, sig, args)
@@ -222,24 +283,32 @@ def _is_none(node):
 
 def _feature_info(stmt, src):
     """Tier, name and label of a feature statement, or None for plain code."""
-    if isinstance(stmt, ast.With):
+    hole = _hole_parts(stmt)
+    if isinstance(stmt, ast.With) and not hole:
         item = stmt.items[0]
         if _call_name(item.context_expr) != "BuildSketch":
             return None
         mode = next((k.value for k in item.context_expr.keywords if k.arg == "mode"), None)
         private = isinstance(mode, ast.Attribute) and mode.attr == "PRIVATE"
         name = item.optional_vars.id if isinstance(item.optional_vars, ast.Name) else None
-        constrained = any(isinstance(n, ast.With) and _call_name(n.items[0].context_expr) == "Constrained" for n in stmt.body)
-        return {"tier": "code", "name": name, "implicit": not private, "constrained": constrained}
+        blocks = [n for n in stmt.body if isinstance(n, ast.With) and _call_name(n.items[0].context_expr) == "Constrained"]
+        placed = sum(1 for b in blocks for n in ast.walk(b) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                     and n.func.attr == "point" and isinstance(n.func.value, ast.Name))
+        return {"tier": "code", "name": name, "implicit": not private, "constrained": bool(blocks), "points": placed}
     found = _call_of(stmt)
     if not found:
         return None
     call, sig, args = found
-    ftype = FEATURE_TYPES.get(call.func.id)
+    ftype = FEATURE_TYPES.get("hole" if hole else call.func.id)
     if not ftype:
         return {"tier": "call"}
     exprs = {n: ast.get_source_segment(src, v[0]) for n, v in args.items()}
     info = {"tier": "type", "label": lambda pending: ftype["label"](exprs, pending)}
+    if hole:
+        exprs["kind"] = call.func.id
+        t = _Text(src)
+        exprs["at"] = src[t.start(hole[0].args[0]):t.end(hole[0].args[-1])]
+        info["kind"] = "hole"
     if "sketch_arg" in ftype and _is_none(args.get(ftype["sketch_arg"], (None,))[0]):
         info["uses_pending"] = True
     return info
@@ -263,9 +332,10 @@ def _default_expr(value):
     return None
 
 
-def _fields(name, sig):
-    """Dialog fields for a call: the feature type's fields, or generic ones from the signature."""
-    ftype = FEATURE_TYPES.get(name)
+def _fields(name, sig, kind=None):
+    """Dialog fields for a call: the feature type's fields (`kind` when it isn't the call's name, as for holes),
+    or generic ones from the signature."""
+    ftype = FEATURE_TYPES.get(kind or name)
     fields = [dict(f) for f in ftype["fields"]] if ftype else []
     listed = {f["name"] for f in fields}
     for p in sig.parameters.values():
@@ -277,9 +347,13 @@ def _fields(name, sig):
             fields.append({"name": p.name, "label": p.name.replace("_", " ").capitalize(), "extra": bool(ftype),
                            **generic})
     for f in fields:
-        p = sig.parameters[f["name"]]
-        f["required"] = p.default is inspect.Parameter.empty
-        f["default"] = _default_expr(p.default)
+        if f.get("pseudo"):
+            f["required"], f["default"] = True, None
+            continue
+        p = sig.parameters.get(f["name"]) or next(
+            (s.parameters[f["name"]] for s in map(_signature, _HOLES) if s and f["name"] in s.parameters), None)
+        f["required"] = p is not None and p.default is inspect.Parameter.empty and f["name"] in sig.parameters
+        f["default"] = _default_expr(p.default) if p is not None else None
     return fields
 
 
@@ -323,14 +397,31 @@ def read_feature(src, index):
     if feat["tier"] == "code" or not found:
         return out
     call, sig, args = found
+    hole = _hole_parts(stmt)
     # The model before the feature, kept for feature_values: previews of the edit replace the latest run.
     env = globals()["_edit_env"] = _env()
     out["call"] = call.func.id
-    out["fields"] = _fields(call.func.id, sig)
+    out["fields"] = _fields(call.func.id, sig, "hole" if hole else None)
     for f in out["fields"]:
+        if f["name"] == "kind" and hole:
+            f.update(expr=call.func.id, value=None, error=None)
+            continue
+        if f["name"] in ("reverse", "far") and hole:
+            at = _hole_points(hole[0])
+            f.update(expr=("True" if at and at[f["name"]] else None), value=None, error=None, required=False)
+            continue
+        if f["name"] == "locations" and hole:
+            t = _Text(src)
+            at = _hole_points(hole[0])
+            f.update(expr=f"*points({at['sketch']})" if at else src[t.start(hole[0].args[0]):t.end(hole[0].args[-1])], value=None, error=None,
+                     options=[{"expr": f"*points({g['name']})", "label": f"{g['name']} ({g['points']} point{'' if g['points'] == 1 else 's'})"}
+                              for g in feats[:index] if g["kind"] == "sketch" and g["name"] and g.get("points")])
+            continue
         arg = args.get(f["name"])
         f["expr"] = ast.get_source_segment(src, arg[0]) if arg else None
         f.update(_evaluate(f["expr"], env) if f["expr"] is not None else {"value": None, "error": None})
+    if hole and not _hole_points(hole[0]):  # explicit positions: nothing to turn around
+        out["fields"] = [f for f in out["fields"] if f["name"] not in ("reverse", "far")]
     return out
 
 
@@ -369,6 +460,14 @@ class _Text:
         return self.starts[node.lineno - 1], self.starts[node.end_lineno]
 
 
+def _parses(code):
+    try:
+        ast.parse(code, mode="eval")
+        return True
+    except SyntaxError:
+        return False
+
+
 def _is_default(expr, default):
     """Does the expression equal the parameter's default? (Evaluated with build123d names only.)"""
     import build123d
@@ -380,10 +479,80 @@ def _is_default(expr, default):
         return False
 
 
+def _hole_points(loc):
+    """{"sketch", "reverse", "far"} of a hole at `Locations(*points(sk, reverse=…, far=…))`, else None."""
+    if len(loc.args) != 1 or not isinstance(loc.args[0], ast.Starred):
+        return None
+    call = loc.args[0].value
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "points"
+            and len(call.args) == 1 and isinstance(call.args[0], ast.Name)):
+        return None
+    kw = {k.arg: k.value for k in call.keywords}
+    reverse = kw.get("reverse")
+    return {"sketch": call.args[0].id, "reverse": isinstance(reverse, ast.Constant) and reverse.value is True,
+            "far": ast.unparse(kw["far"]) if "far" in kw else None}
+
+
+def _points_call(sketch, reverse, far):
+    return f"*points({sketch}" + (", reverse=True" if reverse else "") + (f", far={far}" if far else "") + ")"
+
+
+def _patch_hole(src, stmt, name, expr):
+    """A hole's "locations" (the Locations arguments) or "kind" (switching the class rewrites just the hole call,
+    keeping the arguments the new class takes and giving the ones it needs a start from the radius)."""
+    loc, call = _hole_parts(stmt)
+    t = _Text(src)
+    span = (t.start(loc.args[0]), t.end(loc.args[-1]))
+    if name in ("reverse", "far"):  # a flag of points(): rewrite the call
+        at = _hole_points(loc)
+        if at is None:
+            raise ValueError("Only holes at a sketch's points can drill the other way or start at the far side.")
+        at[name] = bool(expr and expr != "False")
+        if name == "far":
+            at["far"] = _find_part_block(ast.parse(src))[1] if at["far"] else None
+        return src[:span[0]] + _points_call(at["sketch"], at["reverse"], at["far"]) + src[span[1]:]
+    if not expr:
+        raise ValueError(f"The hole's {'position' if name == 'locations' else 'type'} is required.")
+    if name == "locations":
+        at, new = _hole_points(loc), ast.parse(f"f({expr})", mode="eval").body if _parses(f"f({expr})") else None
+        if at and new is not None and len(new.args) == 1 and isinstance(new.args[0], ast.Starred):  # another sketch: keep the flags
+            target = _hole_points(ast.parse(f"Locations({expr})", mode="eval").body)
+            if target:
+                return src[:span[0]] + _points_call(target["sketch"], at["reverse"], at["far"]) + src[span[1]:]
+        try:
+            ast.parse(f"f({expr})", mode="eval")
+        except SyntaxError as e:
+            raise ValueError(f"At: {e.msg} in {expr!r}") from None
+        return src[:t.start(loc.args[0])] + expr + src[t.end(loc.args[-1]):]
+    if expr not in _HOLES:
+        raise ValueError(f"Unknown hole type {expr!r}.")
+    if expr == call.func.id:
+        return src
+    old = _call_of(stmt)[2]
+    exprs = {n: ast.get_source_segment(src, v[0]) for n, v in old.items()}
+    try:
+        r = float(eval(exprs.get("radius", "1"), globals().get("_edit_env") or _env()))
+    except Exception:  # noqa: BLE001 - only a starting value
+        r = 1.0
+    starts = {"counter_bore_radius": _fmt(2 * r), "counter_bore_depth": _fmt(r), "counter_sink_radius": _fmt(2 * r)}
+    sig = _signature(expr)
+    keep = {n: e for n, e in exprs.items() if n in sig.parameters}
+    for n, p in sig.parameters.items():
+        if p.default is inspect.Parameter.empty and n not in keep:
+            keep[n] = starts.get(n, "1")
+    order = [f["name"] for f in FEATURE_TYPES["hole"]["fields"]] + list(sig.parameters)
+    text = f"{expr}(" + ", ".join(f"{n}={keep[n]}" for n in dict.fromkeys(order) if n in keep) + ")"
+    return src[:t.start(call)] + text + src[t.end(call):]
+
+
 def _patch_one(src, index, name, expr):
     """Source with one argument of feature `index` changed, added or removed (expr None)."""
     stmt = _feature_stmt(src, index)
+    if _hole_parts(stmt) and name in ("kind", "locations", "reverse", "far"):
+        return _patch_hole(src, stmt, name, expr)
     call, sig, args = _call_of(stmt)
+    if expr is None and name not in sig.parameters and _hole_parts(stmt):
+        return src  # a field of another hole type, hidden in the dialog
     if name not in sig.parameters:
         raise ValueError(f"{call.func.id}() has no argument '{name}'.")
     param = sig.parameters[name]
@@ -446,7 +615,9 @@ def patch_feature(src, index, kind, changes):
     if index >= len(before) or before[index]["kind"] != kind or before[index]["tier"] == "code":
         raise ValueError("The file changed: this feature isn't there any more. Close the dialog and try again.")
     out = src
-    for name, expr in changes.items():
+    changes = dict(changes)
+    for name in sorted(changes, key=lambda n: n != "kind"):  # a hole's type first: the other fields follow it
+        expr = changes[name]
         expr = expr if isinstance(expr, str) else None  # JS null arrives as JsNull
 
         out = _patch_one(out, index, name, expr)
@@ -485,11 +656,17 @@ def _create(kind, params):
 
 
 def _ensure_import(src, module, name):
-    """Source with `from module import name`, added after the file's first imports if it's missing."""
+    """Source with `from module import name`: added to the file's `from module import …` line if it has one,
+    else as a new line after the file's first imports."""
     tree = ast.parse(src)
     for n in ast.walk(tree):
         if isinstance(n, ast.ImportFrom) and n.module == module and any(a.name in (name, "*") for a in n.names):
             return src
+    line = next((n for n in tree.body if isinstance(n, ast.ImportFrom) and n.module == module and n.lineno == n.end_lineno), None)
+    if line is not None:
+        t = _Text(src)
+        names = ", ".join([ast.get_source_segment(src, a) for a in line.names] + [name])
+        return src[:t.start(line)] + f"from {module} import {names}" + src[t.end(line):]
     imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
     lines = src.splitlines(True)
     at = imports[-1].end_lineno if imports else 0
@@ -497,6 +674,25 @@ def _ensure_import(src, module, name):
         lines[at - 1] += "\n"
     lines.insert(at, f"from {module} import {name}\n")
     return "".join(lines)
+
+
+def _drills_away(src, after, sketch, filename="part.py"):
+    """Would a hole at the sketch's first point drill away from the part (so it should drill the other way)?
+    Checked against the part as it is at `after`: is the material on the drilling side or the other one?"""
+    try:
+        import caad
+        from build123d import Plane
+        ns = {"__name__": "__caad__", "__file__": filename}
+        upto = None if after is None else after
+        exec(compile(_truncate(src, filename, upto), filename, "exec"), ns)
+        part = ns[_find_part_block(ast.parse(src))[1]].part
+        plane = Plane(caad.points(ns[sketch])[0])
+        step = 0.01
+        into = part.is_inside(plane.origin - plane.z_dir * step)
+        other = part.is_inside(plane.origin + plane.z_dir * step)
+        return other and not into
+    except Exception:  # noqa: BLE001 - only a default: keep the plain direction
+        return False
 
 
 def insert_feature(src, after, kind, params):
@@ -519,6 +715,18 @@ def insert_feature(src, after, kind, params):
         body = list(params.get("body") or ["pass"])
         lines = [f"with BuildSketch({params.get('plane') or 'Plane.XY'}, mode=Mode.PRIVATE) as {name}:"]
         lines += ["    " + line for line in body]
+    elif kind == "hole":
+        cls, at = params.pop("kind", None) or "Hole", params.pop("locations", None)
+        if not at:
+            raise ValueError("A hole needs a position (locations).")
+        target = _hole_points(ast.parse(f"Locations({at})", mode="eval").body)
+        if target and _drills_away(src, after, target["sketch"]):
+            at = _points_call(target["sketch"], True, None)
+        lines = [f"with Locations({at}):", "    " + _create(cls, params)[0]]
+        if "points(" in at:
+            src = _ensure_import(src, "caad", "points")
+            tree = ast.parse(src)
+            block, _ = _find_part_block(tree)
     else:
         lines = _create(kind, params)
     t = _Text(src)
@@ -1177,11 +1385,19 @@ def _sketch_outlines(ns, feats, last, tol=0.05, angular=0.2):
             continue
         try:
             sketch = ns[name].sketch
-        except Exception:  # noqa: BLE001 - a sketch that failed half-way: nothing to show
-            continue
-        if sketch is not None:
-            out.append({"name": name, "index": f["index"],
-                        "edges": [{"points": _edge_points(e, tol, angular)} for e in sketch.edges()]})
+        except Exception:  # noqa: BLE001 - no regions (only points), or a sketch that failed half-way
+            sketch = None
+        placed = []
+        c = getattr(ns[name], "_caad_sketch", None)
+        if c is not None:
+            from build123d import Location
+            for p in (e for e in c._entities if getattr(e, "placed", False)):
+                for pl in ns[name].output_placements:
+                    v = (pl * Location((p.x, p.y))).position
+                    placed += [v.X, v.Y, v.Z]
+        if sketch is not None or placed:
+            out.append({"name": name, "index": f["index"], "points": placed,
+                        "edges": [{"points": _edge_points(e, tol, angular)} for e in sketch.edges()] if sketch is not None else []})
     return out
 
 

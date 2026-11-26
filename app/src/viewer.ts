@@ -141,14 +141,23 @@ export class Viewer {
   highlight(picks: Pick[]) { this.agent = picks; this.recolor(); this.render(); }
 
   private sketchLines: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | null = null;
+  private sketchPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
 
   /** Outlines of the sketches no feature uses yet. `fit` frames them (a part without a solid yet). */
   setSketches(sketches: SketchOutline[], fit: boolean) {
-    if (this.sketchLines) {
-      this.scene.remove(this.sketchLines);
-      this.sketchLines.geometry.dispose();
-      this.sketchLines.material.dispose();
-      this.sketchLines = null;
+    for (const obj of [this.sketchLines, this.sketchPoints]) {
+      if (!obj) continue;
+      this.scene.remove(obj);
+      obj.geometry.dispose();
+      obj.material.dispose();
+    }
+    this.sketchLines = this.sketchPoints = null;
+    const dots = sketches.flatMap((s) => s.points ?? []);
+    if (dots.length) { // drawn points (where holes can go)
+      const geo = new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(dots, 3));
+      this.sketchPoints = new THREE.Points(geo, new THREE.PointsMaterial({ color: SKETCH_COLOR, size: 7, sizeAttenuation: false, depthTest: false }));
+      this.sketchPoints.renderOrder = 3;
+      this.scene.add(this.sketchPoints);
     }
     const segs: number[] = [];
     for (const s of sketches) for (const e of s.edges) for (let k = 0; k + 5 < e.points.length; k += 3) segs.push(...e.points.subarray(k, k + 6));
@@ -164,6 +173,11 @@ export class Viewer {
         const { min, max } = geo.boundingBox!;
         this.fit([min.x, min.y, min.z, max.x, max.y, max.z]);
       }
+    }
+    if (fit && !segs.length && dots.length) {
+      this.sketchPoints!.geometry.computeBoundingBox();
+      const { min, max } = this.sketchPoints!.geometry.boundingBox!;
+      this.fit([min.x, min.y, min.z, max.x, max.y, max.z]);
     }
     this.render();
   }

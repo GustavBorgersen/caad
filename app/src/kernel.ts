@@ -22,6 +22,7 @@ export type Feature = {
   refs: string[]; // names of earlier features it uses
   implicit?: boolean; // a sketch that adds its faces to the pending ones
   constrained?: boolean; // a constrained sketch (opens in the sketch editor; plain ones are converted first)
+  points?: number; // a constrained sketch's drawn points: where points(sketch) puts holes
   pending?: string[]; // the pending sketches an extrude without a sketch uses
   sketch?: { dof?: number; message?: string }; // a constrained sketch: degrees of freedom left (none without a solver)
 };
@@ -34,6 +35,8 @@ export type FeatureField = {
   options?: { expr?: string; label: string }[];
   show_if?: Record<string, string | null>;
   extra?: boolean; // not one of the feature type's own fields
+  placeholder?: string; // shown when empty ("through all" for a hole's depth)
+  pseudo?: boolean; // not a call argument (a hole's type and position)
   required: boolean;
   default?: string;
   expr?: string;
@@ -80,7 +83,7 @@ export type SketchAction =
   | { op: "move"; points: Record<string, [number, number]>; circles?: Record<string, number> }
   | { op: "delete"; entities: string[]; constraints: string[] };
 
-export type SketchOutline = { name: string; index: number; edges: { points: Float32Array }[] };
+export type SketchOutline = { name: string; index: number; edges: { points: Float32Array }[]; points: number[] /* drawn points, x y z… */ };
 
 export type BuildResult = {
   ok: boolean;

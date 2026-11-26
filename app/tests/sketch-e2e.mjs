@@ -194,6 +194,16 @@ try {
   await page.waitForFunction(() => !window.caad.sketcher.active);
   check(!(await code()).includes("sk2"), "Cancel saves nothing");
 
+  // 4b. A sketch of points only (where holes will go): Done works, the points show.
+  await page.evaluate(() => window.caad.startSketch("bracket.faces().filter_by(Axis.Z).sort_by(Axis.Z)[0]", "the bottom"));
+  await opened();
+  await tool("point");
+  await clickAt(-20, 5);
+  await clickAt(20, 5);
+  check(!(await page.$eval("#sketch-panel .primary", (b) => b.disabled)) && /p1 = c\.point\(-20, 5\)\n\s+p2 = c\.point\(20, 5\)/.test(await sketchSrc()), "a sketch of two points can be closed (Done)");
+  await done();
+  check(await page.evaluate(() => window.caad.state.result.sketches.some((s) => s.points.length === 6)), "its points show in the view");
+
   // 5. A circle on the top face, centred on the origin (it snaps there): extrude it.
   await page.evaluate(() => window.caad.startSketch("bracket.faces().filter_by(Axis.Z).sort_by(Axis.Z)[-1]", "the top"));
   await opened();

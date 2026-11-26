@@ -19,6 +19,8 @@ export interface App {
   note(message: string | null): void;
   /** Export the open part as STEP or STL into its project's exports/ (the path), or download it if it's in no project. */
   exportPart(format: "step" | "stl"): Promise<{ path?: string; bytes: number; summary: NonNullable<BuildResult["summary"]> }>;
+  /** The open part's source as the user sees it. */
+  source(): string;
 }
 
 const KERNEL_WAIT_MS = 100_000;
@@ -124,6 +126,21 @@ export function makeTools(app: App): Record<string, ToolHandler> {
       }
       if (loose.length) lines.push("In no project:", ...loose.map((f) => `  ${f.path}`));
       return text(lines.length ? lines.join("\n") : "No CAAD projects or build123d files here yet. Ask the user to create a project (New project), or create one with write_part.");
+    },
+
+    async edit_feature({ feature, changes, path }: { feature: number; changes: Record<string, string | null>; path?: string }) {
+      needProject();
+      await needKernel();
+      if (path && path !== app.path()) await app.openPart(path);
+      needPart();
+      const feats = app.result()!.timeline?.features ?? [];
+      const f = feats[feature];
+      if (!f) throw new Error(`There is no feature ${feature}; get_timeline lists them (0 = the first).`);
+      if (f.tier === "code") throw new Error(`Feature ${feature} (${f.label}) is plain code, not a feature with arguments: use edit_part.`);
+      const src = await app.kernel.patchFeature(app.source(), feature, f.kind, changes);
+      const r = await app.applyCode(app.path()!, src);
+      const line = src.split("\n").slice(f.line - 1, f.end).join("\n");
+      return text(`Feature ${feature} is now:\n${line}\n\n${describeBuild(app.path()!, r)}`, !!r && !r.ok);
     },
 
     async export_part({ format, path }: { format: "step" | "stl"; path?: string }) {

@@ -108,10 +108,21 @@ try {
   await panelClosed();
   await waitBuild(g);
 
-  // 6. A code feature: no dialog, the code is shown.
+  // 6. The bracket's hole is a hole feature: depth, then a counterbore (its own fields appear).
   await dblclick(4);
-  await new Promise((r) => setTimeout(r, 300));
-  check(await page.$eval("#feature-panel", (p) => p.hidden) && /code/.test(await page.$eval("#status", (s) => s.textContent)), "a code feature points to the code panel");
+  await panelOpen();
+  let rows = await page.$$eval("#feature-panel .row", (r) => r.map((x) => x.dataset.field));
+  check(JSON.stringify(rows) === JSON.stringify(["kind", "locations", "radius", "depth"]) &&
+    (await page.$eval('#feature-panel [data-field="depth"] input', (i) => i.placeholder)) === "through all", `hole fields: ${rows} (depth empty: through all)`);
+  await page.select('#feature-panel [data-field="kind"] select', "CounterBoreHole");
+  rows = await page.$$eval("#feature-panel .row", (r) => r.map((x) => x.dataset.field));
+  check(rows.includes("counter_bore_radius") && rows.includes("counter_bore_depth"), "choosing Counterbore shows its sizes");
+  await type("depth", "6");
+  g = await gen();
+  await page.click("#feature-panel .primary");
+  await panelClosed();
+  await waitBuild(g);
+  check((await code()).includes("        CounterBoreHole(radius=hole_d / 2, counter_bore_radius=10, counter_bore_depth=5, depth=6)"), "a counterbore hole, 6 deep: only the hole's call changed");
 
   // 7. A call feature (Cylinder in the pump body): generic dialog, add an argument.
   await page.evaluate(() => window.caad.openPart("caad-examples/parts/pump_body.py"));
@@ -131,6 +142,10 @@ try {
   check(src === pumpBefore.replace("Cylinder(outer_r, height, align=(Align.CENTER, Align.CENTER, Align.MIN))", "Cylinder(outer_r, height, align=(Align.CENTER, Align.CENTER, Align.MIN), arc_size=180)"),
     "Add argument appends arc_size=180");
   await page.screenshot({ path: `${OUT}/feature-3-call.png` });
+  // A code feature (with Locations(...): Cylinder(...)): no dialog, the code is shown.
+  await dblclick(2);
+  await new Promise((r) => setTimeout(r, 300));
+  check(await page.$eval("#feature-panel", (p) => p.hidden) && /code/.test(await page.$eval("#status", (s) => s.textContent)), "a code feature points to the code panel");
 
   // 8. Named sketches: the extrude's sketch is a choice of the sketches before it.
   const twoSketches = `from build123d import *
@@ -203,6 +218,71 @@ with BuildPart() as part:
   await panelClosed();
   await new Promise((r) => setTimeout(r, 500));
   check((await code()) === src, "a cancelled new chamfer leaves the file as it was");
+
+  // 12. "+ Hole" at the points of a sketch: a hole at each point, drilled into the sketch's face.
+  const plate = `from build123d import *\nfrom caad import Constrained\n\nwith BuildPart() as plate:\n    Box(60, 40, 8)\n    with BuildSketch(plate.faces().sort_by(Axis.Z)[-1], mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            p1 = c.point(-20, 10)\n            p2 = c.point(20, 10)\n            c.hdistance(p1, p2, 40)\n`;
+  await page.evaluate((s) => window.caad.applyCode("caad-examples/parts/holes.py", s), plate);
+  await page.waitForFunction(() => window.caad.state.path === "caad-examples/parts/holes.py" && window.caad.state.result?.ok, { timeout: 60_000 });
+  check(await page.evaluate(() => window.caad.state.result.sketches[0]?.points.length === 6), "the sketch's two points show in the view");
+  await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Hole").click());
+  await panelOpen();
+  const at = await page.$eval('#feature-panel [data-field="locations"] select', (s) => [...s.options].map((o) => `${o.selected ? "*" : ""}${o.textContent}`).join());
+  check(/New hole/.test(await page.$eval("#feature-panel .head", (h) => h.textContent)) && at === "*sk1 (2 points)", `the dialog opens for the new hole at sk1 (${at})`);
+  await type("radius", "3");
+  g = await gen();
+  await page.click("#feature-panel .primary");
+  await panelClosed();
+  await waitBuild(g);
+  src = await code();
+  check(src.includes("from caad import Constrained, points\n") && src.endsWith("    with Locations(*points(sk1)):\n        Hole(radius=3)\n") &&
+    Math.abs(60 * 40 * 8 - (await page.evaluate(() => window.caad.state.result.summary.volume)) - 2 * Math.PI * 9 * 8) < 0.01, "+ Hole: two holes through the plate, at the points");
+  // Move a point (as the sketch editor would): its hole moves along.
+  g = await gen();
+  await page.evaluate((s) => window.caad.applyCode("caad-examples/parts/holes.py", s), src.replace("c.point(20, 10)", "c.point(20, -10)").replace("            c.hdistance(p1, p2, 40)\n", ""));
+  await waitBuild(g);
+  check(await page.evaluate(() => window.caad.state.result.ok), "the moved point's part builds");
+  const holeAt = await page.evaluate(async () => (await window.caad.kernel.snippet("[round(f.center().Y, 3) for f in plate.faces().filter_by(GeomType.CYLINDER)]")).value);
+  check(String(holeAt).includes("-10") && String(holeAt).includes("10"), `moving a point moves its hole (hole centres at y = ${holeAt})`);
+
+  // 12b. A sketch on XY under the part: + Hole drills up into it; Start at the far side puts the counterbore on top.
+  const under = `from build123d import *\nfrom caad import Constrained\n\nwith BuildPart() as base:\n    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            c.rectangle((-30, -20), (30, 20))\n            p1 = c.point(10, 5)\n    extrude(sk1.sketch, amount=10)\n`;
+  await page.evaluate((s) => window.caad.applyCode("caad-examples/parts/under.py", s), under);
+  await page.waitForFunction(() => window.caad.state.path === "caad-examples/parts/under.py" && window.caad.state.result?.ok, { timeout: 60_000 });
+  await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Hole").click());
+  await panelOpen();
+  check(await page.$eval('#feature-panel [data-field="reverse"] input', (i) => i.checked), "+ Hole under the part: Drill the other way is ticked (towards the part)");
+  await page.select('#feature-panel [data-field="kind"] select', "CounterBoreHole");
+  await page.click('#feature-panel [data-field="far"] input');
+  g = await gen();
+  await page.click("#feature-panel .primary");
+  await panelClosed();
+  await waitBuild(g);
+  src = await code();
+  const capZ = await page.evaluate(async () => (await window.caad.kernel.snippet("max(round(f.center().Z, 3) for f in base.faces() if f.geom_type.name == 'CYLINDER' and f.radius > 3)")).value);
+  check(src.includes("with Locations(*points(sk1, reverse=True, far=base)):\n        CounterBoreHole(") && Number(capZ) > 5, `counterbore from the far side: on the top face (z ${capZ})`);
+
+  // 13. "+ Revolve" the latest sketch, a quarter turn; "+ Mirror" it about YZ.
+  const ring = `from build123d import *\n\nwith BuildPart() as ring:\n    with BuildSketch(Plane.XZ, mode=Mode.PRIVATE) as sk1:\n        with Locations((12.5, 2.5)):\n            Rectangle(5, 5)\n`;
+  g = await gen();
+  await page.evaluate((s) => window.caad.applyCode("caad-examples/parts/ring.py", s), ring);
+  await page.waitForFunction(() => window.caad.state.path === "caad-examples/parts/ring.py" && window.caad.state.result?.ok, { timeout: 60_000 });
+  await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Revolve").click());
+  await panelOpen();
+  await type("revolution_arc", "90");
+  g = await gen();
+  await page.click("#feature-panel .primary");
+  await panelClosed();
+  await waitBuild(g);
+  const quarter = Math.PI * (15 ** 2 - 10 ** 2) * 5 / 4;
+  check((await code()).endsWith("    revolve(sk1.sketch, revolution_arc=90)\n") && Math.abs((await page.evaluate(() => window.caad.state.result.summary.volume)) - quarter) < 0.01, "+ Revolve: a quarter ring");
+  await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Mirror").click());
+  await panelOpen();
+  g = await gen();
+  await page.click("#feature-panel .primary");
+  await panelClosed();
+  await waitBuild(g);
+  check((await code()).endsWith("    mirror(about=Plane.YZ)\n") && Math.abs((await page.evaluate(() => window.caad.state.result.summary.volume)) - 2 * quarter) < 0.01, "+ Mirror about YZ: twice the volume");
+  await page.screenshot({ path: `${OUT}/feature-4-revolve.png` });
 
   console.log(failures ? `\n${failures} FAILED` : "\nALL PASSED");
   await finish(failures ? 1 : 0);
