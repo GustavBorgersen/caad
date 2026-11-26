@@ -1,5 +1,6 @@
 // "Agent" button and dialog: connection status, bridge download for this OS, and setup commands.
 import { localAccess, type AgentLink, type Agents } from "./agent";
+import { siteUrl } from "./site";
 
 type Os = "linux" | "darwin" | "windows";
 const BINARIES: { os: Os; arch: string; label: string }[] = [
@@ -28,7 +29,7 @@ async function detectArch(os: Os): Promise<string> {
 const isLocal = () => ["127.0.0.1", "localhost"].includes(location.hostname);
 
 function commands(os: Os, arch: string) {
-  const url = `${location.origin}/bridge/${file(os, arch)}`;
+  const url = siteUrl(`bridge/${file(os, arch)}`);
   const allow = isLocal() ? "" : ` --allow-origin ${location.origin}`;
   if (os === "windows") {
     const exe = "$env:LOCALAPPDATA\\caad\\caad-mcp.exe";
@@ -68,7 +69,7 @@ export function setupAgentDialog(dialog: HTMLDialogElement, button: HTMLButtonEl
       <h3>1. Install the bridge <span class="muted">(${esc(BINARIES.find((b) => b.os === os && b.arch === arch)?.label ?? os)}, ${c.shell})</span></h3>
       ${block(c.install)}
       <details><summary>Other systems / direct download</summary><ul>${BINARIES.map((b) =>
-        `<li><a href="/bridge/${file(b.os, b.arch)}" download>${b.label}</a></li>`).join("")}</ul></details>
+        `<li><a href="${siteUrl(`bridge/${file(b.os, b.arch)}`)}" download>${b.label}</a></li>`).join("")}</ul></details>
       <h3>2. Add it to your agent</h3>
       <p>Claude Code (once, works in every folder):</p>
       ${block(c.add)}

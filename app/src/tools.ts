@@ -3,6 +3,7 @@ import { text, type ToolHandler, type ToolResult } from "./agent";
 import type { BuildResult, Feature, Kernel, SelectInfo } from "./kernel";
 import { projectOf, type Workspace, type WorkspaceIndex } from "./project";
 import type { Pick, Viewer } from "./viewer";
+import { siteUrl } from "./site";
 
 export interface App {
   kernel: Kernel;
@@ -85,7 +86,7 @@ export function makeTools(app: App): Record<string, ToolHandler> {
     },
 
     async build123d_guide({ topic }: { topic?: string }) {
-      guide ??= await (await fetch("/agent/guide.md")).text();
+      guide ??= await (await fetch(siteUrl("agent/guide.md"))).text();
       const sections = guide.split(/\n(?=## )/);
       const toc = sections.slice(1).map((s) => "- " + s.split("\n")[0].slice(3)).join("\n");
       if (!topic) return text(`${sections[0].trim()}\n\nSections (call again with topic, or 'all'):\n${toc}`);

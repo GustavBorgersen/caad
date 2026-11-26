@@ -462,7 +462,9 @@ document.querySelectorAll<HTMLButtonElement>("#export-choice [data-format]").for
 $("new-project").onclick = () => newProject();
 if (!canOpenFolders()) {
   $<HTMLButtonElement>("open-folder").disabled = true;
-  $("open-folder").title = "Opening folders needs Chrome or Edge (File System Access API)";
+  $("open-folder").title = isSecureContext
+    ? "Opening folders needs Chrome or Edge (File System Access API)"
+    : "Opening folders needs the page over https:// (or on localhost): browsers allow folder access only there";
 } else {
   $("open-folder").onclick = async () => {
     try { await setWorkspace(await openFolder()); } catch (e) { if ((e as Error).name !== "AbortError") status(String(e)); }

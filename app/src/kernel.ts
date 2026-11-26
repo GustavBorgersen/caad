@@ -2,6 +2,8 @@
 // faster than rebuilds, intermediate states are skipped. Calls (selection queries) run in order.
 // Every answer carries `gen`, the number of builds done, so answers about an older model can be ignored.
 
+import { SITE_ROOT } from "./site";
+
 export type Mesh = {
   positions: Float32Array;
   indices: Uint32Array;
@@ -103,7 +105,7 @@ type Waiter = { resolve: (r: any) => void; reject: (e: Error) => void };
 type PendingBuild = Waiter & { src: string; filename: string; upto: number | null };
 
 export class Kernel {
-  private worker = new Worker(new URL("./kernel.worker.ts", import.meta.url), { type: "module" });
+  private worker = new Worker(new URL("./kernel.worker.ts", import.meta.url), { type: "module", name: SITE_ROOT }); // see site.ts
   private nextId = 1;
   private waiting = new Map<number, Waiter>();
   private buildInflight = false;

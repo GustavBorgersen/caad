@@ -1,0 +1,76 @@
+# A self-hosting bundle for every release: the whole static site (app, kernel, bridge downloads) as a zip,
+# attached to the GitHub release, for company web servers that can't reach caad.vercel.app or filter its
+# downloads (app/hosting/README.md). Publish a release on GitHub (e.g. tag v0.2.0) and this attaches
+# caad-v0.2.0.zip to it. Run it by hand (Actions → Release bundle) for a bundle as a workflow artifact only.
+name: Release bundle
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write # attach the zip to the release
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: bridge/go.mod
+          cache-dependency-path: bridge/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build bridge (all systems → app/public/bridge)
+        run: bridge/build.sh
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Test bridge
+        working-directory: app
+        run: npm run test:bridge
+        env:
+          CAAD_MCP: ../bridge/dist/caad-mcp-linux-amd64
+
+      - name: Build site (kernel included)
+        working-directory: app
+        run: npm run build
+
+      - name: Make the bundle
+        id: bundle
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          [ -n "$version" ] || version="$(git rev-parse --short HEAD)"
+          name="caad-$version"
+          # Everything the site needs must be in it.
+          ls app/dist/index.html app/dist/kernel/pyodide-*/python_stdlib.zip app/dist/kernel/wheels/build123d-*.whl app/dist/bridge/caad-mcp-*
+          mkdir -p "bundle/$name"
+          cp -r app/dist/. "bundle/$name/"
+          cp app/hosting/README.md app/hosting/web.config "bundle/$name/"
+          echo "$version ($(git rev-parse HEAD))" > "bundle/$name/VERSION"
+          (cd bundle && zip -qr "$name.zip" "$name")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Bundle: $name.zip, $(du -h "bundle/$name.zip" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.bundle.outputs.name }}
+          path: bundle/${{ steps.bundle.outputs.name }}.zip
+          archive: false # the zip as it is, not zipped again
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        run: gh release upload "${{ github.event.release.tag_name }}" "bundle/${{ steps.bundle.outputs.name }}.zip" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
