@@ -7,6 +7,7 @@ const kernel = (): Plugin => ({ name: "caad-kernel", buildStart: () => fetchKern
 
 export default defineConfig({
   plugins: [kernel()],
+  base: "./", // relative URLs: the release bundle can be hosted in any folder (src/site.ts)
   worker: { format: "es" },
   build: { target: "es2022" },
   server: {

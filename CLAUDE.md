@@ -32,6 +32,8 @@ npm run test:project              # workspace, projects, shared code end to end
 
 **Deployment**: `.github/workflows/deploy.yml` builds the bridge into `app/public/bridge`, runs the bridge test and deploys to Vercel (project `caad`, root directory `app`) with `vercel build` + `vercel deploy --prebuilt` — production on pushes to `main`, previews for pull requests. Vercel's own Git builds are off (`app/vercel.json`) since they can't build Go.
 
+**Self-hosting**: `.github/workflows/release.yml` attaches `caad-<tag>.zip` (the whole built site plus `app/hosting/README.md` and an IIS `web.config`) to every published GitHub release, for company web servers (`app/hosting/README.md`).
+
 The headless tests start their own Vite server on other ports. Kernel changes can be tested faster in Node: `spike/01-build123d-wasm/{kernel,select,agent,sketch,feature,caad}-test.mjs` (needs `node snapshot2.mjs` once there to fetch the wheels; `kernel-env.mjs` boots the kernel as the page does).
 
 ## Conventions
@@ -43,4 +45,5 @@ The headless tests start their own Vite server on other ports. Kernel changes ca
 - **Agent guidance goes in `app/public/agent/guide.md`** (served by the page, always current), not in `bridge/instructions.md`: that is built into the bridge users install and rarely update, so it stays short and stable.
 - Verify build123d assumptions in the real kernel (Node test or `run_snippet`) before relying on them; the page runs build123d 0.13 in Pyodide with some dependencies replaced by placeholders (see `kernel.worker.ts`).
 - Don't commit binaries (`bridge/dist`, `app/public/bridge`, `app/public/kernel`) or `node_modules`.
+- **No absolute paths**: the site may be hosted in a subfolder (`base: "./"`); build URLs of the site's files with `siteUrl()` from `app/src/site.ts`.
 - **The page loads everything from its own origin** (work networks filter CDNs and PyPI); the smoke test fails on any request to another origin.

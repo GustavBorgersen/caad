@@ -5,12 +5,13 @@
 import gcsWasm from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
 import lock from "../kernel-lock.json";
 import { loadSolver } from "./gcs-solve";
+import { siteUrl } from "./site";
 
 export {}; // a module, so names don't clash with DOM globals
 
-// Everything comes from the page's own origin (public/kernel/, filled by scripts/kernel-fetch.mjs from
+// Everything comes from the site itself (public/kernel/, filled by scripts/kernel-fetch.mjs from
 // kernel-lock.json), not from a CDN or PyPI: networks that filter third-party downloads broke the start.
-const KERNEL = new URL("/kernel/", self.location.origin).href;
+const KERNEL = siteUrl("kernel/");
 const PYODIDE = `${KERNEL}pyodide-${lock.pyodide}/`;
 // build123d imports these; they are placeholders that import fine and only fail if that feature is used.
 const STUB_MODULES = ["threejs_materials", "sympy", "sklearn", "IPython", "ezdxf", "scipy"];
@@ -28,7 +29,7 @@ sys.meta_path.insert(0, _Stub())
 `;
 
 /** Fetch from our origin, with an error that says what was blocked (a proxy's answer is often not a 404). */
-async function download(url: string | URL): Promise<Response> {
+async function download(url: string): Promise<Response> {
   let res: Response;
   try { res = await fetch(url); }
   catch (e) { throw new Error(`couldn't download ${url} (${(e as Error).message}) — is a network filter blocking it?`); }
@@ -70,9 +71,9 @@ async function boot() {
   const wheels = await Promise.all(lock.wheels.map(async (w) => new Uint8Array(await (await download(KERNEL + "wheels/" + w.file)).arrayBuffer())));
   for (const bytes of wheels) py.unpackArchive(bytes, "zip", { extractDir: site });
   py.runPython(STUBS);
-  py.FS.writeFile(`${site}/caad.py`, await (await download(new URL("/caad.py", self.location.origin))).text());
+  py.FS.writeFile(`${site}/caad.py`, await (await download(siteUrl("caad.py"))).text());
   setStatus(`Starting OpenCascade… (${seconds()} s)`);
-  py.runPython(await (await download(new URL("/caad_kernel.py", self.location.origin))).text());
+  py.runPython(await (await download(siteUrl("caad_kernel.py"))).text());
   run = py.globals.get("run");
   postMessage({ type: "ready", seconds: Number(seconds()) });
   drain();

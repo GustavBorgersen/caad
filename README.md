@@ -32,6 +32,10 @@ my-project/
 
 Everything is plain build123d, so parts also run without the browser. From the project's folder, with Python and `build123d==0.13` installed: `python -m parts.lid`. Parts with constrained sketches (`from caad import Constrained`) also need the `caad` module: download [caad.py](https://caad.vercel.app/caad.py) (the one the page runs, also [app/public/caad.py](app/public/caad.py)) into the project's folder. Their sketches then build from the geometry CAAD last saved.
 
+## Hosting CAAD yourself
+
+Every [release](https://github.com/GustavBorgersen/caad/releases) has a `caad-<version>.zip`: the whole site (app, CAD kernel, agent bridge downloads), loading nothing from other sites. Unzip it into any folder on a static web server — useful where a company network filters CDNs or downloads from caad.vercel.app. Needs HTTPS for *Open folder* and correct MIME types (`.mjs`); see the README in the zip ([app/hosting/README.md](app/hosting/README.md)).
+
 ## Licence
 
 [MIT](LICENSE). CAAD builds on [build123d](https://github.com/gumyr/build123d) (Apache-2.0), [OCP.wasm](https://github.com/yeicor/OCP.wasm) (MIT), [Pyodide](https://pyodide.org) (MPL-2.0), [three.js](https://threejs.org) and [CodeMirror](https://codemirror.net) (MIT).
