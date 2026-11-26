@@ -28,6 +28,7 @@
     "@types/three": "^0.187.0",
     "@types/wicg-file-system-access": "^2023.10.7",
     "puppeteer-core": "^25.18.1",
+    "pyodide": "314.0.8",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "ws": "^8.23.0"

@@ -3,32 +3,18 @@
 // Lean = build123d without the packages modelling doesn't need (see docs/02-spike-results.md, spike 1b).
 
 import gcsWasm from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
+import lock from "../kernel-lock.json";
 import { loadSolver } from "./gcs-solve";
 
 export {}; // a module, so names don't clash with DOM globals
 
-const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v314.0.8/full/";
-const OCP = "cadquery-ocp-novtk-OCP.wasm==8.0.1.1.post202609241841";
-const LIB3MF = "lib3mf-OCP.wasm==2.5.0.post202609241713";
-const BUILD123D = "build123d==0.13.0";
-// Installed as placeholders: they import fine and only fail if that specific feature is used.
-const STUBS: Record<string, string> = {
-  "threejs-materials": "1.2.5", sympy: "1.14.0", "scikit-learn": "1.8.0", ipython: "9.12.0", ezdxf: "1.4.5", scipy: "1.18.0",
-};
+// Everything comes from the page's own origin (public/kernel/, filled by scripts/kernel-fetch.mjs from
+// kernel-lock.json), not from a CDN or PyPI: networks that filter third-party downloads broke the start.
+const KERNEL = new URL("/kernel/", self.location.origin).href;
+const PYODIDE = `${KERNEL}pyodide-${lock.pyodide}/`;
+// build123d imports these; they are placeholders that import fine and only fail if that feature is used.
 const STUB_MODULES = ["threejs_materials", "sympy", "sklearn", "IPython", "ezdxf", "scipy"];
-
-const INSTALL = `
-import micropip, importlib.metadata as md
-await micropip.install(["${OCP}", "${LIB3MF}"])
-ocp, l3 = md.version("cadquery-ocp-novtk-OCP.wasm"), md.version("lib3mf-OCP.wasm")
-mocks = [("cadquery-ocp", ocp), ("cadquery-ocp-novtk", ocp), ("cadquery_ocp_proxy", ocp),
-         ("lib3mf", l3), ("py-lib3mf", l3)] + list(${JSON.stringify(STUBS)}.items())
-for name, version in mocks:
-    micropip.add_mock_package(name, version)
-await micropip.install("${BUILD123D}")
-for name, _ in mocks:
-    micropip.remove_mock_package(name)
-
+const STUBS = `
 import sys, importlib.abc, importlib.machinery
 from unittest.mock import MagicMock
 class _Stub(importlib.abc.MetaPathFinder, importlib.abc.Loader):
@@ -40,6 +26,15 @@ class _Stub(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def exec_module(self, module): pass
 sys.meta_path.insert(0, _Stub())
 `;
+
+/** Fetch from our origin, with an error that says what was blocked (a proxy's answer is often not a 404). */
+async function download(url: string | URL): Promise<Response> {
+  let res: Response;
+  try { res = await fetch(url); }
+  catch (e) { throw new Error(`couldn't download ${url} (${(e as Error).message}) — is a network filter blocking it?`); }
+  if (!res.ok) throw new Error(`couldn't download ${url}: HTTP ${res.status} — is a network filter blocking it?`);
+  return res;
+}
 
 type RunRequest =
   | { id: number; type: "run"; src: string; filename: string; upto: number | null }
@@ -57,19 +52,27 @@ const queue: RunRequest[] = [];
 
 async function boot() {
   setStatus("Loading Python…");
+  // Pyodide hangs or says only "exit(1)" when one of its files is blocked: check them first (status only),
+  // and download the standard library here.
+  await Promise.all(["pyodide.mjs", "pyodide.asm.mjs", "pyodide.asm.wasm", "pyodide-lock.json"]
+    .map(async (f) => (await download(PYODIDE + f)).body?.cancel()));
+  const stdlib = URL.createObjectURL(await (await download(PYODIDE + "python_stdlib.zip")).blob());
   const { loadPyodide } = await import(/* @vite-ignore */ PYODIDE + "pyodide.mjs");
-  py = await loadPyodide({ indexURL: PYODIDE });
+  py = await loadPyodide({ indexURL: PYODIDE, stdLibURL: stdlib });
+  URL.revokeObjectURL(stdlib);
   // Constrained sketches (caad.py) solve with PlaneGCS: the WebAssembly one, called from Python.
   py.registerJsModule("caad_gcs", await loadSolver(gcsWasm));
   py.setStdout({ batched: (s: string) => postMessage({ type: "log", text: s }) });
   py.setStderr({ batched: (s: string) => postMessage({ type: "log", text: s }) });
-  await py.loadPackage(["micropip", "numpy"]);
   setStatus(`Installing build123d… (${seconds()} s)`);
-  await py.runPythonAsync(INSTALL);
-  const site = py.runPython("import site; site.getsitepackages()[0]");
-  py.FS.writeFile(`${site}/caad.py`, await (await fetch(new URL("/caad.py", self.location.origin))).text());
+  // The wheels are unpacked straight into site-packages: no micropip, no dependency resolution at start.
+  const site: string = py.runPython("import site; site.getsitepackages()[0]");
+  const wheels = await Promise.all(lock.wheels.map(async (w) => new Uint8Array(await (await download(KERNEL + "wheels/" + w.file)).arrayBuffer())));
+  for (const bytes of wheels) py.unpackArchive(bytes, "zip", { extractDir: site });
+  py.runPython(STUBS);
+  py.FS.writeFile(`${site}/caad.py`, await (await download(new URL("/caad.py", self.location.origin))).text());
   setStatus(`Starting OpenCascade… (${seconds()} s)`);
-  py.runPython(await (await fetch(new URL("/caad_kernel.py", self.location.origin))).text());
+  py.runPython(await (await download(new URL("/caad_kernel.py", self.location.origin))).text());
   run = py.globals.get("run");
   postMessage({ type: "ready", seconds: Number(seconds()) });
   drain();

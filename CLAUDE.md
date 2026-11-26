@@ -7,6 +7,7 @@ A browser CAD program for build123d (static site) plus a small agent bridge. Doc
 | Path | What |
 | :-- | :-- |
 | `app/` | The web app (Vite + TypeScript, no UI framework). `src/main.ts` is the glue |
+| `app/kernel-lock.json` | The kernel's wheels (URL + sha256) and Pyodide version. `scripts/kernel-fetch.mjs` (run by the Vite plugin) puts them and Pyodide's core into `app/public/kernel/` (git-ignored): the page loads nothing from CDNs or PyPI. `scripts/kernel-lock.mjs` re-resolves after a version change |
 | `app/public/caad_kernel.py` | Python run inside Pyodide: timeline from code, rollback, errors per feature, tessellation, selectors, agent helpers |
 | `app/public/caad.py` | The `caad` module part files import: constrained sketches (`Constrained`), solved by PlaneGCS (`app/src/gcs-solve.ts` in the page); must also build outside CAAD |
 | `app/public/agent/guide.md` | build123d guide served to agents — every code example must build (test them) |
@@ -41,4 +42,5 @@ The headless tests start their own Vite server on other ports. Kernel changes ca
 - **The page is the agent's toolbox**: new agent abilities are page-side tool handlers (`app/src/tools.ts`) plus an entry in `bridge/tools.json`. The bridge only relays.
 - **Agent guidance goes in `app/public/agent/guide.md`** (served by the page, always current), not in `bridge/instructions.md`: that is built into the bridge users install and rarely update, so it stays short and stable.
 - Verify build123d assumptions in the real kernel (Node test or `run_snippet`) before relying on them; the page runs build123d 0.13 in Pyodide with some dependencies replaced by placeholders (see `kernel.worker.ts`).
-- Don't commit binaries (`bridge/dist`, `app/public/bridge`) or `node_modules`.
+- Don't commit binaries (`bridge/dist`, `app/public/bridge`, `app/public/kernel`) or `node_modules`.
+- **The page loads everything from its own origin** (work networks filter CDNs and PyPI); the smoke test fails on any request to another origin.

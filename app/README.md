@@ -21,6 +21,7 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | :-- | :-- |
 | `src/main.ts` | Glue: project, building, saving, watching for outside edits |
 | `src/kernel.worker.ts` / `src/kernel.ts` | Pyodide + lean build123d in a worker; client that keeps only the latest request |
+| `kernel-lock.json`, `scripts/kernel-*.mjs` | The kernel's Python runtime, served from the site itself (`public/kernel/`, git-ignored), never from a CDN or PyPI: Pyodide's core from the `pyodide` npm package plus the wheels in the lock, checked by sha256. The Vite plugin fetches them before dev and build; `node scripts/kernel-lock.mjs` re-resolves the lock after a version change |
 | `public/caad_kernel.py` | Timeline from the code, rollback, errors per feature, per-face/edge mesh; reading and patching features |
 | `public/caad.py` / `src/gcs-solve.ts` | Constrained sketches (`from caad import Constrained`), solved by PlaneGCS (WebAssembly, called from Python) |
 | `src/viewer.ts` | three.js view, Z up, face/edge picking and highlighting, outlines of unused sketches |

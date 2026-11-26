@@ -15,6 +15,9 @@ try {
   const page = await browser.newPage();
   page.on("console", (m) => m.type() === "error" && console.log("  [page error]", m.text()));
   page.on("pageerror", (e) => console.log("  [page exception]", e.message));
+  // Everything the page needs comes from its own origin: networks that filter CDNs and PyPI broke the start.
+  const foreign = new Set(); // page.on("request") also sees the kernel worker's requests
+  page.on("request", (r) => { if (!/^(http:\/\/127\.0\.0\.1:|data:|blob:)/.test(r.url())) foreign.add(r.url()); });
   for (let i = 0; i < 30; i++) { try { await page.goto(`http://127.0.0.1:${PORT}/`); break; } catch { await new Promise((r) => setTimeout(r, 500)); } }
 
   const t0 = Date.now();
@@ -81,6 +84,8 @@ try {
   console.log("after thickness 8 -> 12:", selAfter);
   console.log(selBefore.split(" | ").at(-1) === selAfter.split(" | ").at(-1) ? "PASS: selection kept across rebuild" : "CHECK: selection changed");
   await page.screenshot({ path: `${OUT}/caad-5-kept.png` });
+  if (foreign.size) throw new Error("requests to other origins:\n  " + [...foreign].join("\n  "));
+  console.log("\nno requests to other origins");
   await done(0);
 } catch (e) {
   console.log("TEST FAILED:", e.message);
