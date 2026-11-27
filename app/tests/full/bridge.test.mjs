@@ -35,6 +35,8 @@ after(async () => {
 
 const connect = (origin) => new Promise((resolve) => {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { origin } });
+  // The bridge greets as soon as it accepts: listen before "open", or the hello can come before the test listens.
+  ws.hello = new Promise((res) => ws.once("message", (m) => res(JSON.parse(m))));
   ws.on("open", () => resolve(ws));
   ws.on("error", () => resolve(null));
   ws.on("unexpected-response", () => resolve(null));
@@ -57,7 +59,7 @@ it("origins: another is rejected, the allowed one connects and is greeted", asyn
   check((await connect("https://evil.example.org")) === null, "page from another origin is rejected");
   page = await connect("https://caad.example.com");
   check(page !== null, "page from the allowed origin connects");
-  const hello = await new Promise((res) => page.once("message", (m) => res(JSON.parse(m))));
+  const hello = await page.hello;
   check(hello.type === "hello" && hello.agent === "bridge-test", "bridge says hello with the agent's name", hello);
 });
 
