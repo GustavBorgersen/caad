@@ -1,0 +1,59 @@
+# The complete test set (npm run test:all in app/): the kernel in Node, every UI suite in headless Chrome, and
+# the agent bridge, its files in parallel. On pull requests and releases; run it by hand from Actions → Tests.
+name: Tests
+
+on:
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # a run takes a few minutes; a hung browser shouldn't hold a runner for hours
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: bridge/go.mod
+          cache-dependency-path: bridge/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build bridge (this system only; the tests find it in bridge/dist/)
+        working-directory: bridge
+        run: CGO_ENABLED=0 go build -trimpath -o dist/caad-mcp-linux-amd64 .
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      # Pyodide and the wheels (~50 MB): fetched once per kernel-lock.json.
+      - uses: actions/cache@v6
+        with:
+          path: app/public/kernel
+          key: kernel-${{ hashFiles('app/kernel-lock.json') }}
+
+      - name: Test
+        working-directory: app
+        run: npm run test:all
+        env:
+          CHROME: /usr/bin/google-chrome
+          SHOTS: ${{ runner.temp }}/shots
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: test-screenshots
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore

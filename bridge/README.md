@@ -35,4 +35,4 @@ go build -o caad-mcp .
 ./build.sh            # all systems into dist/, copied to ../app/public/bridge/
 ```
 
-Tests (from `../app`): `npm run test:bridge` (protocol, origins) and `node tests/agent-e2e.mjs` (real bridge + app in headless Chromium, every tool).
+Tests (from `../app`): `npm run test:bridge` (protocol, origins) and `npm run test:all`, which includes `tests/full/agent.test.mjs` (real bridge + app in headless Chrome, every tool). Both find the binary in `dist/` (or `CAAD_MCP=path`).

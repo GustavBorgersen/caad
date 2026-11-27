@@ -36,9 +36,9 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 | **Export** | **Done 2026-11-25:** STEP and STL into the project's `exports/` (or a download), and an `export_part` agent tool ([07](07-project-structure.md)) | 07 |
 | **Sketch planes and revolve axes** | A plane feature (offset, rotated, or from a face) to sketch on anywhere; revolve about a construction line of a sketch (`axis(sk1, line1)`): full freedom of position and angle. The rest of feature-model slice 3 | [05](05-feature-model.md) |
 | **Extrude and remove from faces** | Extrude, cut or intersect the part's own faces (selected in the view, kept as a selector), not only sketches: `extrude(part.faces().sort_by(Axis.Z)[-1], amount=5)` | 05 |
-| **Fast tests** | Tests must be fast while developing: a quick set that runs in seconds after each change (the kernel booted once and shared, one browser and page for the UI checks, plain unit tests where no kernel is needed), and the slow, complete set in CI on pull requests and releases. Today's full set takes many minutes | — |
+| **Fast tests** | **Done 2026-11-27:** `npm test` runs the quick set in about 30 s (all the kernel tests in Node, the kernel booted once and shared, beside a UI smoke test); `npm run test:all` adds every UI suite and the bridge, each file with its own server and browser, in parallel (about 1.5 min). The Tests workflow runs the complete set on pull requests and releases | — |
 | **Contrast fixes** | Clear marking of the selected/hovered feature in the timeline and the code, stronger colours — the quick part of the visual work | — |
-| **Own repository** | **Done 2026-11-25:** [github.com/GustavBorgersen/caad](https://github.com/GustavBorgersen/caad), MIT licence, deployed to [caad.vercel.app](https://caad.vercel.app) by a GitHub Action that also builds the bridge into the site. Still to do: CI running the headless test suites, bridge binaries as GitHub release assets | — |
+| **Own repository** | **Done 2026-11-25:** [github.com/GustavBorgersen/caad](https://github.com/GustavBorgersen/caad), MIT licence, deployed to [caad.vercel.app](https://caad.vercel.app) by a GitHub Action that also builds the bridge into the site. Still to do: bridge binaries as GitHub release assets | — |
 
 ### Phase 2 — Part studio
 
@@ -69,7 +69,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 ### Alongside all phases
 
 - **Visual design**: a separate brainstorm session (style directions as mock-ups to choose from), then a small design system (colours, type, icons, spacing, dark mode), then implementation. Includes a view cube / standard views, panel resizing and better shading and edges.
-- **Tests**: every feature comes with headless tests, like the current smoke, bridge, agent and sketch suites.
+- **Tests**: every feature comes with tests: kernel tests in `app/tests/kernel/` and a headless UI suite in `app/tests/full/` (see Tests in `app/README.md`).
 
 ## Design documents
 
@@ -94,5 +94,6 @@ Things to remember, not planned yet.
 - **Sign in with GitHub** (OAuth via a tiny serverless function).
 - **Native kernel via the bridge** — run models natively when build123d is installed locally.
 - **Faster start-up** — Pyodide memory snapshots including the OpenCascade library.
+- **Watch mode for tests** — a kernel kept warm that re-runs the tests a change affects within seconds.
 - **Firefox and Safari** — need an alternative to the File System Access API.
 - **Configurations and variable tables**, **2D drawings**, **sheet metal**, **bill of materials**.

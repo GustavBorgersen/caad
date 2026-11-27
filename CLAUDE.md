@@ -13,7 +13,7 @@ A browser CAD program for build123d (static site) plus a small agent bridge. Doc
 | `app/public/agent/guide.md` | build123d guide served to agents — every code example must build (test them) |
 | `bridge/` | `caad-mcp`, the Go MCP bridge (stdio ↔ WebSocket on 127.0.0.1:7337+). `tools.json` and `instructions.md` are the agent's tool definitions and instructions; the page imports `tools.json` too |
 | `examples/` | The bundled examples: a workspace with one project (`caad-examples/`: `pyproject.toml`, `params.py`, `parts/`) |
-| `spike/` | Feasibility spikes; `spike/01-build123d-wasm/*-test.mjs` test the kernel in Node with Pyodide |
+| `spike/` | Feasibility spikes (how the kernel was made to fit in the browser) |
 
 ## Commands
 
@@ -22,19 +22,18 @@ cd app && npm install
 npm run dev -- --host 127.0.0.1   # http://127.0.0.1:5173 (Chrome/Edge); kernel takes ~30-60 s to load
 npm run build                     # type-check + static build into app/dist
 npm run build:bridge              # Go via mise (bridge/mise.toml): all OS binaries into app/public/bridge (git-ignored)
+npm test                          # quick set, ~30 s: kernel tests in Node + UI smoke test (CHROME=/path, default /usr/bin/chromium)
+npm run test:all                  # complete set, ~1.5 min: + every UI suite in tests/full/, agent and bridge (CI runs this)
+npm run test:kernel               # kernel tests only, no browser
 npm run test:bridge               # bridge protocol test
-npm run test:smoke                # headless Chromium (/usr/bin/chromium, override with CHROME=)
-npm run test:agent                # real bridge + app, every agent tool
-npm run test:sketch               # sketch mode end to end
-npm run test:feature              # editing features in the dialog end to end
-npm run test:project              # workspace, projects, shared code end to end
 ```
+
+**Tests**: `node:test`, files in parallel (details in `app/README.md`). Kernel tests are in `app/tests/kernel/*.mjs`, sharing one kernel booted in Node as the page boots it (`tests/kernel/env.mjs`): test kernel changes there first, they take seconds. UI suites (`tests/ui-smoke.test.mjs`, `tests/full/*.test.mjs`) each start their own Vite server, browser and page (`openApp()` in `tests/ui/env.mjs`); `SHOTS=dir` saves screenshots. The agent and bridge tests are skipped without the bridge binary (`npm run build:bridge` or `CAAD_MCP=path`). `.github/workflows/test.yml` runs the complete set on pull requests and releases.
 
 **Deployment**: `.github/workflows/deploy.yml` builds the bridge into `app/public/bridge`, runs the bridge test and deploys to Vercel (project `caad`, root directory `app`) with `vercel build` + `vercel deploy --prebuilt` — production on pushes to `main`, previews for pull requests. Vercel's own Git builds are off (`app/vercel.json`) since they can't build Go.
 
 **Self-hosting**: `.github/workflows/release.yml` attaches `caad-<tag>.zip` (the whole built site plus `app/hosting/README.md` and an IIS `web.config`) to every published GitHub release, for company web servers (`app/hosting/README.md`).
 
-The headless tests start their own Vite server on other ports. Kernel changes can be tested faster in Node: `spike/01-build123d-wasm/{kernel,select,agent,sketch,feature,caad}-test.mjs` (needs `node snapshot2.mjs` once there to fetch the wheels; `kernel-env.mjs` boots the kernel as the page does).
 
 ## Conventions
 
