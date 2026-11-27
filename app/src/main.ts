@@ -368,7 +368,8 @@ async function openDialog(src: string, index: number) {
 
 /**
  * "+ Extrude" / "+ Fillet" / "+ Chamfer" at the rollback bar: a new feature in its dialog. An extrude uses the
- * latest sketch before the bar (preferring one nothing uses yet), fillets and chamfers the selected edges.
+ * faces selected in the view, else the latest sketch before the bar (preferring one nothing uses yet); fillets and
+ * chamfers the selected edges.
  */
 async function addFeature(kind: AddKind) {
   if (featureDialog.open || sketcher.active || !state.path) return;
@@ -376,11 +377,14 @@ async function addFeature(kind: AddKind) {
   const last = feats.length - 1;
   const after = state.upto != null && state.upto < last ? state.upto : null;
   let params: Record<string, string>;
-  if (kind === "extrude" || kind === "revolve") {
+  const faces = kind === "extrude" ? selected("face") : null;
+  if (faces) {
+    params = { to_extrude: faces, amount: "10" };
+  } else if (kind === "extrude" || kind === "revolve") {
     const sketches = feats.filter((f) => f.kind === "sketch" && f.name && !f.implicit && f.index <= (after ?? last));
     const unused = sketches.filter((s) => !feats.some((f) => f.index > s.index && f.index <= (after ?? last) && f.refs.includes(s.name!)));
     const sketch = (unused.length ? unused : sketches).at(-1);
-    if (!sketch) { status(`Draw a sketch first (✎ Sketch), then ${kind} it.`); return; }
+    if (!sketch) { status(kind === "extrude" ? "Select faces of the part, or draw a sketch first (✎ Sketch), then extrude it." : "Draw a sketch first (✎ Sketch), then revolve it."); return; }
     params = kind === "extrude" ? { to_extrude: `${sketch.name}.sketch`, amount: "10" } : { profiles: `${sketch.name}.sketch` };
   } else if (kind === "hole") { // at the points of the latest sketch with points (preferring one nothing uses yet)
     const withPoints = feats.filter((f) => f.kind === "sketch" && f.name && f.points && f.index <= (after ?? last));

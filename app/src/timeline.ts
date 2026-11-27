@@ -14,7 +14,7 @@ let clickTimer = 0;
 export type AddKind = "plane" | "extrude" | "revolve" | "hole" | "fillet" | "chamfer" | "mirror";
 const ADD_TITLES: Record<AddKind, string> = {
   plane: "A plane to sketch or mirror on: offset from the selected flat face (else from XY), here",
-  extrude: "Extrude or cut the latest sketch, here", revolve: "Revolve the latest sketch, here",
+  extrude: "Extrude or cut the faces selected in the view, else the latest sketch, here", revolve: "Revolve the latest sketch, here",
   hole: "Holes at the points of the latest sketch with points, here", fillet: "A fillet on the edges selected in the view, here",
   chamfer: "A chamfer on the edges selected in the view, here", mirror: "Mirror the part so far, here",
 };

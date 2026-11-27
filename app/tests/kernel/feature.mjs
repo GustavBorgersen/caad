@@ -331,6 +331,27 @@ with BuildPart() as p:
     check(call("sketch_regions", "nothing.sketch").name == null && call("sketch_regions", "Rectangle(3, 3)").regions.length === 0, "no sketch: no regions");
   });
 
+  test("extruding the part's own faces: added, cut and intersected; labelled face or faces", () => {
+    const box = "from build123d import *\n\nwith BuildPart() as part:\n    Box(20, 20, 10)\n";
+    const top = "part.faces().sort_by(Axis.Z)[-1]", sides = "part.faces().filter_by(Axis.X)";
+    let ins = call("insert_feature", box, 0, "extrude", { to_extrude: top, amount: "5" });
+    check(ins.index === 1 && ins.src.includes(`    extrude(${top}, amount=5)\n`) && features(ins.src)[1].label === "Extrude face, 5 mm",
+      "the top face, extruded: its selector in the code, labelled as a face", features(ins.src)[1].label);
+    check(Math.abs(vol(ins.src) - 20 * 20 * 15) < 1e-6, "adds a 5 mm slab on top");
+    const rf = call("read_feature", ins.src, 1);
+    check(field(rf, "to_extrude").expr === top && field(rf, "to_extrude").label === "Sketch or faces",
+      "the dialog's sketch field holds the selector");
+    check(JSON.stringify(field(rf, "dir").inward) === '{"mode":["Mode.SUBTRACT","Mode.INTERSECT"]}', "opposite direction goes inward for removing and intersecting");
+    const flip = `-${top}.faces()[0].normal_at()`;
+    const cut = patch(ins.src, 1, { amount: "4", dir: flip, mode: "Mode.SUBTRACT" });
+    check(features(cut)[1].label === "Cut face, 4 mm" && Math.abs(vol(cut) - 20 * 20 * 6) < 1e-6, "removing goes into the part from its top face", features(cut)[1].label);
+    const inter = patch(cut, 1, { mode: "Mode.INTERSECT" });
+    check(Math.abs(vol(inter) - 20 * 20 * 4) < 1e-6, "intersecting keeps the 4 mm under the face");
+    const both = box.replace("    Box(20, 20, 10)\n", `    Box(20, 20, 10)\n    extrude(${sides}, amount=-3, mode=Mode.SUBTRACT)\n`);
+    check(features(both)[1].label === "Cut faces, -3 mm" && Math.abs(vol(both) - 14 * 20 * 10) < 1e-6,
+      "several faces (both sides): a negative depth goes into the part from each", features(both)[1].label);
+  });
+
   test("shared code: the open part's project is importable (set_project, docs/07)", () => {
     const plateSrc = example("plate.py");
     const paramsSrc = read("examples/caad-examples/params.py");

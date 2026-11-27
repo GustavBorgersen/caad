@@ -20,6 +20,9 @@ export type FeatureDialogHost = {
   regions: (r: SketchRegions | null, toggle: (index: number) => void) => void;
 };
 
+/** A sketch field's expression that uses a sketch (sk1.sketch, regions(sk1, …)) rather than the part's faces. */
+const isSketch = (expr: string | null) => expr === null || /^\w+\.sketch$|^regions\(/.test(expr.trim());
+
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
 export class FeatureDialog {
@@ -74,7 +77,7 @@ export class FeatureDialog {
       <div class="fields">${fields.filter((f) => this.visible(f)).map((f) => this.row(f)).join("")}</div>
       ${hidden.length ? `<label class="add">Add argument <select><option value=""></option>${hidden.map((f) =>
         `<option value="${esc(f.name)}">${esc(f.label)}</option>`).join("")}</select></label>` : ""}
-      ${fields.some((f) => f.type === "sketch" && this.visible(f)) ? `<div class="note">Click regions of the sketch in the view to choose which to use.</div>` : ""}
+      ${fields.some((f) => f.type === "sketch" && this.visible(f) && isSketch(this.exprs.get(f.name) ?? null)) ? `<div class="note">Click regions of the sketch in the view to choose which to use, or select faces of the part and press Use selection.</div>` : ""}
       <div class="message" hidden></div>
       <div class="actions"><button class="cancel">Cancel</button><button class="primary">OK</button></div>`;
 
@@ -91,11 +94,11 @@ export class FeatureDialog {
         this.schedule();
       });
       row.querySelector<HTMLButtonElement>(".use")?.addEventListener("click", () => {
-        const kind = field.pick ?? (row.dataset.type === "faces" ? "face" : "edge");
+        const kind = field.pick ?? (field.type === "faces" || field.type === "sketch" ? "face" : "edge");
         const sel = this.host.selection(kind);
         if (!sel) { this.say(`Select ${field.pick ? `a flat ${kind}` : `${kind}s`} in the view first.`, true); return; }
         const expr = field.pick && field.template ? field.template.replace("{}", sel) : sel;
-        this.exprs.set(name, expr);
+        this.assign(name, expr);
         if (input instanceof HTMLSelectElement) this.render(); // the selection becomes an option
         else input.value = expr;
         this.schedule();
@@ -112,11 +115,18 @@ export class FeatureDialog {
     this.el.querySelector<HTMLButtonElement>(".primary")!.onclick = () => this.ok();
   }
 
-  /** Set a field's expression; a flip of it follows (another sketch: flip that one instead). */
+  /** Set a field's expression; a flip of it follows (another sketch: flip that one instead). With the part's faces,
+   * whose normals point out of the part, a flip with `inward` is on for the results that go into the part. */
   private assign(name: string, expr: string | null) {
-    const flips = this.detail!.fields!.filter((g) => g.type === "flip" && g.of === name && this.exprs.get(g.name) != null && this.exprs.get(g.name) === this.flipped(g));
+    const fields = this.detail!.fields!;
+    const flips = fields.filter((g) => g.type === "flip" && g.of === name && this.exprs.get(g.name) != null && this.exprs.get(g.name) === this.flipped(g));
     this.exprs.set(name, expr);
     for (const g of flips) this.exprs.set(g.name, this.flipped(g));
+    for (const g of fields) {
+      if (g.type !== "flip" || !g.inward || isSketch(this.exprs.get(g.of!) ?? null) || (name !== g.of && !(name in g.inward))) continue;
+      const inward = Object.entries(g.inward).some(([k, vs]) => vs.includes(this.exprs.get(k) ?? ""));
+      this.exprs.set(g.name, inward ? this.flipped(g) : null);
+    }
   }
 
   /** A region clicked in the view: the sketch field becomes regions(sk1, ...) with that one added or removed. */
@@ -132,7 +142,8 @@ export class FeatureDialog {
     const expr = this.exprs.get(f.name) ?? null;
     const changed = expr !== (f.expr ?? null);
     let input: string;
-    if (f.type === "sketch") { // the named sketches before this feature, or the pending ones
+    const sketch = f.type === "sketch";
+    if (sketch) { // the named sketches before this feature, or the pending ones
       const d = this.detail!;
       f = { ...f, type: "choice", options: [
         { label: d.pending.length ? `Pending: ${d.pending.join(", ")}` : "None" },
@@ -142,13 +153,13 @@ export class FeatureDialog {
       if (some) {
         const n = (expr!.match(/\(\s*[-+\d.e]+\s*,\s*[-+\d.e]+\s*\)/g) ?? []).length;
         f.options!.push({ expr: expr!, label: `${some[1]}: ${n} region${n === 1 ? "" : "s"}` });
-      }
+      } else if (!isSketch(expr)) f.options!.push({ expr: expr!, label: `Faces: ${expr}` });
     }
     if (f.type === "choice") {
       const opts = [...(f.options ?? [])];
       if (expr !== null && !opts.some((o) => (o.expr ?? null) === expr)) opts.push({ expr, label: expr });
       input = `<select>${opts.map((o) => `<option value="${esc(o.expr ?? "")}"${(o.expr ?? null) === expr ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
-      if (f.pick) input += `<button class="use" title="Use the ${f.pick} selected in the view">Use selection</button>`;
+      if (f.pick || sketch) input += `<button class="use" title="Use the ${sketch ? "faces" : f.pick} selected in the view">Use selection</button>`;
     } else if (f.type === "bool" && (expr === null || expr === "True" || expr === "False")) {
       input = `<input type="checkbox"${expr === "True" ? " checked" : ""}>`;
     } else if (f.type === "flip" && (expr === null || expr === this.flipped(f))) {
@@ -194,7 +205,7 @@ export class FeatureDialog {
     if (seq !== this.seq || !this.detail) return;
     this.say(error ? `Preview: ${error}` : "", !!error);
     const sketch = d.fields!.find((f) => f.type === "sketch" && this.visible(f));
-    const expr = sketch ? this.exprs.get(sketch.name) : null;
+    const expr = sketch && isSketch(this.exprs.get(sketch.name) ?? null) ? this.exprs.get(sketch.name) : null;
     const regions = expr ? await this.host.kernel.sketchRegions(expr).catch(() => null) : null;
     if (seq !== this.seq || !this.detail) return;
     this.host.regions(regions?.regions.length ? regions : null, (i) => this.toggleRegion(sketch!.name, regions!, i));
