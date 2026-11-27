@@ -95,6 +95,9 @@ export type SketchAction =
   | { op: "delete"; entities: string[]; constraints: string[] };
 
 export type SketchOutline = { name: string; index: number; edges: { points: Float32Array }[]; points: number[] /* drawn points, x y z… */ };
+/** A region of a sketch, to pick in the view: `at` is a point inside it in the sketch's coordinates (for regions()). */
+export type SketchRegion = { at: [number, number]; selected: boolean; triangles: number[] /* x y z per corner */; lines: number[] /* segments */ };
+export type SketchRegions = { name: string | null; regions: SketchRegion[] };
 /** A plane feature as a square: 4 corners, x y z… */
 export type PlaneOutline = { name: string; index: number; corners: number[] };
 
@@ -235,6 +238,11 @@ export class Kernel {
   /** The whole part built from `src` as a STEP or STL file (the view's model stays as it is); rejects if it doesn't build. */
   exportPart(src: string, filename: string, format: "step" | "stl"): Promise<{ data: Uint8Array; summary: NonNullable<BuildResult["summary"]> }> {
     return this.call("export_part", [src, filename, format]);
+  }
+
+  /** The regions of the sketch a sketch field's expression uses (sk1.sketch or regions(sk1, ...)), in the latest build. */
+  sketchRegions(expr: string): Promise<SketchRegions> {
+    return this.call("sketch_regions", [expr]);
   }
 
   /** Values of edited expressions, in the model the last readFeature saw. */

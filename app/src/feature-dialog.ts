@@ -1,6 +1,6 @@
 // Feature dialog: edit a feature's arguments as expressions, with a live preview (docs/05-feature-model.md).
 // The kernel reads the feature and patches only the changed arguments; this panel just shows fields.
-import type { FeatureDetail, FeatureField, Kernel } from "./kernel";
+import type { FeatureDetail, FeatureField, Kernel, SketchRegions } from "./kernel";
 
 const PREVIEW_DELAY_MS = 250;
 
@@ -16,6 +16,8 @@ export type FeatureDialogHost = {
   cancel: () => void;
   /** Best selector for the selected edges or faces, if that's what is selected. */
   selection: (kind: "edge" | "face") => string | null;
+  /** Show the regions of the sketch field's sketch in the view to pick (null: none); a click calls `toggle`. */
+  regions: (r: SketchRegions | null, toggle: (index: number) => void) => void;
 };
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -72,6 +74,7 @@ export class FeatureDialog {
       <div class="fields">${fields.filter((f) => this.visible(f)).map((f) => this.row(f)).join("")}</div>
       ${hidden.length ? `<label class="add">Add argument <select><option value=""></option>${hidden.map((f) =>
         `<option value="${esc(f.name)}">${esc(f.label)}</option>`).join("")}</select></label>` : ""}
+      ${fields.some((f) => f.type === "sketch" && this.visible(f)) ? `<div class="note">Click regions of the sketch in the view to choose which to use.</div>` : ""}
       <div class="message" hidden></div>
       <div class="actions"><button class="cancel">Cancel</button><button class="primary">OK</button></div>`;
 
@@ -83,10 +86,7 @@ export class FeatureDialog {
         ? (input.checked ? (field.type === "flip" ? this.flipped(field) : "True") : null)
         : (input.value.trim() || null);
       input.addEventListener(input instanceof HTMLSelectElement || input.type === "checkbox" ? "change" : "input", () => {
-        // A flip of this field follows it (another sketch: flip that one instead).
-        const flips = fields.filter((g) => g.type === "flip" && g.of === name && this.exprs.get(g.name) != null && this.exprs.get(g.name) === this.flipped(g));
-        this.exprs.set(name, read());
-        for (const g of flips) this.exprs.set(g.name, this.flipped(g));
+        this.assign(name, read());
         if (input instanceof HTMLSelectElement || input.type === "checkbox") this.render(); // may show or hide fields
         this.schedule();
       });
@@ -112,6 +112,22 @@ export class FeatureDialog {
     this.el.querySelector<HTMLButtonElement>(".primary")!.onclick = () => this.ok();
   }
 
+  /** Set a field's expression; a flip of it follows (another sketch: flip that one instead). */
+  private assign(name: string, expr: string | null) {
+    const flips = this.detail!.fields!.filter((g) => g.type === "flip" && g.of === name && this.exprs.get(g.name) != null && this.exprs.get(g.name) === this.flipped(g));
+    this.exprs.set(name, expr);
+    for (const g of flips) this.exprs.set(g.name, this.flipped(g));
+  }
+
+  /** A region clicked in the view: the sketch field becomes regions(sk1, ...) with that one added or removed. */
+  private toggleRegion(field: string, r: SketchRegions, index: number) {
+    if (!this.detail) return;
+    const chosen = r.regions.filter((g, i) => (i === index ? !g.selected : g.selected));
+    this.assign(field, `regions(${[r.name, ...chosen.map((g) => `(${g.at[0]}, ${g.at[1]})`)].join(", ")})`);
+    this.render();
+    this.schedule(0);
+  }
+
   private row(f: FeatureField): string {
     const expr = this.exprs.get(f.name) ?? null;
     const changed = expr !== (f.expr ?? null);
@@ -122,6 +138,11 @@ export class FeatureDialog {
         { label: d.pending.length ? `Pending: ${d.pending.join(", ")}` : "None" },
         ...d.sketches.map((n) => ({ expr: `${n}.sketch`, label: n })),
       ] };
+      const some = expr?.match(/^regions\((\w+)/);
+      if (some) {
+        const n = (expr!.match(/\(\s*[-+\d.e]+\s*,\s*[-+\d.e]+\s*\)/g) ?? []).length;
+        f.options!.push({ expr: expr!, label: `${some[1]}: ${n} region${n === 1 ? "" : "s"}` });
+      }
     }
     if (f.type === "choice") {
       const opts = [...(f.options ?? [])];
@@ -172,6 +193,11 @@ export class FeatureDialog {
     const error = await this.host.preview(src, d.index);
     if (seq !== this.seq || !this.detail) return;
     this.say(error ? `Preview: ${error}` : "", !!error);
+    const sketch = d.fields!.find((f) => f.type === "sketch" && this.visible(f));
+    const expr = sketch ? this.exprs.get(sketch.name) : null;
+    const regions = expr ? await this.host.kernel.sketchRegions(expr).catch(() => null) : null;
+    if (seq !== this.seq || !this.detail) return;
+    this.host.regions(regions?.regions.length ? regions : null, (i) => this.toggleRegion(sketch!.name, regions!, i));
     const edited = Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== null)) as Record<string, string>;
     const values = Object.keys(edited).length ? await this.host.kernel.featureValues(edited) : {};
     if (seq !== this.seq || !this.detail) return;
@@ -219,6 +245,7 @@ export class FeatureDialog {
   }
 
   private close() {
+    this.host.regions(null, () => {});
     clearTimeout(this.timer);
     this.seq++;
     this.detail = null;

@@ -27,7 +27,7 @@ async function download(url: string): Promise<Response> {
 type RunRequest =
   | { id: number; type: "run"; src: string; filename: string; upto: number | null }
   | { id: number; type: "call"; fn: "select" | "resolve" | "snippet" | "api_help" | "highlight_indices" | "sketch_plane"
-    | "read_feature" | "patch_feature" | "feature_values" | "insert_feature" | "delete_feature" | "sketch_open" | "sketch_action" | "sketch_convert" | "set_project" | "export_part"; args: unknown[] };
+    | "read_feature" | "patch_feature" | "feature_values" | "insert_feature" | "delete_feature" | "sketch_open" | "sketch_action" | "sketch_convert" | "sketch_regions" | "set_project" | "export_part"; args: unknown[] };
 
 const t0 = performance.now();
 const seconds = () => ((performance.now() - t0) / 1000).toFixed(1);

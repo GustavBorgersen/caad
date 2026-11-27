@@ -286,7 +286,14 @@ export class Viewer {
     return this.raycaster.ray.intersectPlane(p, new THREE.Vector3());
   }
 
-  /** World size of one screen pixel at a point. */
+  /** What the pointer's ray hits among `objects`, nearest first. */
+  raycast(ev: PointerEvent, objects: THREE.Object3D[]): THREE.Intersection[] {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    return this.raycaster.intersectObjects(objects, false);
+  }
+
   get canvas(): HTMLCanvasElement { return this.renderer.domElement; }
 
   /** Where a point in the scene is on the canvas, in CSS pixels from its top left. */
@@ -296,6 +303,7 @@ export class Viewer {
     return { x: ((p.x + 1) / 2) * el.clientWidth, y: ((1 - p.y) / 2) * el.clientHeight };
   }
 
+  /** World size of one screen pixel at a point. */
   pixelSize(at: THREE.Vector3): number {
     const h = this.renderer.domElement.clientHeight || 1;
     return (2 * this.camera.position.distanceTo(at) * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / h;

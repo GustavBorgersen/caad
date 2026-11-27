@@ -1,7 +1,7 @@
 # CAAD — Sketches and constraints
 
 **Date:** 2026-11-25
-**Status:** 06a and 06b built (2026-11-25); 06c in progress (part edges in sketches, and trim, fillet, mirror and patterns built 2026-11-27); 06d (visuals) after
+**Status:** 06a and 06b built (2026-11-25); 06c built 2026-11-27 (part edges in sketches; trim, fillet, mirror and patterns; choosing regions); 06d (visuals) next
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1 ("Sketches v2"); builds on [05 — Feature model](05-feature-model.md)
 
 ## Problem
@@ -55,7 +55,7 @@ One rule for numbers, everywhere in the block:
 - **Numbers in entity and shape calls are geometry** — where it is drawn: `c.rectangle((0, 0), (60, 40))`, `c.circle((18.333, 16.997), 5)`. They are the last solved values, rounded to 0.001 mm: the solver's starting point (which of several solutions you get) and the fallback geometry when no solver is available.
 - **Constraints and dimensions are separate calls.** Dimensions are plain Python expressions, evaluated before solving: `width`, `hole_d / 2`, `2 * depth + 3`.
 - **Shared points are coincidence**: lines that use the same point meet without a constraint.
-- **Regions** are the closed loops of non-construction entities, nested even-odd: a loop inside a loop is a hole, a loop inside that is material again (Onshape-like).
+- **Regions** are the closed loops of non-construction entities, nested even-odd: a loop inside a loop is a hole, a loop inside that is material again (Onshape-like). `sk1.sketch` is all of it. To use only some, `regions(sk1, (x, y), …)` (`from caad import regions`) takes the single areas — every area the lines enclose, crossings included — that contain the given points, fused: `extrude(regions(sk1, (0, 0)), amount=5)` extrudes only the area around the origin (a circle's disc, not the ring around it). In the extrude and revolve dialogs the sketch's areas show in the view; clicking one adds or removes it (the code becomes `regions(sk1, …)` with a point well inside each).
 
 ### The API
 
@@ -69,6 +69,7 @@ Small, one line per call, so the agent writes it as easily as the editor:
 | Dimensions | `distance(a, b, d)`, `hdistance(a, b, d)`, `vdistance(a, b, d)`, `length(line, d)`, `radius(circle_or_arc, r)`, `diameter(…, d)`, `angle(line_a, line_b, degrees)` |
 | References | `c.origin` (the sketch plane's origin, fixed), `c.x_axis`, `c.y_axis` (construction lines); `line.start` / `.end`, `circle.center`, `arc.center` / `.start` / `.end` |
 | The part | `project(edge_or_vertex, construction=True)`: an edge or vertex of the part (a selector; a ShapeList of one is fine) projected onto the sketch plane as fixed geometry: a line, a circle or arc (parallel to the plane), or a point (a vertex, or an edge seen end-on). Constrain to it like anything else; a guide by default, `construction=False` makes it part of the regions. Re-projected at every build, so it follows the part |
+| Regions | `regions(sketch, *at)` (module-level, not `c.`): the single areas of a named sketch containing the points `at`, on the sketch's plane; for `extrude` / `revolve`. A point on a line or outside every area is an error at the feature |
 | Operations | `fillet(corner, r)`: rounds the corner where exactly two lines end → the arc (`.corner` is the old corner, kept as a point to dimension to; `r` is a dimension). `mirror(about, *items)` → copies of points, lines, circles and arcs mirrored about a line, kept symmetric. `linear_pattern(items, count, dx, dy=0)` and `circular_pattern(items, count, center, angle=360)` → `[copy][item]` (the original is copy 0; 360°: spread all round, else from the first copy to the last); copies follow the originals. Their helpers (radius spokes) aren't drawn |
 
 Each call maps to PlaneGCS primitives (`p2p_distance`, `horizontal_l`, `tangent_lc`…). The mapping lives in one place — the `caad` module — and the page's editor uses the same primitive format.
@@ -111,7 +112,7 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 | :-- | :-- |
 | **06a — Constrained sketches in code** (done) | The `caad` module: entities, shapes, constraints, dimensions, regions; PlaneGCS at build in the page (WebAssembly bridge) and outside (PyPI or stored geometry); errors at the sketch feature; the sketcher writes the constrained form (its rectangles, circles and polygons as shapes, with their sizes as dimensions); outlines and `get_timeline` status; guide and `api_help`. Node tests against the page's build123d |
 | **06b — The sketch editor** (done) | sketch sessions in the kernel (`sketch_open` / `sketch_action`); reopening sketches by double-click, new sketches in the same editor; line (chains), rectangle, circle, arc and point tools; snapping to points and the origin, with horizontal/vertical inferred for new lines; dragging with live solving (only what has to move moves); constraint and dimension buttons for the selection (a distance goes from the first selected point to the second), a new dimension opening for its expression with the part's parameters offered, double-click a label to change it; constraints shown as glyphs (select, delete); conflicts in red; degrees of freedom. Converting plain sketches on first edit (`sketch_convert`: checked by comparing regions; polygons keep their points as written — build123d 0.13's default alignment) |
-| **06c — References and tools** (in progress) | **Done:** a point placed on the origin is tied to it (#7); the part's edges in a sketch (`c.project(selector)`, the *Use* tool; fixed, a guide unless `construction=False`), constrained to like any entity; trim (a code edit: shorter, split, circle to arc, shapes into lines), `c.fillet`, `c.mirror`, `c.linear_pattern` / `c.circular_pattern` with editor buttons and pattern fields. **Next:** choosing individual regions to extrude |
+| **06c — References and tools** (done) | **Done:** a point placed on the origin is tied to it (#7); the part's edges in a sketch (`c.project(selector)`, the *Use* tool; fixed, a guide unless `construction=False`), constrained to like any entity; trim (a code edit: shorter, split, circle to arc, shapes into lines), `c.fillet`, `c.mirror`, `c.linear_pattern` / `c.circular_pattern` with editor buttons and pattern fields; choosing individual regions to extrude or revolve (`regions(sk1, (x, y), …)`, clicked in the view in the feature dialog) |
 | **06d — Sketch visuals** | Drawn points as small circles (unlike the origin and a rectangle's centre); Onshape-like dimensions: extension lines and arrows for distances between entities, the arc of an angle; the sketch's local X/Y axes in the sketch and on plane features |
 
 ## Decided

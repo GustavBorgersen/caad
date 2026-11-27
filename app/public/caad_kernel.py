@@ -136,9 +136,32 @@ def _num(expr):
         return expr
 
 
+def _sketch_name(expr):
+    """The sketch a sketch field's expression uses: sk1 for sk1.sketch or regions(sk1, ...), else None."""
+    try:
+        node = ast.parse(expr or "", mode="eval").body
+    except SyntaxError:
+        return None
+    if isinstance(node, ast.Attribute) and node.attr == "sketch" and isinstance(node.value, ast.Name):
+        return node.value.id
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "regions" and node.args \
+            and isinstance(node.args[0], ast.Name) and not node.keywords:
+        return node.args[0].id
+    return None
+
+
+def _sketch_label(expr):
+    """sk1 for sk1.sketch, "sk1 (2 regions)" for regions(sk1, a, b), else the expression."""
+    name = _sketch_name(expr)
+    if name and not expr.strip().endswith(".sketch"):
+        n = len(ast.parse(expr, mode="eval").body.args) - 1
+        return f"{name} ({n} region{'' if n == 1 else 's'})"
+    return name or (expr or "")
+
+
 def _extrude_label(a, pending):
     verb = {"Mode.SUBTRACT": "Cut", "Mode.INTERSECT": "Intersect"}.get(a.get("mode"), "Extrude")
-    sketch = (a.get("to_extrude") or "").removesuffix(".sketch") or ", ".join(pending)
+    sketch = _sketch_label(a.get("to_extrude")) or ", ".join(pending)
     depth = {"Until.LAST": "through all", "Until.NEXT": "up to next"}.get(a.get("until")) or _num(a.get("amount"))
     return ", ".join(x for x in [f"{verb} {sketch}".strip(), depth, "symmetric" if a.get("both") == "True" else None] if x)
 
@@ -171,7 +194,7 @@ FEATURE_TYPES = {
             {"name": "mode", "label": "Result", "type": "choice", "options": _MODES},
         ],
         "sketch_arg": "profiles",
-        "label": lambda a, p: ", ".join(x for x in [f"Revolve {(a.get('profiles') or '').removesuffix('.sketch') or ', '.join(p)}".strip(),
+        "label": lambda a, p: ", ".join(x for x in [f"Revolve {_sketch_label(a.get('profiles')) or ', '.join(p)}".strip(),
                                                     f"{a.get('revolution_arc') or 360}°", _axis_label(a.get("axis"))] if x),
     },
     "mirror": {
@@ -482,7 +505,7 @@ def _axis_options(src, feats, env, first=None):
 
 
 def _ensure_caad_imports(src):
-    """Source importing caad's axis() and points() if calls use them and the file doesn't define them otherwise."""
+    """Source importing caad's axis(), points() and regions() if calls use them and the file doesn't define them otherwise."""
     tree = ast.parse(src)
     bound = set()
     for n in ast.walk(tree):
@@ -493,7 +516,7 @@ def _ensure_caad_imports(src):
         elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
             bound.add(n.id)
     called = {n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    for name in ("axis", "points"):
+    for name in ("axis", "points", "regions"):
         if name in called and name not in bound:
             src = _ensure_import(src, "caad", name)
     return src
@@ -618,7 +641,7 @@ def read_feature(src, index):
         if f["name"] == "about" and call.func.id == "mirror":  # the plane features before it
             f["options"] = f["options"] + [{"expr": n, "label": n} for n in _plane_names(feats[:index])]
         if f["name"] == "axis" and call.func.id == "revolve":  # lines of the sketches before it
-            profile = ast.get_source_segment(src, args["profiles"][0]).removesuffix(".sketch") if "profiles" in args else None
+            profile = _sketch_name(ast.get_source_segment(src, args["profiles"][0])) if "profiles" in args else None
             f["options"] = f["options"] + _axis_options(src, feats[:index], env, profile)
     return out
 
@@ -2024,6 +2047,60 @@ def _sketch_outlines(ns, feats, last, tol=0.05, angular=0.2):
     return out
 
 
+def sketch_regions(expr):
+    """The regions of the sketch a sketch field uses (sk1.sketch or regions(sk1, ...)) in the latest run, to pick them
+    in the view: {"name", "regions": [{"at": [x, y], "selected", "triangles": [x y z…], "lines": [x y z…] (segments)}]}.
+    Selected: the regions the expression uses (for sk1.sketch, those that are material)."""
+    import caad
+    from build123d import Vector
+    name = _sketch_name(expr)
+    ns = (globals().get("_current") or {}).get("ns") or {}
+    sk = ns.get(name) if name else None
+    if not isinstance(sk, BuildSketch):
+        return {"name": None, "regions": []}
+    areas = caad._sketch_areas(sk)
+    node = ast.parse(expr, mode="eval").body
+    if isinstance(node, ast.Call):
+        picked = set()
+        for arg in node.args[1:]:
+            try:
+                x, y = eval(compile(ast.Expression(arg), "<regions>", "eval"), dict(ns))  # noqa: S307 - the user's own code
+                picked.add(caad._area_at(areas, float(x), float(y)))
+            except Exception:  # noqa: BLE001 - a point that isn't one: picks nothing
+                pass
+        selected = [i in picked for i in range(len(areas))]
+    else:
+        try:
+            material = sk.sketch_local.faces()
+        except Exception:  # noqa: BLE001 - no regions
+            material = []
+        selected = []
+        for a in areas:
+            x, y = caad._region_point(a)
+            selected.append(any(f.is_inside(Vector(x, y, 0)) for f in material))
+    out = []
+    for a, sel in zip(areas, selected):
+        tris, lines = [], []
+        for pl in sk.output_placements:
+            face = a.moved(pl)
+            BRepMesh_IncrementalMesh(face.wrapped, 0.05, True, 0.2, True)
+            loc = TopLoc_Location()
+            tri = BRep_Tool.Triangulation_s(face.wrapped, loc)
+            if tri is not None:
+                trsf = loc.Transformation()
+                nodes = [tri.Node(i).Transformed(trsf) for i in range(1, tri.NbNodes() + 1)]
+                for i in range(1, tri.NbTriangles() + 1):
+                    for k in tri.Triangle(i).Get():
+                        p = nodes[k - 1]
+                        tris += [p.X(), p.Y(), p.Z()]
+            for e in face.edges():
+                pts = _edge_points(e, 0.05, 0.2)
+                for k in range(0, len(pts) - 3, 3):
+                    lines += pts[k:k + 6]
+        out.append({"at": list(caad._region_point(a)), "selected": sel, "triangles": tris, "lines": lines})
+    return {"name": name, "regions": out}
+
+
 def tessellate(shape, tol=0.05, angular=0.2):
     """Per-face triangles and per-edge polylines, as flat lists, plus face/edge ids."""
     BRepMesh_IncrementalMesh(shape.wrapped, tol, True, angular, True)  # whole shape: faces share edge points
@@ -2284,7 +2361,7 @@ def api_help(name):
     import inspect
     import build123d
     name = name.strip().removeprefix("build123d.")
-    if name.split(".")[0] in ("Constrained", "caad", "points", "axis"):  # CAAD's own (build123d has Axis, not axis)
+    if name.split(".")[0] in ("Constrained", "caad", "points", "axis", "regions"):  # CAAD's own (build123d has Axis, not axis)
         return _caad_help(name)
     obj = build123d
     try:

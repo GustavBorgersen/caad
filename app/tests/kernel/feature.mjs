@@ -310,6 +310,27 @@ with BuildPart() as p:
       "axis() refuses a line of another sketch");
   });
 
+  test("extruding chosen regions: sketch_regions for the view, regions(sk1, ...) in the code", () => {
+    const src = `from build123d import *\nfrom caad import Constrained\n\nwith BuildPart() as p:\n    with BuildSketch(Plane.XY.offset(3), mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            rect1 = c.rectangle((0, 0), (60, 40))\n            circle1 = c.circle((30, 20), 10)\n    extrude(sk1.sketch, amount=5)\n`;
+    call("run", src, "part.py");
+    let r = call("sketch_regions", "sk1.sketch");
+    const ring = r.regions.findIndex((g) => !g.selected), disc = 1 - ring;
+    check(r.name === "sk1" && r.regions.length === 2 && r.regions[disc].selected && JSON.stringify(r.regions[ring].at) === "[30,20]",
+      "two regions; for sk1.sketch the ring is material, the disc (a hole) isn't", r.regions.map((g) => [g.at, g.selected]));
+    check(r.regions.every((g) => g.triangles.length >= 9 && g.triangles.length % 9 === 0 && g.lines.length % 6 === 0 && g.triangles[2] === 3),
+      "each has triangles and outline segments on the sketch's plane (z = 3)");
+    const [x, y] = r.regions[ring].at;
+    const out = patch(src, 1, { to_extrude: `regions(sk1, (${x}, ${y}))` });
+    check(out.includes("from caad import Constrained, regions\n") && out.includes(`extrude(regions(sk1, (${x}, ${y})), amount=5)`) && features(out)[1].label === "Extrude sk1 (1 region), 5 mm",
+      "patched: imported from caad, labelled by the sketch and the number of regions", features(out)[1].label);
+    check(features(out)[1].refs.includes("sk1"), "the extrude still uses sk1");
+    check(Math.abs(vol(out) - Math.PI * 100 * 5) < 0.01, "only the disc is extruded");
+    call("run", out, "part.py");
+    r = call("sketch_regions", `regions(sk1, (${x}, ${y}))`);
+    check(r.regions[ring].selected && !r.regions[disc].selected, "the regions the points pick are the selected ones");
+    check(call("sketch_regions", "nothing.sketch").name == null && call("sketch_regions", "Rectangle(3, 3)").regions.length === 0, "no sketch: no regions");
+  });
+
   test("shared code: the open part's project is importable (set_project, docs/07)", () => {
     const plateSrc = example("plate.py");
     const paramsSrc = read("examples/caad-examples/params.py");

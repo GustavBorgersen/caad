@@ -259,6 +259,34 @@ step("+ Revolve about a construction line of the sketch, chosen in the dialog", 
     "revolve(sk1.sketch, axis=axis(sk1, line1)): a ring around x = 20", src);
 });
 
+step("+ Extrude: click the sketch's regions in the view to extrude only those", async () => {
+  await open("caad-examples/parts/regions.py", `from build123d import *\nfrom caad import Constrained\n\nwith BuildPart() as plate:\n    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            rect1 = c.rectangle((-30, -20), (30, 20))\n            circle1 = c.circle((0, 0), 10)\n`);
+  await addAtBar("+ Extrude");
+  await panelOpen();
+  const chosen = () => page.evaluate(() => window.caad.regionPicker()?.regions.map((r) => r.selected) ?? []);
+  await page.waitForFunction(() => window.caad.regionPicker()?.regions.length === 2, { timeout: 30_000 });
+  const [ring, disc] = (await chosen())[0] ? [0, 1] : [1, 0];
+  check((await chosen()).filter(Boolean).length === 1 && /Click regions/.test(await page.$eval("#feature-panel .note", (n) => n.textContent)),
+    "the sketch's two regions show in the view; sk1.sketch uses the ring", await chosen());
+  const click = async (i) => {
+    const at = await page.evaluate((i) => { const r = window.caad.viewer.canvas.getBoundingClientRect(); const p = window.caad.regionPicker().screen(i); return { x: r.left + p.x, y: r.top + p.y }; }, i);
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.click(at.x, at.y);
+  };
+  await click(disc);
+  await page.waitForFunction(() => window.caad.regionPicker()?.regions.every((r) => r.selected), { timeout: 30_000 });
+  const label = await page.$eval('#feature-panel [data-field="to_extrude"] select', (s) => s.selectedOptions[0].textContent);
+  check(label === "sk1: 2 regions", "clicking the disc adds it: regions(sk1, ...) with both", label);
+  await click(ring);
+  await page.waitForFunction((d) => { const r = window.caad.regionPicker()?.regions; return r && r[d].selected && r.filter((x) => x.selected).length === 1; }, { timeout: 30_000 }, disc);
+  await app.shot("feature-5-regions.png");
+  await ok();
+  const src = await code();
+  check(src.includes("from caad import Constrained, regions\n") && /\n    extrude\(regions\(sk1, \([-\d.]+, [-\d.]+\)\), amount=10\)\n$/.test(src) && Math.abs((await volume()) - Math.PI * 100 * 10) < 0.01,
+    "clicking the ring removes it: only the disc is extruded", src);
+  check(await page.evaluate(() => window.caad.regionPicker() === null && window.caad.viewer.tool === null), "the regions are gone with the dialog");
+});
+
 step("+ Plane on the selected top face, offset; ✎ Sketch on it; it hides once used", async () => {
   await open("caad-examples/parts/planes.py", `from build123d import *\n\nwith BuildPart() as block:\n    Box(20, 20, 10)\n`);
   await addAtBar("+ Plane");
@@ -281,7 +309,7 @@ step("+ Plane on the selected top face, offset; ✎ Sketch on it; it hides once 
   check(/\n    pl1 = Plane\(block\.faces\(\)[^\n]+\)\.offset\(5\)\n$/.test(src) && /Plane pl1 on a face, offset 5 mm/.test(await page.$eval("#timeline", (t) => t.textContent)),
     "pl1 = Plane(<top face>).offset(5)", src);
   check(planes.length === 1 && planes[0].corners.filter((v, i) => i % 3 === 2).every((z) => Math.abs(z - 10) < 1e-6), "the plane shows, 5 above the top", planes);
-  await app.shot("feature-5-plane.png");
+  await app.shot("feature-6-plane.png");
 
   check(await page.evaluate(() => window.caad.state.selection.length === 0), "nothing is selected");
   await page.click("#sketch-button");

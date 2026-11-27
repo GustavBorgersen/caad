@@ -14,6 +14,7 @@ starting point and the fallback without a solver. Constraints and dimensions are
 `c.fillet`, `c.mirror`, `c.linear_pattern` and `c.circular_pattern` make geometry from geometry.
 Leaving the block solves the sketch with PlaneGCS and adds its regions to the enclosing BuildSketch:
 loops inside loops alternate between material and hole; loops that cross are merged.
+`regions(sk1, (x, y), ...)` picks single areas instead, like clicking regions in a CAD program.
 
 PlaneGCS runs in the CAAD page (WebAssembly). Outside CAAD the sketch is built from its stored
 geometry, with a warning when that doesn't satisfy the constraints.
@@ -24,7 +25,7 @@ import math
 import sys
 import warnings
 
-__all__ = ["Constrained", "axis", "points"]
+__all__ = ["Constrained", "axis", "points", "regions"]
 
 TOLERANCE = 1e-3  # stored geometry is rounded to 0.001 mm
 solves = []  # per solved sketch: {"line", "dof", "solver", "message"}; CAAD shows it in the timeline
@@ -604,7 +605,8 @@ class Constrained:
                 info["message"] = "Redundant constraints (already implied by others): " + _describe(redundant) + "."
         if not strict:
             return
-        self.faces = _regions([e._edge() for e in self._entities if not e.construction and hasattr(e, "_edge")])
+        self._edges = [e._edge() for e in self._entities if not e.construction and hasattr(e, "_edge")]
+        self.faces = _regions(self._edges)
         if self.faces is not None:
             from build123d import BuildSketch, add
             if BuildSketch._get_context(log=False) is not None:
@@ -672,6 +674,33 @@ def axis(sketch, line):
     if (b - a).length < TOLERANCE:
         raise ValueError("The axis line has no length.")
     return Axis(a, b - a)
+
+
+def regions(sketch, *at):
+    """Single regions of a sketch, by a point inside each (in the sketch's own coordinates), to extrude or revolve
+    only those: `extrude(regions(sk1, (5, 3), (-5, 3)), amount=5)`. Every area the sketch's lines enclose is a
+    region of its own: a circle inside a rectangle makes two (the ring and the disc), a line across a rectangle
+    splits it in two, and crossing circles make three. (`sk1.sketch` instead alternates material and hole.)
+    Chosen regions that touch are merged."""
+    from build123d import Sketch
+    if not hasattr(sketch, "output_placements"):
+        raise TypeError(f"regions() takes a sketch (`with BuildSketch(...) as sk1:`), not {sketch!r}.")
+    if not at:
+        raise ValueError("Choose at least one region: regions(sk1, (x, y)) with a point inside it.")
+    areas = _sketch_areas(sketch)
+    chosen = []
+    for p in at:
+        x, y = _pair(p)
+        i = _area_at(areas, x, y)
+        if i is None:
+            raise ValueError(f"No region of the sketch contains ({x:g}, {y:g}): the point is outside its closed loops "
+                             "or on a line. Choose the regions again.")
+        if i not in chosen:
+            chosen.append(i)
+    faces = [areas[i] for i in chosen]
+    if len(faces) > 1:
+        faces = faces[0].fuse(*faces[1:]).clean().faces()
+    return Sketch([f.moved(pl) for pl in sketch.output_placements for f in faces])
 
 
 # --- Solving ------------------------------------------------------------------------------------
@@ -780,6 +809,128 @@ def _regions(edges):
             if fd == d:
                 result = f if result is None else (result.fuse(f) if d % 2 == 0 else result.cut(f))
     return result.clean() if result is not None else None
+
+
+_area_cache = {}
+
+
+def _sketch_areas(sketch):
+    """The regions of a sketch (see regions()), in its own coordinates: of its Constrained block, else of its shapes."""
+    c = getattr(sketch, "_caad_sketch", None)
+    if c is not None and getattr(c, "_edges", None) is not None:
+        return _areas(c._edges)
+    try:
+        return _areas(sketch.sketch_local.edges())
+    except Exception:  # noqa: BLE001 - a sketch without shapes
+        return []
+
+
+def _areas(edges):
+    """Every area the edges enclose, as faces facing up (+Z): the edges are split where they cross, those with a
+    free end are dropped, and a big face is split by the rest; its pieces but the outside are the regions."""
+    from build123d import Compound, Face, Location
+    edges = [e for e in edges if e.length > TOLERANCE]
+    key = tuple(sorted(_edge_key(e) for e in edges))
+    if key in _area_cache:
+        return _area_cache[key]
+    out = []
+    if len(edges) > 1:
+        edges = edges[0].fuse(*edges[1:]).edges()
+    edges = _prune(list(edges))
+    if edges:
+        bb = Compound(edges).bounding_box()
+        size = 4 * max(bb.size.X, bb.size.Y, 1.0)
+        big = Face.make_rect(size, size).moved(Location((bb.center().X, bb.center().Y)))
+        out = [f for f in _split(big, edges).faces() if f.bounding_box().size.X < size / 2]  # not the outside
+        out = [-f if f.normal_at().Z < 0 else f for f in out]
+    if len(_area_cache) > 32:
+        _area_cache.clear()
+    _area_cache[key] = out
+    return out
+
+
+def _split(face, edges):
+    """The face cut into pieces by the edges (OpenCascade's splitter)."""
+    from build123d.topology import shape_core
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Splitter
+    try:
+        from OCP.TopTools import TopTools_ListOfShape as ShapeList
+    except ImportError:  # the OCP build CAAD's page runs
+        ShapeList = shape_core.List_TopoDS_Shape
+    args, tools = ShapeList(), ShapeList()
+    args.Append(face.wrapped)
+    for e in edges:
+        tools.Append(e.wrapped)
+    op = BRepAlgoAPI_Splitter()
+    op.SetArguments(args)
+    op.SetTools(tools)
+    op.Build()
+    return shape_core.Shape.cast(op.Shape())
+
+
+def _edge_key(e):
+    pts = [e.position_at(t) for t in (0, 0.5, 1)]
+    return (e.geom_type.name, round(e.length, 6)) + tuple(round(v, 6) for p in pts for v in (p.X, p.Y))
+
+
+def _area_at(areas, x, y):
+    """The index of the region containing (x, y), else None (outside, or on a line)."""
+    from build123d import Vector
+    for i, a in enumerate(areas):
+        if a.is_inside(Vector(x, y, 0), tolerance=1e-6) and _clearance(_rings(a), x, y) > 1e-6:
+            return i
+    return None
+
+
+def _rings(face):
+    """A face's boundary as polylines (outer and holes), for quick point tests."""
+    rings = []
+    for w in [face.outer_wire()] + face.inner_wires():
+        pts = []
+        for e in w.edges():
+            n = 2 if e.geom_type.name == "LINE" else 24
+            pts += [(p.X, p.Y) for p in (e.position_at(i / (n - 1)) for i in range(n))]
+        rings.append(pts)
+    return rings
+
+
+def _clearance(rings, x, y):
+    """Distance from (x, y) to the nearest boundary segment."""
+    best = math.inf
+    for ring in rings:
+        for (ax, ay), (bx, by) in zip(ring, ring[1:] + ring[:1]):
+            dx, dy = bx - ax, by - ay
+            t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy))) if dx or dy else 0.0
+            best = min(best, math.hypot(x - ax - t * dx, y - ay - t * dy))
+    return best
+
+
+def _inside(rings, x, y):
+    """Even-odd test against the polylines."""
+    n = False
+    for ring in rings:
+        for (ax, ay), (bx, by) in zip(ring, ring[1:] + ring[:1]):
+            if (ay > y) != (by > y) and x < ax + (y - ay) * (bx - ax) / (by - ay):
+                n = not n
+    return n
+
+
+def _region_point(face):
+    """A point well inside a region, rounded to a short number: what regions() is given to pick it."""
+    rings = _rings(face)
+    bb = face.bounding_box()
+    c = face.center()
+    candidates = [(c.X, c.Y)] + [(bb.min.X + bb.size.X * (i + 0.5) / 16, bb.min.Y + bb.size.Y * (j + 0.5) / 16)
+                                 for i in range(16) for j in range(16)]
+    scored = [(_clearance(rings, x, y), x, y) for x, y in candidates if _inside(rings, x, y)]
+    if not scored:
+        return (round(c.X, 3), round(c.Y, 3))
+    best, x, y = max(scored)
+    for step in (10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.01, 0.001):
+        rx, ry = (round(round(v / step) * step, 6) + 0.0 for v in (x, y))  # + 0.0: no -0
+        if _inside(rings, rx, ry) and _clearance(rings, rx, ry) >= 0.5 * best:
+            return (rx, ry)
+    return (round(x, 3), round(y, 3))
 
 
 def _prune(edges):

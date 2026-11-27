@@ -125,6 +125,7 @@ body.sketching #selection, body.sketching #view-tools, body.sketching #agent-not
 #feature-panel .value { grid-column: 2; font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #feature-panel .value.error, #feature-panel .message.error { color: var(--error); }
 #feature-panel .add { display: block; margin: 6px 0 2px; color: var(--muted); }
+#feature-panel .note { margin: 6px 0 2px; color: var(--muted); font-size: 11px; }
 #feature-panel .message { margin-top: 6px; padding: 4px 6px; border-radius: 3px; background: var(--hover); white-space: pre-wrap; }
 #feature-panel .message.error { background: var(--error-bg); }
 #feature-panel .actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
