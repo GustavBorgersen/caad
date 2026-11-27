@@ -188,14 +188,17 @@ step("deleting a line takes what depends on it; Cancel saves nothing", async () 
   check(!(await code()).includes("sk2"), "Cancel saves nothing");
 });
 
-step("a sketch of points only (where holes will go)", async () => {
+step("a sketch of points only (where holes will go); a point on the origin is tied to it", async () => {
   await startOn("bracket.faces().filter_by(Axis.Z).sort_by(Axis.Z)[0]", "the bottom");
   await tool("point");
   await clickAt(-20, 5);
   await clickAt(20, 5);
-  check(!(await page.$eval("#sketch-panel .primary", (b) => b.disabled)) && /p1 = c\.point\(-20, 5\)\n\s+p2 = c\.point\(20, 5\)/.test(await sketchSrc()), "a sketch of two points can be closed (Done)");
+  await clickAt(0.2, -0.1);
+  const src = await sketchSrc();
+  check(/p3 = c\.point\(0, 0\)\n\s+c\.coincident\(p3, c\.origin\)/.test(src), "a click on the origin adds a point there, coincident with it (#7)", src);
+  check(!(await page.$eval("#sketch-panel .primary", (b) => b.disabled)) && /p1 = c\.point\(-20, 5\)\n\s+p2 = c\.point\(20, 5\)/.test(await sketchSrc()), "a sketch of three points can be closed (Done)");
   await done();
-  check(await page.evaluate(() => window.caad.state.result.sketches.some((s) => s.points.length === 6)), "its points show in the view");
+  check(await page.evaluate(() => window.caad.state.result.sketches.some((s) => s.points.length === 9)), "its three points show in the view");
 });
 
 step("a circle on the top face, snapped to the origin, extruded", async () => {

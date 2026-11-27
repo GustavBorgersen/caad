@@ -358,7 +358,10 @@ export class Sketcher implements PointerTool {
   private async place(s: Snap) {
     const cons = this.construction || undefined;
     if (this.tool === "point") {
-      if (!s.ref) await this.act([{ op: "add", kind: "point", args: s.at }]);
+      // On an existing point (the origin, a rectangle's centre…): a new point there, tied to it.
+      const actions: SketchAction[] = [{ op: "add", kind: "point", args: s.at }];
+      if (s.ref) actions.push({ op: "constrain", kind: "coincident", refs: ["$0", s.ref] });
+      await this.act(actions);
       return;
     }
     if (this.tool === "line") {
