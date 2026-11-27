@@ -9,7 +9,7 @@ A browser CAD program for build123d (static site) plus a small agent bridge. Doc
 | `app/` | The web app (Vite + TypeScript, no UI framework). `src/main.ts` is the glue |
 | `app/kernel-lock.json` | The kernel's wheels (URL + sha256) and Pyodide version. `scripts/kernel-fetch.mjs` (run by the Vite plugin) puts them and Pyodide's core into `app/public/kernel/` (git-ignored): the page loads nothing from CDNs or PyPI. `scripts/kernel-lock.mjs` re-resolves after a version change |
 | `app/public/caad_kernel.py` | Python run inside Pyodide: timeline from code, rollback, errors per feature, tessellation, selectors, agent helpers |
-| `app/public/caad.py` | The `caad` module part files import: constrained sketches (`Constrained`), solved by PlaneGCS (`app/src/gcs-solve.ts` in the page); must also build outside CAAD |
+| `app/public/caad.py` | The `caad` module part files import: constrained sketches (`Constrained`), solved by PlaneGCS (`app/src/gcs-solve.ts` in the page), and `points()` / `axis()` (a sketch's points as hole locations, a sketch line as a revolve axis); must also build outside CAAD |
 | `app/public/agent/guide.md` | build123d guide served to agents — every code example must build (test them) |
 | `bridge/` | `caad-mcp`, the Go MCP bridge (stdio ↔ WebSocket on 127.0.0.1:7337+). `tools.json` and `instructions.md` are the agent's tool definitions and instructions; the page imports `tools.json` too |
 | `examples/` | The bundled examples: a workspace with one project (`caad-examples/`: `pyproject.toml`, `params.py`, `parts/`) |

@@ -88,12 +88,12 @@ def analyze(src, filename="part.py"):
         return {"part": None, "block_line": None,
                 "features": [{"index": 0, "line": 1, "end": last, "label": "Custom code", "kind": "code",
                               "tier": "code", "name": None, "refs": []}]}
-    feats, names, pending = [], set(), []
+    feats, names, pending, planes = [], set(), [], set()
     for i, s in enumerate(block.body):
         f = {"index": i, "line": s.lineno, "end": s.end_lineno, "label": _label(s, src), "kind": _kind(s),
              "tier": "code", "name": None,
              "refs": sorted({n.id for n in ast.walk(s) if isinstance(n, ast.Name) and n.id in names})}
-        info = _feature_info(s, src)
+        info = _feature_info(s, src, planes)
         if info:
             f.update(tier=info["tier"], name=info.get("name"))
             if info.get("kind"):
@@ -110,6 +110,8 @@ def analyze(src, filename="part.py"):
                 f["label"] = info["label"](f.get("pending", []))
         if f["name"]:
             names.add(f["name"])
+            if f["kind"] == "plane":
+                planes.add(f["name"])
         feats.append(f)
     return {"part": name, "block_line": block.lineno, "features": feats}
 
@@ -169,7 +171,7 @@ FEATURE_TYPES = {
         ],
         "sketch_arg": "profiles",
         "label": lambda a, p: ", ".join(x for x in [f"Revolve {(a.get('profiles') or '').removesuffix('.sketch') or ', '.join(p)}".strip(),
-                                                    f"{a.get('revolution_arc') or 360}°"] if x),
+                                                    f"{a.get('revolution_arc') or 360}°", _axis_label(a.get("axis"))] if x),
     },
     "mirror": {
         "fields": [
@@ -281,8 +283,12 @@ def _is_none(node):
     return node is None or (isinstance(node, ast.Constant) and node.value is None)
 
 
-def _feature_info(stmt, src):
-    """Tier, name and label of a feature statement, or None for plain code."""
+def _feature_info(stmt, src, planes=()):
+    """Tier, name and label of a feature statement, or None for plain code. `planes`: the plane features before it."""
+    plane = _plane_feature(stmt, src, planes)
+    if plane:
+        name, parts = plane
+        return {"tier": "type", "kind": "plane", "name": name, "label": lambda pending: _plane_label(name, parts)}
     hole = _hole_parts(stmt)
     if isinstance(stmt, ast.With) and not hole:
         item = stmt.items[0]
@@ -312,6 +318,184 @@ def _feature_info(stmt, src):
     if "sketch_arg" in ftype and _is_none(args.get(ftype["sketch_arg"], (None,))[0]):
         info["uses_pending"] = True
     return info
+
+
+# Plane features: `pl1 = <base>[.offset(d)][.rotated((x, y, z))]` in the part block, a plane to sketch or mirror on.
+# The base is Plane.XY (or any Plane.<name>), Plane(<flat face>) or an earlier plane feature.
+_PLANE_PARTS = ("base", "offset", "rx", "ry", "rz")
+_PLANE_FIELDS = [
+    {"name": "base", "label": "On", "type": "choice", "pick": "face", "template": "Plane({})",
+     "options": _choices(("Plane.XY", "XY (top)"), ("Plane.XZ", "XZ (front)"), ("Plane.YZ", "YZ (right)"))},
+    {"name": "offset", "label": "Offset", "type": "number"},
+    {"name": "rx", "label": "Tilt about x", "type": "number"},
+    {"name": "ry", "label": "Tilt about y", "type": "number"},
+    {"name": "rz", "label": "Turn about normal", "type": "number"},
+]
+
+
+def _is_zero(expr):
+    try:
+        return float(expr) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _plane_parts(node, src, planes=()):
+    """{base, offset, rx, ry, rz} of a plane expression, as source text (None: absent or 0), or None if the
+    expression isn't one (see _PLANE_FIELDS)."""
+    parts = dict.fromkeys(_PLANE_PARTS)
+    seg = lambda n: ast.get_source_segment(src, n)  # noqa: E731
+
+    def method(n, name):
+        return (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == name
+                and len(n.args) == 1 and not n.keywords and not isinstance(n.args[0], ast.Starred))
+    if method(node, "rotated"):
+        rot = node.args[0]
+        if not (isinstance(rot, ast.Tuple) and len(rot.elts) == 3 and not any(isinstance(e, ast.Starred) for e in rot.elts)):
+            return None
+        for k, e in zip(("rx", "ry", "rz"), rot.elts):
+            parts[k] = None if _is_zero(seg(e)) else seg(e)
+        node = node.func.value
+    if method(node, "offset"):
+        parts["offset"] = None if _is_zero(seg(node.args[0])) else seg(node.args[0])
+        node = node.func.value
+    named = isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "Plane"
+    on_face = (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "Plane"
+               and len(node.args) == 1 and not node.keywords and not isinstance(node.args[0], ast.Starred))
+    if not (named or on_face or (isinstance(node, ast.Name) and node.id in planes)):
+        return None
+    parts["base"] = seg(node)
+    return parts
+
+
+def _plane_feature(stmt, src, planes=()):
+    """(name, parts) of a plane feature statement `name = <plane expression>`, else None."""
+    if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name)):
+        return None
+    parts = _plane_parts(stmt.value, src, planes)
+    return (stmt.targets[0].id, parts) if parts else None
+
+
+def _plane_expr(parts):
+    out = parts["base"]
+    if parts.get("offset"):
+        out += f".offset({parts['offset']})"
+    if any(parts.get(k) for k in ("rx", "ry", "rz")):
+        out += ".rotated((" + ", ".join(parts.get(k) or "0" for k in ("rx", "ry", "rz")) + "))"
+    return out
+
+
+def _plane_label(name, parts):
+    base = parts["base"]
+    on = "a face" if base.startswith("Plane(") else base.removeprefix("Plane.")
+    bits = [f"Plane {name} on {on}"]
+    if parts["offset"]:
+        bits.append(f"offset {_num(parts['offset'])}")
+    for k, about in (("rx", "about x"), ("ry", "about y"), ("rz", "about its normal")):
+        if parts[k]:
+            bits.append(f"{_deg(parts[k])} {about}")
+    return ", ".join(bits)
+
+
+def _deg(expr):
+    try:
+        float(expr)
+        return f"{expr}°"
+    except ValueError:
+        return expr
+
+
+def _axis_label(expr):
+    """"about line1" for a revolve about axis(sk1, line1), else None."""
+    try:
+        node = ast.parse(expr or "", mode="eval").body
+    except SyntaxError:
+        return None
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "axis" and len(node.args) == 2:
+        return f"about {ast.unparse(node.args[1])}"
+    return None
+
+
+def _plane_names(feats):
+    return [f["name"] for f in feats if f["kind"] == "plane"]
+
+
+def _patch_plane(src, index, stmt, name, expr):
+    """A plane feature's statement with one part changed: the plane expression is written again from its parts
+    (the unchanged ones keep their text)."""
+    planes = _plane_names(analyze(src)["features"][:index])
+    parts = _plane_parts(stmt.value, src, planes)
+    label = next(f["label"] for f in _PLANE_FIELDS if f["name"] == name)
+    if expr is not None:
+        expr = expr.strip()
+        if not _parses(expr):
+            raise ValueError(f"{label}: invalid syntax in {expr!r}")
+    if name == "base":
+        on = _plane_parts(ast.parse(expr, mode="eval").body, expr, planes) if expr else None
+        if not on or on["base"] != expr:
+            raise ValueError("A plane is on XY, XZ, YZ, a flat face (Plane(face)) or an earlier plane; "
+                             "its offset and rotation are fields of their own.")
+    elif expr is not None and _is_zero(expr):
+        expr = None
+    parts[name] = expr
+    t = _Text(src)
+    return src[:t.start(stmt.value)] + _plane_expr(parts) + src[t.end(stmt.value):]
+
+
+def _read_plane(src, index, feats, stmt, out):
+    """read_feature for a plane feature: its parts as pseudo-fields."""
+    planes = _plane_names(feats[:index])
+    parts = _plane_parts(stmt.value, src, planes)
+    env = globals()["_edit_env"] = _env()
+    out["call"] = "Plane"
+    out["fields"] = []
+    for f in _PLANE_FIELDS:
+        f = dict(f, pseudo=True, required=f["name"] == "base", default=None if f["name"] == "base" else "0", expr=parts[f["name"]])
+        if f["name"] == "base":
+            f["options"] = f["options"] + [{"expr": n, "label": n} for n in planes]
+        f.update(_evaluate(f["expr"], env) if f["expr"] is not None else {"value": None, "error": None})
+        out["fields"].append(f)
+    return out
+
+
+def _axis_options(src, feats, env, first=None):
+    """The lines of the constrained sketches in `feats` as revolve axes, axis(sk1, line1): `first`'s sketch first."""
+    import caad
+    out = []
+    for f in sorted((f for f in feats if f["kind"] == "sketch" and f.get("constrained") and f["name"]), key=lambda f: f["name"] != first):
+        c = getattr(env.get(f["name"]), "_caad_sketch", None)
+        try:
+            _, block, cname = _constrained_block(src, f["index"])
+        except ValueError:
+            continue
+        if c is None:
+            continue
+        # without the block's `c`: the env's is the last sketch's, whose c.origin and axes would be made by looking
+        refs = _sketch_refs(block, cname, {k: v for k, v in env.items() if k != cname}, c)
+        for e in c._entities:
+            ref = refs.get(id(e))
+            if isinstance(e, caad.Line) and ref and not ref.startswith(f"{cname}."):
+                out.append({"expr": f"axis({f['name']}, {ref})",
+                            "label": f"{f['name']}: {ref}" + (" (construction)" if e.construction else "")})
+    return out
+
+
+def _ensure_caad_imports(src):
+    """Source importing caad's axis() and points() if calls use them and the file doesn't define them otherwise."""
+    tree = ast.parse(src)
+    bound = set()
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            bound |= {(a.asname or a.name).split(".")[0] for a in n.names}
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(n.name)
+        elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+            bound.add(n.id)
+    called = {n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    for name in ("axis", "points"):
+        if name in called and name not in bound:
+            src = _ensure_import(src, "caad", name)
+    return src
 
 
 def _feature_stmt(src, index):
@@ -359,13 +543,18 @@ def _fields(name, sig, kind=None):
 
 def _describe_value(v):
     """Short text for an evaluated parameter, shown next to its expression."""
-    from build123d import Shape, ShapeList
+    from build123d import Axis, Plane, Shape, ShapeList
     if isinstance(v, bool) or v is None:
         return repr(v)
     if isinstance(v, (int, float)):
         return f"{round(v, 4):g}"
     if isinstance(v, enum.Enum):
         return v.name
+    xyz = lambda p: f"({round(p.X, 3) + 0.0:g}, {round(p.Y, 3) + 0.0:g}, {round(p.Z, 3) + 0.0:g})"  # noqa: E731 - no -0
+    if isinstance(v, Plane):
+        return f"at {xyz(v.origin)}, normal {xyz(v.z_dir)}"
+    if isinstance(v, Axis):
+        return f"through {xyz(v.position)}, along {xyz(v.direction)}"
     if isinstance(v, ShapeList):
         kinds = {type(x).__name__.lower() for x in v}
         what = kinds.pop() if len(kinds) == 1 else "shape"
@@ -394,6 +583,8 @@ def read_feature(src, index):
            # named private sketches before this feature: what a sketch field can refer to
            "sketches": [f["name"] for f in feats[:index] if f["kind"] == "sketch" and f["name"] and not f.get("implicit")]}
     found = _call_of(stmt)
+    if feat["kind"] == "plane" and isinstance(stmt, ast.Assign):
+        return _read_plane(src, index, feats, stmt, out)
     if feat["tier"] == "code" or not found:
         return out
     call, sig, args = found
@@ -422,6 +613,12 @@ def read_feature(src, index):
         f.update(_evaluate(f["expr"], env) if f["expr"] is not None else {"value": None, "error": None})
     if hole and not _hole_points(hole[0]):  # explicit positions: nothing to turn around
         out["fields"] = [f for f in out["fields"] if f["name"] not in ("reverse", "far")]
+    for f in out["fields"]:
+        if f["name"] == "about" and call.func.id == "mirror":  # the plane features before it
+            f["options"] = f["options"] + [{"expr": n, "label": n} for n in _plane_names(feats[:index])]
+        if f["name"] == "axis" and call.func.id == "revolve":  # lines of the sketches before it
+            profile = ast.get_source_segment(src, args["profiles"][0]).removesuffix(".sketch") if "profiles" in args else None
+            f["options"] = f["options"] + _axis_options(src, feats[:index], env, profile)
     return out
 
 
@@ -548,6 +745,8 @@ def _patch_hole(src, stmt, name, expr):
 def _patch_one(src, index, name, expr):
     """Source with one argument of feature `index` changed, added or removed (expr None)."""
     stmt = _feature_stmt(src, index)
+    if name in _PLANE_PARTS and _plane_feature(stmt, src, _plane_names(analyze(src)["features"][:index])):
+        return _patch_plane(src, index, stmt, name, expr)
     if _hole_parts(stmt) and name in ("kind", "locations", "reverse", "far"):
         return _patch_hole(src, stmt, name, expr)
     call, sig, args = _call_of(stmt)
@@ -622,6 +821,7 @@ def patch_feature(src, index, kind, changes):
 
         out = _patch_one(out, index, name, expr)
     try:
+        out = _ensure_caad_imports(out)
         after = analyze(out)["features"]
     except SyntaxError as e:
         raise ValueError(f"The change would break the code ({e.msg}); nothing was written.") from None
@@ -698,7 +898,8 @@ def _drills_away(src, after, sketch, filename="part.py"):
 def insert_feature(src, after, kind, params):
     """Source with a new feature after feature `after` (None: at the end, -1: first), in canonical form.
     A sketch gets the next free name `skN`; params are {"plane": expr, "body": [lines]} for a sketch,
-    else the call's arguments as expressions. Returns {src, index, name}."""
+    {"base", "offset", "rx", "ry", "rz"} for a plane (named `plN`), else the call's arguments as expressions.
+    Returns {src, index, name}."""
     tree = ast.parse(src)
     block, _ = _find_part_block(tree)
     if block is None:
@@ -727,6 +928,17 @@ def insert_feature(src, after, kind, params):
             src = _ensure_import(src, "caad", "points")
             tree = ast.parse(src)
             block, _ = _find_part_block(tree)
+    elif kind == "plane":
+        feats = analyze(src)["features"]
+        planes = _plane_names(feats if after is None else feats[:after + 1])
+        parts = {k: v.strip() if isinstance(v, str) and v.strip() and not (k != "base" and _is_zero(v)) else None
+                 for k, v in ((k, params.get(k)) for k in _PLANE_PARTS)}
+        base = parts["base"] or "Plane.XY"
+        on = _plane_parts(ast.parse(base, mode="eval").body, base, planes) if _parses(base) else None
+        if not on or on["base"] != base:
+            raise ValueError(f"A plane can't be on {base!r}: use XY, XZ, YZ, a flat face (Plane(face)) or an earlier plane.")
+        name = _free_name(src, "pl")
+        lines = [f"{name} = {_plane_expr({**parts, 'base': base})}"]
     else:
         lines = _create(kind, params)
     t = _Text(src)
@@ -746,7 +958,7 @@ def insert_feature(src, after, kind, params):
         index = (n - 1 if after is None else min(after, n - 1)) + 1
     if a == len(src) and src and not src.endswith("\n"):
         text = "\n" + text
-    return {"src": src[:a] + text + src[b:], "index": index, "name": name}
+    return {"src": _ensure_caad_imports(src[:a] + text + src[b:]), "index": index, "name": name}
 
 
 def delete_feature(src, index):
@@ -1273,7 +1485,7 @@ def run(src, filename="part.py", upto=None):
     try:
         info = analyze(src, filename)
     except SyntaxError as e:
-        return {"ok": False, "timeline": None, "mesh": None, "sketches": [],
+        return {"ok": False, "timeline": None, "mesh": None, "sketches": [], "planes": [],
                 "error": {"feature": None, "line": e.lineno, "message": f"SyntaxError: {e.msg}"},
                 "times": {"build": 0, "mesh": 0}}
     feats = info["features"]
@@ -1319,7 +1531,7 @@ def run(src, filename="part.py", upto=None):
     t2 = time.perf_counter()
     globals()["_current"] = {"ns": ns, "shape": shape, "part": info["part"]}
     return {"ok": error is None, "timeline": info, "upto": last, "error": error, "mesh": mesh,
-            "sketches": _sketch_outlines(ns, feats, last),
+            "sketches": _sketch_outlines(ns, feats, last), "planes": _plane_outlines(ns, feats, last, shape),
             "summary": _summary(shape) if mesh else None,
             "times": {"build": round(t1 - t0, 3), "mesh": round(t2 - t1, 3)}}
 
@@ -1370,6 +1582,27 @@ def _edge_points(edge, tol, angular):
     for i in range(1, sampler.NbPoints() + 1):
         p = sampler.Value(i)
         out += [p.X(), p.Y(), p.Z()]
+    return out
+
+
+def _plane_outlines(ns, feats, last, shape):
+    """Squares for the plane features up to feature `last` that no feature up to there uses yet: corners x y z…,
+    sized to the part."""
+    from build123d import Plane
+    try:
+        half = max(10.0, 0.35 * shape.bounding_box().diagonal) if shape is not None and not shape.is_null else 25.0
+    except Exception:  # noqa: BLE001 - an empty shape
+        half = 25.0
+    out = []
+    for f in feats[: last + 1]:
+        pl = ns.get(f["name"]) if f["kind"] == "plane" and f.get("status") == "ok" else None
+        if not isinstance(pl, Plane) or any(f["name"] in g["refs"] for g in feats[f["index"] + 1: last + 1]):
+            continue
+        corners = []
+        for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            v = pl.origin + pl.x_dir * (sx * half) + pl.y_dir * (sy * half)
+            corners += [v.X, v.Y, v.Z]
+        out.append({"name": f["name"], "index": f["index"], "corners": corners})
     return out
 
 
@@ -1661,7 +1894,7 @@ def api_help(name):
     import inspect
     import build123d
     name = name.strip().removeprefix("build123d.")
-    if name.split(".")[0] in ("Constrained", "caad"):
+    if name.split(".")[0] in ("Constrained", "caad", "points", "axis"):  # CAAD's own (build123d has Axis, not axis)
         return _caad_help(name)
     obj = build123d
     try:

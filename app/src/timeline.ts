@@ -4,15 +4,16 @@ import { sketchStatus } from "./tools";
 
 const ICONS: Record<string, string> = {
   sketch: "✎", extrude: "⬆", revolve: "↻", fillet: "◜", chamfer: "◸", hole: "◉", group: "⌗", code: "{}",
-  box: "▣", cylinder: "◎", sphere: "●", mirror: "⇋", loft: "⋈", sweep: "∿",
+  box: "▣", cylinder: "◎", sphere: "●", mirror: "⇋", loft: "⋈", sweep: "∿", plane: "▱",
 };
 
 // A click rolls back, a double-click edits: wait this long so a double-click doesn't roll back first.
 const DOUBLE_CLICK_MS = 200;
 let clickTimer = 0;
 
-export type AddKind = "extrude" | "revolve" | "hole" | "fillet" | "chamfer" | "mirror";
+export type AddKind = "plane" | "extrude" | "revolve" | "hole" | "fillet" | "chamfer" | "mirror";
 const ADD_TITLES: Record<AddKind, string> = {
+  plane: "A plane to sketch or mirror on: offset from the selected flat face (else from XY), here",
   extrude: "Extrude or cut the latest sketch, here", revolve: "Revolve the latest sketch, here",
   hole: "Holes at the points of the latest sketch with points, here", fillet: "A fillet on the edges selected in the view, here",
   chamfer: "A chamfer on the edges selected in the view, here", mirror: "Mirror the part so far, here",

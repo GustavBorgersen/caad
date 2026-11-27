@@ -5,7 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
-import type { Mesh, SketchOutline } from "./kernel";
+import type { Mesh, PlaneOutline, SketchOutline } from "./kernel";
 
 export type SketchPlane = { origin: number[]; x: number[]; y: number[]; z: number[] };
 
@@ -33,6 +33,7 @@ const COLORS = {
   edgeAgent: new THREE.Color(0x1a7fd0),
 };
 const SKETCH_COLOR = 0x1f6feb; // outlines of sketches no feature uses yet
+const PLANE_COLOR = 0x8a63d2; // plane features no feature uses yet
 const EDGE_PICK_PX = 6;
 const MARKED_EDGE_PX = 3; // selected/hovered/highlighted edges are drawn this wide (WebGL lines are always 1 px)
 
@@ -141,6 +142,7 @@ export class Viewer {
   highlight(picks: Pick[]) { this.agent = picks; this.recolor(); this.render(); }
 
   private sketchLines: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | null = null;
+  private planes: THREE.Group | null = null;
   private sketchPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
 
   /** Outlines of the sketches no feature uses yet. `fit` frames them (a part without a solid yet). */
@@ -178,6 +180,33 @@ export class Viewer {
       this.sketchPoints!.geometry.computeBoundingBox();
       const { min, max } = this.sketchPoints!.geometry.boundingBox!;
       this.fit([min.x, min.y, min.z, max.x, max.y, max.z]);
+    }
+    this.render();
+  }
+
+  /** Plane features: a translucent square with an outline each, drawn on top like sketches. */
+  setPlanes(planes: PlaneOutline[] | undefined) {
+    if (this.planes) {
+      this.scene.remove(this.planes);
+      this.planes.traverse((o) => {
+        if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) { o.geometry.dispose(); o.material.dispose(); }
+      });
+      this.planes = null;
+    }
+    if (planes?.length) {
+      const tris: number[] = [], segs: number[] = [];
+      for (const { corners: c } of planes) {
+        const p = (i: number) => c.slice(3 * i, 3 * i + 3);
+        tris.push(...p(0), ...p(1), ...p(2), ...p(0), ...p(2), ...p(3));
+        for (let i = 0; i < 4; i++) segs.push(...p(i), ...p((i + 1) % 4));
+      }
+      const fill = new THREE.Mesh(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(tris, 3)),
+        new THREE.MeshBasicMaterial({ color: PLANE_COLOR, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+      const outline = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(segs, 3)),
+        new THREE.LineBasicMaterial({ color: PLANE_COLOR, transparent: true, opacity: 0.7 }));
+      fill.renderOrder = outline.renderOrder = 2;
+      this.planes = new THREE.Group().add(fill, outline);
+      this.scene.add(this.planes);
     }
     this.render();
   }

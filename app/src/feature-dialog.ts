@@ -91,11 +91,13 @@ export class FeatureDialog {
         this.schedule();
       });
       row.querySelector<HTMLButtonElement>(".use")?.addEventListener("click", () => {
-        const kind = row.dataset.type === "faces" ? "face" : "edge";
+        const kind = field.pick ?? (row.dataset.type === "faces" ? "face" : "edge");
         const sel = this.host.selection(kind);
-        if (!sel) { this.say(`Select ${kind}s in the view first.`, true); return; }
-        (input as HTMLInputElement).value = sel;
-        this.exprs.set(name, sel);
+        if (!sel) { this.say(`Select ${field.pick ? `a flat ${kind}` : `${kind}s`} in the view first.`, true); return; }
+        const expr = field.pick && field.template ? field.template.replace("{}", sel) : sel;
+        this.exprs.set(name, expr);
+        if (input instanceof HTMLSelectElement) this.render(); // the selection becomes an option
+        else input.value = expr;
         this.schedule();
       });
     });
@@ -125,6 +127,7 @@ export class FeatureDialog {
       const opts = [...(f.options ?? [])];
       if (expr !== null && !opts.some((o) => (o.expr ?? null) === expr)) opts.push({ expr, label: expr });
       input = `<select>${opts.map((o) => `<option value="${esc(o.expr ?? "")}"${(o.expr ?? null) === expr ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
+      if (f.pick) input += `<button class="use" title="Use the ${f.pick} selected in the view">Use selection</button>`;
     } else if (f.type === "bool" && (expr === null || expr === "True" || expr === "False")) {
       input = `<input type="checkbox"${expr === "True" ? " checked" : ""}>`;
     } else if (f.type === "flip" && (expr === null || expr === this.flipped(f))) {

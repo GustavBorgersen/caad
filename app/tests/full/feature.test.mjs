@@ -245,3 +245,60 @@ step("+ Revolve the latest sketch a quarter turn; + Mirror it about YZ", async (
   check((await code()).endsWith("    mirror(about=Plane.YZ)\n") && Math.abs((await volume()) - 2 * quarter) < 0.01, "+ Mirror about YZ: twice the volume");
   await app.shot("feature-4-revolve.png");
 });
+
+step("+ Revolve about a construction line of the sketch, chosen in the dialog", async () => {
+  await open("caad-examples/parts/axis.py", `from build123d import *\nfrom caad import Constrained\n\nwith BuildPart() as ring:\n    with BuildSketch(Plane.XZ, mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            rect1 = c.rectangle((10, 0), (14, 4))\n            line1 = c.line((20, 0), (20, 10), construction=True)\n`);
+  await addAtBar("+ Revolve");
+  await panelOpen();
+  const axes = await page.$eval('#feature-panel [data-field="axis"] select', (s) => [...s.options].map((o) => o.textContent));
+  check(axes.includes("sk1: line1 (construction)") && axes.includes("sk1: rect1.left"), "the axis can be a line of the sketch", axes);
+  await page.select('#feature-panel [data-field="axis"] select', "axis(sk1, line1)");
+  await ok();
+  const src = await code();
+  check(src.includes("from caad import Constrained, axis\n") && src.endsWith("    revolve(sk1.sketch, axis=axis(sk1, line1))\n") && Math.abs((await volume()) - Math.PI * (100 - 36) * 4) < 0.01,
+    "revolve(sk1.sketch, axis=axis(sk1, line1)): a ring around x = 20", src);
+});
+
+step("+ Plane on the selected top face, offset; ✎ Sketch on it; it hides once used", async () => {
+  await open("caad-examples/parts/planes.py", `from build123d import *\n\nwith BuildPart() as block:\n    Box(20, 20, 10)\n`);
+  await addAtBar("+ Plane");
+  await panelOpen();
+  check(/New plane/.test(await page.$eval("#feature-panel .head", (h) => h.textContent)) &&
+    (await page.$eval('#feature-panel [data-field="base"] select', (s) => s.value)) === "Plane.XY", "nothing selected: + Plane is on XY");
+  await page.waitForFunction(() => window.caad.state.result.preview && window.caad.state.result.planes.length === 1, { timeout: 30_000 });
+  // Pick the top face while the dialog is open: Use selection makes it the plane's base.
+  await page.evaluate(async () => {
+    const r = await window.caad.kernel.highlightIndices("block.faces().sort_by(Axis.Z)[-1]");
+    window.caad.viewer.onSelect(r.faces.map((index) => ({ kind: "face", index })));
+  });
+  await page.waitForFunction(() => window.caad.state.selection.length === 1, { timeout: 30_000 });
+  await page.click('#feature-panel [data-field="base"] .use');
+  await page.evaluate(() => window.caad.viewer.onSelect([])); // else ✎ Sketch would sketch on the selected face
+  await type("offset", "5");
+  await ok();
+  const src = await code();
+  const planes = await page.evaluate(() => window.caad.state.result.planes);
+  check(/\n    pl1 = Plane\(block\.faces\(\)[^\n]+\)\.offset\(5\)\n$/.test(src) && /Plane pl1 on a face, offset 5 mm/.test(await page.$eval("#timeline", (t) => t.textContent)),
+    "pl1 = Plane(<top face>).offset(5)", src);
+  check(planes.length === 1 && planes[0].corners.filter((v, i) => i % 3 === 2).every((z) => Math.abs(z - 10) < 1e-6), "the plane shows, 5 above the top", planes);
+  await app.shot("feature-5-plane.png");
+
+  check(await page.evaluate(() => window.caad.state.selection.length === 0), "nothing is selected");
+  await page.click("#sketch-button");
+  check((await page.$$eval("#plane-features button", (b) => b.map((x) => x.textContent))).join() === "pl1", "✎ Sketch offers the plane");
+  await page.click("#plane-features button");
+  await page.waitForFunction(() => window.caad.sketcher.active, { timeout: 60_000 });
+  check(await page.evaluate(() => Math.abs(window.caad.sketcher.plane.origin[2] - 10) < 1e-6), "the sketch is on pl1 (z = 10)");
+  await page.click('#sketch-panel [data-tool="circle"]');
+  for (const [x, y] of [[0, 0], [3, 0]]) {
+    const s = await page.evaluate(([a, b]) => window.caad.sketcher.screen([a, b]), [x, y]);
+    await page.mouse.move(s.x, s.y);
+    await page.mouse.click(s.x, s.y);
+    await page.waitForFunction(() => window.caad.sketcher.idle, { timeout: 30_000 });
+  }
+  const g = await gen();
+  await page.click("#sketch-panel .primary");
+  await waitBuild(g);
+  check((await code()).includes("    with BuildSketch(pl1, mode=Mode.PRIVATE) as sk1:\n") && (await page.evaluate(() => window.caad.state.result.planes.length)) === 0,
+    "Done: a sketch on pl1, which isn't drawn any more");
+});

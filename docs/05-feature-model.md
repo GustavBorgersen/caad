@@ -1,7 +1,7 @@
 # CAAD — Feature model and code round-trip
 
 **Date:** 2026-11-24, decisions added 2026-11-25
-**Status:** Slices 1–2 built; slice 3 built except sketch planes and revolving about a sketch line (2026-11-26)
+**Status:** Slices 1–3 built (sketch planes and revolving about a sketch line 2026-11-27)
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1
 
 ## Problem
@@ -82,7 +82,8 @@ First set of feature types and their canonical forms:
 | :-- | :-- | :-- |
 | **Sketch** | `with BuildSketch(<plane>, mode=Mode.PRIVATE) as skN:` + body | The body is edited in the sketch editor; its format is design doc 06 |
 | **Extrude** | `extrude(skN.sketch, amount=…, [both=True], [dir=…], [taper=…], [mode=Mode.SUBTRACT/INTERSECT])` | *Through all*: `until=Until.LAST`. *Opposite direction*: `dir=-skN.sketch.faces()[0].normal_at()` — a sketch on a face has its normal pointing out of the part, so cutting into it needs this (verified: without it build123d finds no intersection) |
-| **Revolve** | `revolve(skN.sketch, axis=…, revolution_arc=…, [mode=…])` | |
+| **Revolve** | `revolve(skN.sketch, axis=…, revolution_arc=…, [mode=…])` | *Axis* offers X, Y, Z and the lines of the constrained sketches (the profile's own first): `axis=axis(sk1, line1)`, caad's `axis()` turning a line — usually a construction line — into a build123d `Axis` on the sketch's plane |
+| **Plane** | `plN = <base>[.offset(d)][.rotated((rx, ry, rz))]` | *On*: `Plane.XY/XZ/YZ`, an earlier plane feature, or the face selected in the view (`Plane(<face selector>)`); offset along its normal; tilts about its own x and y and a turn about the normal (`rotated` uses the plane's local axes). Drawn in the view (a translucent square) until a later feature uses it; *✎ Sketch* offers it, and a sketch on it is `BuildSketch(plN, …)`. *Mirror*'s *About* offers the plane features too |
 | **Fillet / Chamfer** | `fillet(<edges>, radius=…)` / `chamfer(<edges>, length=…, [length2=…])` | Edges as a selector |
 | **Hole** | `with Locations(<points or faces>):` + `Hole(…)` / `CounterBoreHole(…)` / `CounterSinkHole(…)` | |
 | **Mirror** | `mirror(about=<plane>)` | |
@@ -175,7 +176,7 @@ The agent keeps writing code with `write_part` / `edit_part`. The build123d guid
 | :-- | :-- |
 | **1 — Read and patch** (done) | Registry with extrude, fillet and chamfer; call and code tiers; `analyze` extension, `read_feature`, `patch_feature`; Node tests; generic dialog in the page with live preview, opened by double-click |
 | **2 — Named sketches** (done) | Sketcher writes the named form; extrude's sketch field; `insert_feature` and a "+" at the rollback bar (fillet/chamfer from the selected edges); refs and safe delete |
-| **3 — More types, agent** | Revolve, hole (`with Locations(…): Hole/CounterBoreHole/CounterSinkHole(…)`: its type and position are dialog fields that aren't call arguments; switching the type rewrites just the hole call), mirror; *+ Revolve*, *+ Hole* (on the selected face), *+ Mirror* at the rollback bar; `edit_feature` tool; guide teaches the canonical forms (all done). Holes go at a sketch's points (`with Locations(*points(sk1)): Hole(…)`), with *Drill the other way* and *Start at the far side*. **Still to do — free placement:** *sketch planes*: a plane feature (`pl1 = Plane.XZ.offset(20)`, rotated, or from a face) shown in the view, that sketches can be drawn on — so a sketch can sit anywhere, not only on the base planes and the part's faces; and *revolving about a sketch line*: `revolve(sk1.sketch, axis=axis(sk1, line1))`, with caad's `axis()` turning a (construction) line of the sketch into the axis, and the dialog's *Axis* offering the sketch's lines next to X, Y and Z. Together they give revolves (and sketches) full freedom of position and angle |
+| **3 — More types, agent** | Revolve, hole (`with Locations(…): Hole/CounterBoreHole/CounterSinkHole(…)`: its type and position are dialog fields that aren't call arguments; switching the type rewrites just the hole call), mirror; *+ Revolve*, *+ Hole* (on the selected face), *+ Mirror* at the rollback bar; `edit_feature` tool; guide teaches the canonical forms (all done). Holes go at a sketch's points (`with Locations(*points(sk1)): Hole(…)`), with *Drill the other way* and *Start at the far side*. **Free placement (done 2026-11-27):** *sketch planes*: a plane feature (`pl1 = Plane.XZ.offset(20)`, rotated, or from a face; *+ Plane* at the rollback bar) shown in the view, that sketches can be drawn on — so a sketch can sit anywhere, not only on the base planes and the part's faces; and *revolving about a sketch line*: `revolve(sk1.sketch, axis=axis(sk1, line1))`, with caad's `axis()` turning a (construction) line of the sketch into the axis, and the dialog's *Axis* offering the sketch's lines next to X, Y and Z. Together they give revolves (and sketches) full freedom of position and angle |
 
 ## Tests
 

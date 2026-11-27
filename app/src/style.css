@@ -89,7 +89,7 @@ dialog summary { cursor: pointer; color: var(--muted); }
 h2 .small { float: right; margin-top: -3px; padding: 0 6px; font-size: 11px; text-transform: none; letter-spacing: 0; }
 #view-tools { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; align-items: center; }
 #view-tools button, #plane-choice button { background: rgba(255,255,255,0.95); }
-#plane-choice { display: inline-flex; gap: 4px; align-items: center; }
+#plane-choice, #plane-features { display: inline-flex; gap: 4px; align-items: center; }
 #plane-choice[hidden] { display: none; }
 #sketch-panel { position: absolute; top: 8px; left: 8px; right: 8px; padding: 6px 8px; background: rgba(255,255,255,0.96); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); font-size: 12px; }
 #sketch-panel .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
