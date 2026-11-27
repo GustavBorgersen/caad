@@ -1,6 +1,6 @@
 // Sketch editor end to end (docs/06-sketches.md): converting a plain sketch, draw, dimension, Done, extrude;
 // reopen and change a dimension; line chains with snapping and inferred constraints; delete; sketches on faces;
-// Cancel; a new part.
+// Cancel; a new part; Use (a part edge in the sketch, constrained to).
 import { after } from "node:test";
 import { check } from "../common.mjs";
 import { openApp, sleep, steps } from "../ui/env.mjs";
@@ -241,4 +241,29 @@ step("a new part: a closed polyline, then its extrude", async () => {
   await extrude();
   check(Math.abs((await volume()) - 5000) < 1, "extruded 10: volume 5000 mm³", await volume());
   await app.shot("sketch-5-newpart.png");
+});
+step("Use: a part edge in the sketch, fixed, and a point constrained to it", async () => {
+  await startOn("Plane.XY.offset(10)", "the top");
+  await tool("use");
+  await clickAt(15, 0); // the polyline part's front edge, on top
+  let m = await model();
+  const ref = m.entities.find((e) => e.ref === "ref1");
+  const ends = m.entities.filter((e) => e.ref === "ref1.start" || e.ref === "ref1.end");
+  check(/ref1 = c\.project\(\w+\.edges\(\)/.test(await sketchSrc()) && ref?.kind === "line" && ref.reference && ends.length === 2 && ends.every((p) => Math.abs(p.y) < 1e-6),
+    "a click on the edge projects it: c.project(<its selector>), a line along y = 0", (await sketchSrc()).match(/ref1 = .*/)?.[0]);
+  await tool("point");
+  await clickAt(15, 5);
+  await tool("select");
+  await clickAt(15, 5);
+  await shiftClickAt(8, 0);
+  await option("on");
+  await idle();
+  m = await model();
+  check(Math.abs(m.entities.find((e) => e.ref === "p1").y) < 1e-6 && /c\.on\(p1, ref1\)/.test(await sketchSrc()), "a point put on it goes to y = 0");
+  const before = await sketchSrc();
+  await dragFrom([5, 0], [5, 6]);
+  check((await sketchSrc()) === before && (await model()).entities.filter((e) => e.reference && e.kind === "point").every((p) => Math.abs(p.y) < 1e-6), "the reference can't be dragged");
+  await app.shot("sketch-6-use.png");
+  await done();
+  check(/ref1 = c\.project\(/.test(await code()) && await page.evaluate(() => window.caad.state.result.ok), "saved; the part builds");
 });

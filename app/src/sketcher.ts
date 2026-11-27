@@ -8,10 +8,11 @@ import type { Kernel, SketchAction, SketchEntity, SketchModel } from "./kernel";
 import { num } from "./sketch-code";
 import type { PointerTool, SketchPlane, Viewer } from "./viewer";
 
-type Tool = "select" | "line" | "rect" | "circle" | "arc" | "point";
+type Tool = "select" | "line" | "rect" | "circle" | "arc" | "point" | "use";
 const TOOLS: [Tool, string, string][] = [
   ["select", "↖", "Select and drag"], ["line", "╱", "Line"], ["rect", "▭", "Rectangle"],
   ["circle", "◯", "Circle"], ["arc", "◠", "Arc"], ["point", "•", "Point"],
+  ["use", "⤓", "Use part edges: bring them into the sketch to constrain to"],
 ];
 const HINTS: Record<Tool, string> = {
   select: "Click to select (Shift: more), drag to move, Delete to remove.",
@@ -20,10 +21,11 @@ const HINTS: Record<Tool, string> = {
   circle: "Click the centre, then a point on the circle.",
   arc: "Click the centre, the start, then the end (counter-clockwise).",
   point: "Click to place a point.",
+  use: "Click an edge of the part: it comes into the sketch as fixed guide geometry to constrain to (construction=False in the code makes it part of the regions).",
 };
 const COLOR = {
   free: 0x1f6feb, constrained: 0x1d2228, construction: 0x8a96a3, selected: 0xe06000, hover: 0xf0a040,
-  conflict: 0xc62828, preview: 0xe67e22, grid: 0xdfe4ea, axis: 0xb0bac5,
+  conflict: 0xc62828, preview: 0xe67e22, grid: 0xdfe4ea, axis: 0xb0bac5, reference: 0x8a63d2,
 };
 // Constraints shown as small glyphs in the view (not the ones built into shapes).
 const GLYPHS: Record<string, string> = {
@@ -131,6 +133,7 @@ export class Sketcher implements PointerTool {
 
   stop() {
     this.active = false;
+    this.viewer.hoverPick(null);
     this.viewer.tool = null;
     this.viewer.onCameraChange = () => {};
     this.viewer.remove(this.group);
@@ -176,10 +179,10 @@ export class Sketcher implements PointerTool {
     return this.model.entities.find((e) => e.ref === ref) ?? { id: "origin", kind: "point", ref, x: 0, y: 0, fixed: true, construction: true };
   }
 
-  /** Entities drawn in the view: not the origin and its axes (the grid's axes show them). */
+  /** Entities drawn in the view: not the origin and its axes (the grid's axes show them); references are. */
   private drawn(e: SketchEntity): boolean {
     const c = this.model.c;
-    return !(e.fixed || e.ref?.startsWith(`${c}.x_axis`) || e.ref?.startsWith(`${c}.y_axis`));
+    return !((e.fixed && !e.reference) || e.ref?.startsWith(`${c}.x_axis`) || e.ref?.startsWith(`${c}.y_axis`));
   }
 
   private local(ev: PointerEvent): XY | null {
@@ -235,6 +238,12 @@ export class Sketcher implements PointerTool {
   // --- Pointer ------------------------------------------------------------------------------------
 
   move(ev: PointerEvent) {
+    if (this.tool === "use") {
+      const edge = this.viewer.pickEdge(ev);
+      this.viewer.hoverPick(edge);
+      this.viewer.canvas.style.cursor = edge ? "pointer" : "";
+      return;
+    }
     const at = this.local(ev);
     if (!at) return;
     this.cursor = this.tool === "select" ? { at } : this.snap(at);
@@ -257,6 +266,7 @@ export class Sketcher implements PointerTool {
     const d = this.dragging;
     const at = this.local(ev);
     if (!d || !at) return;
+    if (this.entity(d.id)?.reference) return; // part geometry stays put (released, it's a click: selected)
     if (!d.moved && Math.hypot(at[0] - d.from[0], at[1] - d.from[1]) < 3 * this.px()) return;
     d.moved = true;
     this.solveDrag(d.id, d.from, at);
@@ -278,6 +288,7 @@ export class Sketcher implements PointerTool {
   }
 
   click(ev: PointerEvent) {
+    if (this.tool === "use") { if (!this.busy) this.use(ev); return; }
     const at = this.local(ev);
     if (!at || this.busy) return;
     if (this.tool === "select") {
@@ -355,6 +366,30 @@ export class Sketcher implements PointerTool {
 
   private arg(s: Snap): string | XY { return s.ref ?? s.at; }
 
+  /** Use: the part's edge under the cursor into the sketch, as `c.project(<its selector>)`. The view shows the part
+   * as it is before the sketch, which is what the sketch's code sees, so the selector picks the same edge. */
+  private async use(ev: PointerEvent) {
+    const edge = this.viewer.pickEdge(ev);
+    if (!edge) { this.host.status("Click an edge of the part to use it in the sketch."); return; }
+    this.busy = true;
+    let expr: string | undefined;
+    try { expr = (await this.host.kernel.select("edge", [edge.index])).selectors[0]?.expr; }
+    catch (e) { this.host.status((e as Error).message); }
+    finally { this.busy = false; }
+    if (!expr) { this.host.status("No selector found for that edge."); return; }
+    const before = this.session;
+    await this.act([{ op: "add", kind: "project", args: [expr] }]);
+    const error = this.model.error;
+    if (error && !before.model.error) { // e.g. a circle seen from the side: leave the sketch as it was
+      this.session = before;
+      this.renderPanel();
+      this.redraw();
+      this.host.status(`Can't use that edge: ${error.message.replace(/^\w+Error: /, "")}`);
+      return;
+    }
+    this.host.status(`Using ${expr}`);
+  }
+
   private async place(s: Snap) {
     const cons = this.construction || undefined;
     if (this.tool === "point") {
@@ -419,6 +454,7 @@ export class Sketcher implements PointerTool {
   }
 
   private setTool(t: Tool) {
+    if (this.tool === "use") this.viewer.hoverPick(null);
     this.tool = t;
     this.pending = [];
     this.chain = null;
@@ -503,7 +539,7 @@ export class Sketcher implements PointerTool {
   }
 
   private deleteSelected() {
-    const ents = this.model.entities.filter((e) => !e.fixed).map((e) => e.id).filter((id) => this.selected.has(id));
+    const ents = this.model.entities.filter((e) => !e.fixed || e.reference).map((e) => e.id).filter((id) => this.selected.has(id));
     const cons = this.model.constraints.map((c) => c.id).filter((id) => this.selected.has(id));
     this.selected.clear();
     this.act([{ op: "delete", entities: ents, constraints: cons }]);
@@ -516,6 +552,7 @@ export class Sketcher implements PointerTool {
     if (this.hover === e.id) return COLOR.hover;
     const conflicting = new Set(this.model.conflicting);
     if (this.model.constraints.some((c) => conflicting.has(c.id) && c.involves.includes(e.id))) return COLOR.conflict;
+    if (e.reference) return COLOR.reference;
     if (e.construction && e.kind !== "point") return COLOR.construction;
     return this.model.dof === 0 ? COLOR.constrained : COLOR.free;
   }

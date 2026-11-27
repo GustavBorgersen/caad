@@ -149,6 +149,74 @@ with BuildPart() as part:
     check(/already constrained/.test(tryCall("sketch_convert", src0, 1).error ?? ""), "a constrained sketch isn't converted again");
   });
 
+  test("references: the part's edges in the sketch (c.project)", () => {
+    // A plate with a hole and a rounded corner (40, 30); the sketch on its top face, empty for now.
+    const srcRef = (plane, body = "pass") => `from build123d import *
+from caad import Constrained
+
+with BuildPart() as part:
+    Box(80, 60, 10)
+    Cylinder(5, 10, mode=Mode.SUBTRACT)
+    fillet(part.edges().filter_by(Axis.Z).group_by(Axis.X)[-1].sort_by(Axis.Y)[-1], radius=4)
+    with BuildSketch(${plane}) as sk1:
+        with Constrained() as c:
+${body.split("\n").map((l) => "            " + l).join("\n")}
+    extrude(amount=2)
+`;
+    const top = srcRef("Plane.XY.offset(5)");
+    check(!call("sketch_open", top, 3).error, "a sketch on the plate's top opens");
+    const top_edge = "part.edges().filter_by(Axis.X).group_by(Axis.Z)[-1].sort_by(Axis.Y)[-1]";
+    let r = call("sketch_action", top, 3, [
+      { op: "add", kind: "project", args: [top_edge] },
+      { op: "add", kind: "project", args: ["part.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1].sort_by(SortBy.RADIUS)[-1]"] },
+      { op: "add", kind: "point", args: [0, 20] },
+      { op: "constrain", kind: "on", refs: ["$2", "$0"] },
+      { op: "add", kind: "circle", args: [[20, 0], 3] },
+      { op: "constrain", kind: "equal", refs: ["$3", "$1"] },
+    ]);
+    check(r.src.includes(`ref1 = c.project(${top_edge})`) && JSON.stringify(r.made.slice(0, 2)) === '["ref1","ref2"]', "Use writes `ref1 = c.project(<selector>)`", lineOf(r.src, /ref1 =/));
+    const ref1 = byRef(r.model, "ref1"), ref2 = byRef(r.model, "ref2");
+    const ys = [byRef(r.model, "ref1.start"), byRef(r.model, "ref1.end")];
+    check(ref1.kind === "line" && ref1.reference && ref1.construction && ys.every((p) => p.fixed && p.reference && near(p.y, 30)) && near(Math.abs(ys[0].x - ys[1].x), 76),
+      "the top edge: a fixed construction line at y = 30 (76 long: up to the rounded corner)", ys.map((p) => [p.x, p.y]));
+    check(ref2.kind === "circle" && ref2.reference && near(ref2.r, 5) && near(byRef(r.model, "ref2.center").x, 0), "the hole: a fixed circle of radius 5 at the origin");
+    check(near(byRef(r.model, "p1").y, 30) && near(byRef(r.model, "circle1").r, 5) && !r.model.problem, "a point on the edge goes to y = 30; a circle equal to the hole gets radius 5 (the reference doesn't move)");
+    check(r.model.dof === 3, `references add no degrees of freedom (${r.model.dof}: the point's x, the circle's centre)`);
+
+    const arc = call("sketch_action", top, 3, [{ op: "add", kind: "project", args: ["part.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1].sort_by(SortBy.RADIUS)[-1].edges()"] }]);
+    check(arc.model.entities.some((e) => e.kind === "circle"), "a ShapeList of one edge is fine");
+    const a = call("sketch_action", top, 3, [{ op: "add", kind: "project", args: ["part.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1].sort_by(SortBy.RADIUS)[0]"] }]).model;
+    const [ac, as, ae] = ["ref1.center", "ref1.start", "ref1.end"].map((x) => byRef(a, x));
+    check(byRef(a, "ref1").kind === "arc" && near(ac.x, 36) && near(ac.y, 26) && near(as.x, 40) && near(as.y, 26) && near(ae.x, 36) && near(ae.y, 30),
+      "the rounded corner: an arc around (36, 26), counter-clockwise from (40, 26) to (36, 30)", [ac, as, ae].map((p) => [p.x, p.y]));
+    const v = call("sketch_action", top, 3, [
+      { op: "add", kind: "project", args: ["part.vertices().group_by(Axis.Z)[-1].group_by(Axis.X)[0].sort_by(Axis.Y)[-1]"] },
+      { op: "add", kind: "project", args: ["part.edges().filter_by(Axis.Z).group_by(Axis.X)[0].sort_by(Axis.Y)[0]"] },
+    ]).model;
+    check(byRef(v, "ref1").kind === "point" && byRef(v, "ref1").fixed && near(byRef(v, "ref1").x, -40) && near(byRef(v, "ref1").y, 30), "a vertex: a fixed point");
+    check(byRef(v, "ref2").kind === "point" && near(byRef(v, "ref2").x, -40) && near(byRef(v, "ref2").y, -30), "an edge straight through the sketch plane: a point");
+
+    const side = srcRef("Plane.XZ");
+    call("sketch_open", side, 3);
+    const tilted = call("sketch_action", side, 3, [{ op: "add", kind: "project", args: ["part.edges().filter_by(GeomType.CIRCLE)[0]"] }]).model;
+    check(/parallel to the sketch plane/.test(tilted.error?.message ?? ""), "a circle seen from the side is refused", tilted.error?.message);
+    const face = call("sketch_action", side, 3, [{ op: "add", kind: "project", args: ["part.faces()[0]"] }]).model;
+    check(/takes an edge or a vertex/.test(face.error?.message ?? ""), "so is a face", face.error?.message);
+    check(/one edge/.test(call("sketch_action", side, 3, [{ op: "add", kind: "project", args: ["part.edges()"] }]).model.error?.message ?? ""), "and several edges");
+
+    call("sketch_open", top, 3);
+    const m = call("sketch_action", top, 3, [{ op: "add", kind: "project", args: [top_edge] }, { op: "add", kind: "point", args: [0, 20] }, { op: "constrain", kind: "on", refs: ["$1", "$0"] }]);
+    const del = call("sketch_action", m.src, 3, [{ op: "delete", entities: [byRef(m.model, "ref1").id], constraints: [] }]);
+    check(!del.src.includes("c.project") && !del.src.includes("c.on(") && del.src.includes("p1 = c.point(0, 20)"), "deleting a reference takes the constraints on it");
+
+    // The whole part: the sketch's plane comes from BuildSketch (here a face), and construction=False makes a region.
+    const faceTop = srcRef("part.faces().sort_by(Axis.Z)[-1]", "ref1 = c.project(part.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1].sort_by(SortBy.RADIUS)[-1], construction=False)");
+    const built = call("run", faceTop, "part.py");
+    const plate = call("run", srcRef("Plane.XY", "pass").replace("    extrude(amount=2)\n", ""), "part.py");
+    check(built.ok && near(built.summary.volume - plate.summary.volume, Math.PI * 25 * 2, 0.05) && near(built.summary.bbox[5], 7),
+      `projecting the hole's edge with construction=False: a disc on the hole, extruded 2 up (${built.error?.message ?? (built.summary.volume - plate.summary.volume).toFixed(2)})`);
+  });
+
   test("the edited file builds", () => {
     const built = call("run", withLine, "part.py");
     check(built.ok && near(built.summary.volume, 80 * 60 * 10 + 14 * 12 * 5, 0.01), `the edited part builds (volume ${built.summary?.volume})`);

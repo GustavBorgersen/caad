@@ -336,11 +336,28 @@ export class Viewer {
   }
 
   private pick(ev: PointerEvent): Pick | null {
+    return this.pickAt(ev, false);
+  }
+
+  /** The part's edge under the cursor (for the sketch editor's Use tool): faces don't hide edges here. */
+  pickEdge(ev: PointerEvent): Pick | null {
+    return this.pickAt(ev, true);
+  }
+
+  /** Show `p` as hovered (the sketch editor's Use tool, which has the pointer). */
+  hoverPick(p: Pick | null) {
+    if (p?.kind === this.hovered?.kind && p?.index === this.hovered?.index) return;
+    this.hovered = p;
+    this.recolor();
+    this.render();
+  }
+
+  private pickAt(ev: PointerEvent, edgesOnly: boolean): Pick | null {
     if (!this.faces || !this.edges || !this.data) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
-    const faceHit = this.raycaster.intersectObject(this.faces)[0];
+    const faceHit = edgesOnly ? undefined : this.raycaster.intersectObject(this.faces)[0];
     // Edge pick tolerance: a few pixels, converted to world units at the target distance.
     const dist = faceHit?.distance ?? this.camera.position.distanceTo(this.controls.target);
     const pxWorld = (2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / rect.height;

@@ -12,7 +12,7 @@ import sys
 import time
 import traceback
 
-from build123d import Axis, BuildPart, BuildSketch, CenterOf, GeomType, Part
+from build123d import Axis, BuildPart, BuildSketch, CenterOf, GeomType, Part, Plane
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRep import BRep_Tool
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -987,7 +987,7 @@ def delete_feature(src, index):
 
 _DIMENSIONS = ("distance", "hdistance", "vdistance", "length", "radius", "diameter", "angle")
 _NAME_PREFIX = {"point": "p", "line": "line", "polyline": "line", "circle": "circle", "arc": "arc",
-                "rectangle": "rect", "polygon": "poly"}
+                "rectangle": "rect", "polygon": "poly", "project": "ref"}
 
 
 def _constrained_block(src, index):
@@ -1027,13 +1027,18 @@ def _sketch_run(src, index):
     session = globals()["_sketch_session"]
     filename = session["filename"]
     linecache.cache[filename] = (len(src), None, src.splitlines(True), filename)
-    _, block, cname = _constrained_block(src, index)
+    stmt, block, cname = _constrained_block(src, index)
     env = dict(session["env"])
     sk = caad.Constrained()
     sk._line = block.lineno
     env[cname] = sk
     error = None
     try:
+        args = stmt.items[0].context_expr.args
+        if args:  # the plane BuildSketch would use, for c.project
+            where = eval(compile(ast.Expression(args[0]), filename, "eval"), env)
+            where = where[0] if isinstance(where, list) and len(where) == 1 else where
+            sk._plane = where if isinstance(where, Plane) else Plane(where)
         exec(compile(ast.Module(body=block.body, type_ignores=[]), filename, "exec"), env)
         sk._build(strict=False)
     except Exception as e:  # noqa: BLE001 - shown in the editor
@@ -1091,7 +1096,7 @@ def _sketch_model(src, index):
     entities = []
     for e in sk._entities:
         item = {"id": e.id, "kind": type(e).__name__.lower(), "ref": refs.get(id(e)), "stmt": stmt_of(e.line),
-                "construction": e.construction}
+                "construction": e.construction, "reference": e.reference}
         if isinstance(e, caad.Point):
             item.update(x=e.x, y=e.y, fixed=e.fixed)
         elif isinstance(e, caad.Line):
@@ -1356,7 +1361,9 @@ def sketch_action(src, index, actions):
     """Apply editor actions to sketch `index` and return {src, model, made}. Actions, in order:
       {"op": "add", "kind": point|line|polyline|circle|arc|rectangle|polygon, "args": [...], "construction": bool}
          points are [x, y] (new) or expressions of existing ones ("p1", "rect1.corners[0]", "$0.end": made by
-         action 0); a circle's radius is a number
+         add k, counting adds only); a circle's radius is a number
+      {"op": "add", "kind": "project", "args": [selector expression], "construction": false (optional)}
+         part geometry as a reference (c.project)
       {"op": "constrain", "kind": method name, "refs": [expressions], "value": expression or None}
       {"op": "dimension", "constraint": id, "expr": expression}   - a dimension's new value
       {"op": "move", "points": {id: [x, y]}, "circles": {id: r}}  - geometry after dragging
@@ -1370,7 +1377,12 @@ def sketch_action(src, index, actions):
         if op == "add":
             kind = a["kind"]
             args = list(a.get("args") or [])
-            if kind == "circle":
+            if kind == "project":
+                if len(args) != 1 or not isinstance(args[0], str):
+                    raise ValueError("A project action takes one selector expression.")
+                ast.parse(args[0], mode="eval")
+                parts = [args[0].strip()] + (["construction=False"] if a.get("construction") is False else [])
+            elif kind == "circle":
                 parts = [_point_arg(args[0], made), _fmt(args[1])]
             elif kind == "point":
                 parts = [_fmt(args[0]), _fmt(args[1])]
@@ -1378,7 +1390,7 @@ def sketch_action(src, index, actions):
                 parts = [_point_arg(p, made) for p in args]
             if kind == "polyline" and a.get("close"):
                 parts.append("close=True")
-            if a.get("construction"):
+            if a.get("construction") and kind != "project":
                 parts.append("construction=True")
             if kind == "polyline":
                 n = len(args) - (0 if a.get("close") else 1)

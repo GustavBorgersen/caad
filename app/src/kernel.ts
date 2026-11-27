@@ -59,6 +59,7 @@ export type SketchEntity = {
   ref?: string; // how code refers to it ("rect1.corners[0]"); none: it can't be constrained from the editor
   stmt?: number; // the block statement that made it
   construction: boolean;
+  reference?: boolean; // part geometry brought in with c.project: fixed
   x?: number; y?: number; fixed?: boolean; // point
   p1?: string; p2?: string; // line: point ids
   c?: string; r?: number; s?: string; e?: string; // circle, arc: centre (and ends) as point ids, radius
@@ -78,7 +79,7 @@ export type SketchModel = {
   params?: { name: string; value: number }[]; // from sketchOpen: the part's numeric parameters
 };
 export type SketchAction =
-  | { op: "add"; kind: "point" | "line" | "polyline" | "circle" | "arc" | "rectangle" | "polygon"; args: unknown[]; close?: boolean; construction?: boolean }
+  | { op: "add"; kind: "point" | "line" | "polyline" | "circle" | "arc" | "rectangle" | "polygon" | "project"; args: unknown[]; close?: boolean; construction?: boolean }
   | { op: "constrain"; kind: string; refs: string[]; value?: string | number }
   | { op: "dimension"; constraint: string; expr: string }
   | { op: "move"; points: Record<string, [number, number]>; circles?: Record<string, number> }

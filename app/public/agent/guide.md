@@ -104,6 +104,7 @@ with BuildPart() as plate:
 - Numbers in entity and shape calls (`c.point`, `c.line`, `c.circle`, `c.arc`, `c.rectangle`, `c.polygon`) are **geometry**: where it is drawn, the solver's starting point. Write sensible positions.
 - Constraints and dimensions are separate calls; dimension values are any expression. Shared points are coincident (`c.polyline` and `c.rectangle` share their corners).
 - A loop inside a loop is a hole; crossing loops merge. `construction=True` entities only guide.
+- The part's own edges: `ref1 = c.project(part.edges().filter_by(Axis.X).sort_by(Axis.Y)[0])` projects one edge (or vertex) of the part as it is before the sketch onto the sketch plane, fixed: then `c.on(p1, ref1)`, `c.coincident(line1.start, ref1.end)`, `c.equal(h, ref2)`… It's a guide; `construction=False` makes it part of the regions. Circles and arcs must be parallel to the sketch plane.
 - A fully constrained sketch has 0 degrees of freedom; `get_timeline` reports what's left, and conflicting constraints fail at the sketch, naming them.
 - Full API: `api_help("Constrained")`.
 

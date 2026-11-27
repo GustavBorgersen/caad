@@ -10,6 +10,7 @@
 
 Numbers in entity and shape calls are geometry: the last solved positions, which are the solver's
 starting point and the fallback without a solver. Constraints and dimensions are separate calls.
+`c.project(edge)` brings the part's own edges and vertices in as fixed references to constrain to.
 Leaving the block solves the sketch with PlaneGCS and adds its regions to the enclosing BuildSketch:
 loops inside loops alternate between material and hole; loops that cross are merged.
 
@@ -31,6 +32,8 @@ solves = []  # per solved sketch: {"line", "dof", "solver", "message"}; CAAD sho
 # --- Entities ---------------------------------------------------------------------------------
 
 class _Entity:
+    reference = False  # part geometry projected with c.project: fixed
+
     def __init__(self, sketch, construction):
         self.id = f"{type(self).__name__.lower()}{len(sketch._entities)}"
         self.construction = construction
@@ -78,6 +81,8 @@ class Line(_Entity):
 class Circle(_Entity):
     """A circle around `center` (a point) with radius `r`."""
 
+    fixed = False  # a reference's radius is fixed too
+
     def __init__(self, sketch, center, r, construction=False):
         super().__init__(sketch, construction)
         self.center, self.r = center, _number(r, "r")
@@ -86,7 +91,10 @@ class Circle(_Entity):
         return f"Circle({self.center!r}, {self.r:g})"
 
     def _primitives(self):
-        return [{"id": self.id, "type": "circle", "c_id": self.center.id, "radius": self.r}]
+        out = [{"id": self.id, "type": "circle", "c_id": self.center.id, "radius": self.r}]
+        if self.fixed:
+            out.append({"id": f"{self.id}_r", "type": "circle_radius", "c_id": self.id, "radius": self.r})
+        return out
 
     def _edge(self):
         from build123d import Edge, Location, Plane
@@ -160,12 +168,17 @@ class Constrained:
         self._entities = []
         self._constraints = []  # (primitive, source line, source text)
         self._origin = self._axes = None
+        self._plane = None  # the sketch's plane in 3D (for c.project); None: Plane.XY
         self.faces = None  # after the block: the regions that were added
         self.dof = None  # after the block: degrees of freedom left (None without a solver)
         self.conflicting, self.problem = [], None  # see _build(strict=False)
 
     def __enter__(self):
         self._line = _caller()[0]
+        from build123d import BuildSketch, Plane
+        sketch = BuildSketch._get_context(log=False)
+        if sketch is not None and sketch.output_placements:
+            self._plane = Plane(sketch.output_placements[0])
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -204,6 +217,53 @@ class Constrained:
     def polygon(self, *points, construction=False):
         """A closed polygon through the points."""
         return Polygon(self, points, construction)
+
+    def project(self, item, construction=True):
+        """Part geometry in the sketch, to constrain to: an edge (a line, circle or arc) or a vertex of the part,
+        projected onto the sketch plane as fixed geometry, e.g. `ref1 = c.project(part.edges().sort_by(Axis.Z)[-1])`.
+        The selector runs on every build, so the reference follows the part. Only a guide (construction) unless
+        construction=False, which makes it part of the sketch's regions."""
+        from build123d import Edge, GeomType, Plane, Vector, Vertex
+        if isinstance(item, (list, tuple)):
+            if len(item) != 1:
+                raise ValueError(f"project() takes one edge or vertex; the selector gave {len(item)}.")
+            item = item[0]
+        plane = self._plane or Plane.XY
+        def local(v):
+            v = plane.to_local_coords(Vector(v))
+            return (v.X, v.Y)
+
+        def point(xy):
+            p = Point(self, xy[0], xy[1], fixed=True)
+            p.reference = True
+            return p
+
+        def made(e):
+            e.reference = True
+            return e
+
+        if isinstance(item, Vertex):
+            return point(local((item.X, item.Y, item.Z)))
+        if not isinstance(item, Edge):
+            raise TypeError(f"project() takes an edge or a vertex of the part, not {item!r}.")
+        if item.geom_type == GeomType.LINE:
+            a, b = local(item.position_at(0)), local(item.position_at(1))
+            if math.dist(a, b) < TOLERANCE:  # straight through the plane: a point
+                return point(a)
+            return made(Line(self, point(a), point(b), construction))
+        if item.geom_type != GeomType.CIRCLE:
+            raise ValueError(f"project() takes lines, circles and arcs; this edge is a {item.geom_type.name.lower()}.")
+        if abs(abs(item.normal().dot(plane.z_dir)) - 1) > 1e-6:
+            raise ValueError("project() takes circles and arcs parallel to the sketch plane; this one is tilted.")
+        center = local(item.arc_center)
+        if item.is_closed:
+            circle = made(Circle(self, point(center), item.radius, construction))
+            circle.fixed = True
+            return circle
+        s, m, e = (local(item.position_at(t)) for t in (0, 0.5, 1))
+        if (s[0] - center[0]) * (m[1] - center[1]) - (s[1] - center[1]) * (m[0] - center[0]) < 0:
+            s, e = e, s  # arcs go counter-clockwise
+        return made(Arc(self, point(center), point(s), point(e), construction))
 
     @property
     def origin(self):

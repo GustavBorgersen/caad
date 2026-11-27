@@ -1,7 +1,7 @@
 # CAAD — Sketches and constraints
 
 **Date:** 2026-11-25
-**Status:** 06a and 06b built (2026-11-25); 06c later
+**Status:** 06a and 06b built (2026-11-25); 06c in progress (part edges in sketches built 2026-11-27); 06d (visuals) after
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1 ("Sketches v2"); builds on [05 — Feature model](05-feature-model.md)
 
 ## Problem
@@ -68,6 +68,7 @@ Small, one line per call, so the agent writes it as easily as the editor:
 | Constraints | `coincident(a, b)`, `horizontal(*lines)`, `vertical(*lines)`, `parallel(a, b)`, `perpendicular(a, b)`, `tangent(a, b)`, `equal(*entities)`, `fix(*points)`, `on(point, line_or_circle)`, `midpoint(point, line)`, `symmetric(a, b, about)` |
 | Dimensions | `distance(a, b, d)`, `hdistance(a, b, d)`, `vdistance(a, b, d)`, `length(line, d)`, `radius(circle_or_arc, r)`, `diameter(…, d)`, `angle(line_a, line_b, degrees)` |
 | References | `c.origin` (the sketch plane's origin, fixed), `c.x_axis`, `c.y_axis` (construction lines); `line.start` / `.end`, `circle.center`, `arc.center` / `.start` / `.end` |
+| The part | `project(edge_or_vertex, construction=True)`: an edge or vertex of the part (a selector; a ShapeList of one is fine) projected onto the sketch plane as fixed geometry: a line, a circle or arc (parallel to the plane), or a point (a vertex, or an edge seen end-on). Constrain to it like anything else; a guide by default, `construction=False` makes it part of the regions. Re-projected at every build, so it follows the part |
 
 Each call maps to PlaneGCS primitives (`p2p_distance`, `horizontal_l`, `tangent_lc`…). The mapping lives in one place — the `caad` module — and the page's editor uses the same primitive format.
 
@@ -89,7 +90,7 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 ## The sketch editor
 
 - **Reopen**: double-click a sketch in the timeline. The view rolls back to just before it; the kernel opens a session (`sketch_open(src, index)`): it keeps the part's names as they are before the sketch and returns the sketch's model — plane, entities with the expression code uses for each (`rect1.corners[0]`), constraints, dimensions as expressions with their values, PlaneGCS primitives, degrees of freedom and conflicts. New sketches open the same way, as an empty `with Constrained() as c: pass` that is only saved on Done.
-- **Tools**: line / polyline, rectangle, circle, arc, point; construction toggle. **No grid snapping** — snapping to existing points and edges instead, with inferred constraints shown while drawing (coincident, horizontal, vertical, on-edge), as in Onshape.
+- **Tools**: line / polyline, rectangle, circle, arc, point, *Use* (click an edge of the part: `ref1 = c.project(<its selector>)`, drawn dashed purple, can't be dragged); construction toggle. **No grid snapping** — snapping to existing points and edges instead, with inferred constraints shown while drawing (coincident, horizontal, vertical, on-edge), as in Onshape.
 - **Constraints**: select entities, then a constraint button; only the ones that apply to the selection are enabled.
 - **Dimensions**: a dimension tool; the value field takes expressions, offers the part's parameters, and shows the evaluated value.
 - **Live solving**: PlaneGCS WebAssembly in the page solves on every drag (milliseconds for sketch-sized problems).
@@ -108,7 +109,8 @@ Plain build123d sketches — `Rectangle`, `Circle`, `Polygon` at `Locations`, as
 | :-- | :-- |
 | **06a — Constrained sketches in code** (done) | The `caad` module: entities, shapes, constraints, dimensions, regions; PlaneGCS at build in the page (WebAssembly bridge) and outside (PyPI or stored geometry); errors at the sketch feature; the sketcher writes the constrained form (its rectangles, circles and polygons as shapes, with their sizes as dimensions); outlines and `get_timeline` status; guide and `api_help`. Node tests against the page's build123d |
 | **06b — The sketch editor** (done) | sketch sessions in the kernel (`sketch_open` / `sketch_action`); reopening sketches by double-click, new sketches in the same editor; line (chains), rectangle, circle, arc and point tools; snapping to points and the origin, with horizontal/vertical inferred for new lines; dragging with live solving (only what has to move moves); constraint and dimension buttons for the selection (a distance goes from the first selected point to the second), a new dimension opening for its expression with the part's parameters offered, double-click a label to change it; constraints shown as glyphs (select, delete); conflicts in red; degrees of freedom. Converting plain sketches on first edit (`sketch_convert`: checked by comparing regions; polygons keep their points as written — build123d 0.13's default alignment) |
-| **06c — References and tools** | Use the part's edges in a sketch (projected, referred to by selector) and constrain to them; trim, sketch fillet, mirror, pattern; choosing individual regions to extrude |
+| **06c — References and tools** (in progress) | **Done:** a point placed on the origin is tied to it (#7); the part's edges in a sketch (`c.project(selector)`, the *Use* tool; fixed, a guide unless `construction=False`), constrained to like any entity. **Next:** trim, sketch fillet, mirror, pattern; choosing individual regions to extrude |
+| **06d — Sketch visuals** | Drawn points as small circles (unlike the origin and a rectangle's centre); Onshape-like dimensions: extension lines and arrows for distances between entities, the arc of an angle; the sketch's local X/Y axes in the sketch and on plane features |
 
 ## Decided
 
