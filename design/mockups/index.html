@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAAD style mock-ups</title>
+<link rel="stylesheet" href="assets/page.css">
+<style>
+main { max-width: 1100px; margin: 0 auto; padding: 28px 24px 60px; }
+h2 { font-size: 22px; margin: 0 0 6px; }
+.lead { color: #6b7380; margin: 0 0 24px; max-width: 760px; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.card { display: block; padding: 18px; border-radius: 14px; background: #fff; color: inherit; text-decoration: none; box-shadow: 0 2px 10px rgba(0,0,0,.08); border-top: 6px solid var(--c); }
+:root[data-theme="dark"] .card { background: #1b1e23; }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card p { margin: 0; color: #6b7380; font-size: 13.5px; }
+table { width: 100%; border-collapse: collapse; margin-top: 30px; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid rgba(127,127,127,.2); }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #6b7380; }
+td:first-child { font-weight: 600; width: 150px; }
+.sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+.same { margin-top: 26px; color: #6b7380; font-size: 13.5px; max-width: 900px; }
+</style>
+</head>
+<body>
+<header class="mock-head"><h1>CAAD — style mock-ups (phase 1.5a)</h1><span class="note">Pick one, or mix: the result becomes doc 10, the visual system.</span>
+  <nav><button data-theme-choice="system">System</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></nav></header>
+<main>
+  <h2>Three directions, four scenes each</h2>
+  <p class="lead">Each page shows the same four scenes (a part with its timeline and code, a feature dialog with preview, the sketch editor with dimensions, the right-click menu) in light and dark. The part is rendered from <code>part.py</code> by CAAD's own kernel (<code>render.mjs</code>), so the shading and edges are a real preview of the 3D look, not a drawing.</p>
+  <div class="cards">
+    <a class="card" href="a-studio.html" style="--c:#2563eb"><h3>A — Studio</h3><p>Calm and technical, a cleaned-up Onshape. Slim top bar with labelled tools, timeline and parameters in a left rail, dialogs and code docked on the right.</p></a>
+    <a class="card" href="b-islands.html" style="--c:#5b5bd6"><h3>B — Islands</h3><p>The view is the whole window; toolbar, timeline, dialogs and code float on frosted-glass islands. Icon-only toolbar with named tooltips; one tabbed island for timeline, parameters and parts.</p></a>
+    <a class="card" href="c-workshop.html" style="--c:#e0573a"><h3>C — Workshop</h3><p>Warm and playful: paper and coral, chunky keyed buttons. A command dock on the left, the timeline as a strip along the bottom, a pie menu on right-click.</p></a>
+  </div>
+  <p style="margin-top:22px"><b>Chosen: A</b>, with a Files | Timeline switch in the left rail; written down in <code>docs/10-visual-system.md</code>. Continued in <a href="a-projects.html">A — Projects and files</a>: browsing several projects, creating, renaming and removing projects and files, choosing the folder.</p>
+  <table>
+    <tr><th></th><th>A — Studio</th><th>B — Islands</th><th>C — Workshop</th></tr>
+    <tr><td>Commands</td><td>Top bar, icon + label</td><td>Floating pill, icons only, tooltip with name and key</td><td>Left dock, icon + label, key printed on each button</td></tr>
+    <tr><td>Timeline</td><td>Left rail, vertical, always visible</td><td>Floating island, tabs: Timeline · Parameters · Parts; collapses</td><td>Horizontal strip along the bottom, parameters at its start</td></tr>
+    <tr><td>Dialogs, code</td><td>Docked right, full height</td><td>Floating card / sheet on the right</td><td>Docked card on the right</td></tr>
+    <tr><td>Right-click</td><td>List menu</td><td>Glass list menu</td><td>Pie menu (fixed directions)</td></tr>
+    <tr><td>Room for the part</td><td>Least: rail + dock are fixed</td><td>Most: everything floats and tucks away</td><td>Medium: the strip costs height, the dock is narrow</td></tr>
+    <tr><td>State colours</td><td><span class="sw" style="background:#2563eb"></span>select · <span class="sw" style="background:#0f766e"></span>preview · <span class="sw" style="background:#7c3aed"></span>agent</td>
+      <td><span class="sw" style="background:#5b5bd6"></span>select · <span class="sw" style="background:#e0a030"></span>preview · <span class="sw" style="background:#c2298a"></span>agent</td>
+      <td><span class="sw" style="background:#e0573a"></span>select · <span class="sw" style="background:#2f9e5f"></span>preview · <span class="sw" style="background:#6f4ef2"></span>agent</td></tr>
+    <tr><td>Type</td><td>System UI</td><td>System UI</td><td>Rounded system font where available</td></tr>
+  </table>
+  <p class="same">The same in all three, from doc 09: one place for dialogs (beside the view, never over the part); the timeline shows the names the code uses (<code>sk1</code>, <code>sk2</code>) and hovering a feature highlights its result in the view and its lines in the code; keys are shown in tooltips, menus and buttons; destructive actions happen at once with Undo in a message; the selection shows as a small chip only while something is selected; sketch mode swaps the commands but keeps the layout. Parts can be mixed, e.g. A's calm colours with B's floating layout, or C's bottom timeline in B.</p>
+</main>
+<script src="assets/common.js"></script>
+</body>
+</html>

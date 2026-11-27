@@ -1,7 +1,7 @@
 # CAAD — Design goals, layout and workflow
 
 **Date:** 2026-11-27
-**Status:** Goals and interaction model agreed in a brainstorm; style mock-ups next, then the visual system (doc 10); nothing built yet
+**Status:** Goals and interaction model agreed in a brainstorm; mock-ups done and the visual system written ([10](10-visual-system.md), direction A); nothing built yet
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1.5 ("Layout, visuals and workflow"); replaces the roadmap's "Contrast fixes" item and the "Visual design" brainstorm
 
 ## Problem
@@ -104,7 +104,7 @@ Everything is built around a full-size 3D view. Decided:
 - **Dialogs dock to one side** of the view, never in front of the part.
 - **The selection panel** is compact and appears only while something is selected.
 
-Open, for the mock-ups: where the timeline and the project browser live (a left rail, a floating island, or a timeline along the bottom) and how they share space.
+Decided from the mock-ups ([10](10-visual-system.md)): a slim top bar with labelled commands, a **left rail with a Files | Timeline switch** (the workspace's projects and files, or the open part's timeline), dialogs and the code docked on the right.
 
 ## Style mock-ups
 

@@ -1,0 +1,18 @@
+/* The mock-up pages' own frame (not part of any style direction): title, theme switch, scene captions. */
+:root { color-scheme: light dark; }
+body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: #e9ebef; color: #1c2027; }
+:root[data-theme="dark"] body { background: #101215; color: #d7dbe2; }
+.mock-head { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 10px 24px; background: rgba(233,235,239,.92); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(0,0,0,.08); }
+:root[data-theme="dark"] .mock-head { background: rgba(16,18,21,.9); border-color: rgba(255,255,255,.08); }
+.mock-head h1 { margin: 0; font-size: 16px; }
+.mock-head .note { color: #6b7380; font-size: 13px; }
+.mock-head nav { margin-left: auto; display: flex; gap: 4px; }
+.mock-head button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid rgba(0,0,0,.15); background: transparent; color: inherit; cursor: pointer; }
+:root[data-theme="dark"] .mock-head button { border-color: rgba(255,255,255,.2); }
+.mock-head button[aria-pressed="true"] { background: #1c2027; color: #fff; }
+:root[data-theme="dark"] .mock-head button[aria-pressed="true"] { background: #d7dbe2; color: #101215; }
+.mock-head a { color: inherit; }
+.scene { padding: 28px 24px 8px; }
+.scene > h2 { margin: 0 0 4px; font-size: 15px; }
+.scene > p { margin: 0 0 14px; max-width: 1280px; color: #6b7380; }
+.screen { width: 1280px; height: 800px; position: relative; overflow: hidden; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.18); }

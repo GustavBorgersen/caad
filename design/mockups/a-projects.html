@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAAD mock-up A — Projects and files</title>
+<link rel="stylesheet" href="assets/page.css">
+<link rel="stylesheet" href="assets/studio.css">
+<style>
+/* ---- Projects and files, in direction A ---- */
+.ws { display: flex; align-items: center; gap: 8px; margin: 2px 10px 6px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); position: relative; }
+.ws .i { width: 16px; height: 16px; color: var(--muted); }
+.ws b { font-weight: 600; }
+.ws small { color: var(--muted); font-size: 11px; }
+.ws .sw { margin-left: auto; color: var(--faint); }
+.ws.open { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.tree-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px 4px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.newbtn { display: flex; align-items: center; gap: 4px; padding: 2px 8px 2px 5px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text); }
+.newbtn .i { width: 14px; height: 14px; }
+.tree { padding-bottom: 6px; }
+.tr { display: flex; align-items: center; gap: 6px; height: 26px; padding-right: 8px; position: relative; font-size: 12.5px; white-space: nowrap; }
+.tr .chev { width: 14px; height: 14px; color: var(--faint); flex: none; }
+.tr .chev.open { transform: rotate(90deg); }
+.tr .nochev { width: 14px; flex: none; }
+.tr .i { width: 15px; height: 15px; color: var(--muted); }
+.tr .tn { overflow: hidden; text-overflow: ellipsis; }
+.tr .ext { color: var(--muted); }
+.tr .meta { margin-left: auto; color: var(--muted); font-size: 11.5px; display: flex; align-items: center; gap: 6px; }
+.tr .acts { margin-left: auto; display: flex; gap: 2px; }
+.tr .acts span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: var(--muted); }
+.tr .acts span:hover, .tr .acts span.hov { background: var(--panel); color: var(--text); }
+.tr .acts .i { width: 14px; height: 14px; }
+.tr.proj { font-weight: 600; }
+.tr.proj > .i { color: var(--text); }
+.tr.group { height: 22px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tr.group .meta { font-size: 10.5px; }
+.tr.hover { background: var(--panel-2); }
+.tr.sel { background: var(--accent-soft); }
+.tr.active { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+.tr.active .tn { font-weight: 600; color: var(--accent-text); }
+.tr.ghost { opacity: .55; font-style: italic; }
+.tr.ghost .tn::after { content: " (preview)"; color: var(--faint); font-style: normal; }
+.tr .err { width: 8px; height: 8px; border-radius: 2px; background: var(--err); transform: rotate(45deg); }
+.tr .agentdot { width: 8px; height: 8px; border-radius: 50%; background: var(--agent); box-shadow: 0 0 0 3px var(--agent-soft); }
+.tr .lock { width: 13px; height: 13px; color: var(--faint); }
+.tr .edit { flex: 1; display: flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 5px; border: 1.5px solid var(--accent); background: var(--panel); box-shadow: 0 0 0 3px var(--accent-soft); font-size: 12.5px; }
+.tr .edit .cur { display: inline-block; width: 1px; height: 14px; background: var(--text); margin-left: 1px; }
+.tr .edit.bad { border-color: var(--err); box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 18%, transparent); }
+.hint { margin: 2px 10px 6px 46px; padding: 6px 8px; border-radius: 7px; font-size: 11.5px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); white-space: normal; line-height: 1.35; }
+.hint.bad { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, transparent); background: color-mix(in srgb, var(--err) 7%, var(--panel)); }
+.hint kbd { margin: 0 1px; }
+.loose { margin: 6px 10px 0; padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--line); font-size: 12px; color: var(--muted); }
+.loose b { color: var(--text); font-weight: 600; }
+.loose a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.rail .foot { margin-top: auto; border-top: 1px solid var(--line); padding: 8px 14px; color: var(--muted); font-size: 11.5px; display: flex; align-items: center; gap: 6px; }
+.rail .foot .i { width: 14px; height: 14px; }
+.split { height: 1px; background: var(--line); margin: 4px 0; position: relative; }
+.split::after { content: ""; position: absolute; left: 50%; top: -2px; width: 28px; height: 5px; margin-left: -14px; border-radius: 3px; background: var(--line); }
+.rail .sec { display: flex; align-items: center; gap: 6px; padding: 10px 14px 4px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.rail .sec .i { width: 13px; height: 13px; }
+.rail .sec .r { margin-left: auto; text-transform: none; letter-spacing: 0; color: var(--muted); }
+
+/* popovers (workspace switcher, New menu) */
+.pop { position: absolute; z-index: 5; width: 280px; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.pop .h { padding: 6px 10px 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pop .it { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; }
+.pop .it .i { width: 16px; height: 16px; color: var(--muted); }
+.pop .it small { display: block; color: var(--muted); font-size: 11.5px; }
+.pop .it .r { margin-left: auto; color: var(--muted); font-size: 11.5px; display: flex; gap: 6px; align-items: center; }
+.pop .it.cur { background: var(--accent-soft); }
+.pop .it.cur .i { color: var(--accent); }
+.pop .it.hot { background: var(--accent); color: var(--on-accent); }
+.pop .it.hot .i, .pop .it.hot small, .pop .it.hot .r { color: var(--on-accent); }
+.pop .it .tagw { font-size: 10.5px; padding: 1px 6px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+.pop .it .tagw.warn { color: #b45309; border-color: color-mix(in srgb, #b45309 35%, transparent); background: color-mix(in srgb, #f59e0b 10%, var(--panel)); }
+:root[data-theme="dark"] .pop .it .tagw.warn { color: #fbbf24; }
+.pop hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+.pop .it kbd { margin-left: auto; }
+.pop .it.danger { color: var(--err); }
+.pop .it.danger .i { color: var(--err); }
+.pop .it.danger.hot { background: var(--err); color: #fff; }
+.pop .it.danger.hot .i, .pop .it.danger.hot .r { color: #fff; }
+.pop .note { padding: 4px 10px 6px; font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+
+/* dialog bits not in studio.css */
+.dock .help { padding: 0 16px; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.preview-tree { margin: 4px 16px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); font: 12px/1.7 ui-monospace, monospace; color: var(--muted); }
+.preview-tree b { color: var(--text); font-weight: 600; }
+.preview-tree .new { color: var(--ok); }
+:root[data-theme="dark"] .preview-tree .new { color: #4ade80; }
+.input .suffix { color: var(--muted); }
+.msg { margin: 2px 16px 0; font-size: 11.5px; color: var(--muted); }
+
+/* the start screen */
+.welcome { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 640px; }
+.welcome h2 { margin: 0 0 4px; font-size: 22px; font-weight: 650; }
+.welcome > p { margin: 0 0 20px; color: var(--muted); }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.choice { padding: 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); display: grid; gap: 6px; }
+.choice .i { width: 24px; height: 24px; color: var(--accent); }
+.choice b { font-size: 14px; }
+.choice span { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.choice.primary { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
+.recent { margin-top: 18px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
+.recent .h { padding: 10px 14px 6px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.recent .r { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); }
+.recent .r .i { width: 16px; height: 16px; color: var(--muted); }
+.recent .r small { color: var(--muted); }
+.recent .r .go { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--accent); }
+.top .tools.off { opacity: .4; }
+.drop { position: absolute; inset: 14px; border-radius: 14px; border: 2px dashed var(--line); }
+</style>
+</head>
+<body>
+<header class="mock-head">
+  <h1>A — Projects and files</h1>
+  <span class="note">Direction A, continued: browsing several projects, creating, renaming and removing projects and files, and choosing the folder to work in.</span>
+  <nav><button data-theme-choice="system">System</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button><a href="a-studio.html" style="margin-left:10px">A — Studio</a><a href="index.html" style="margin-left:10px">All directions</a></nav>
+</header>
+<main id="scenes"></main>
+
+<script src="assets/views.js"></script>
+<script src="assets/common.js"></script>
+<script src="assets/studio.js"></script>
+<script>
+
+/** A tree row. depth: indent; kind: proj | group | file; extra: { open, chev, active, hover, sel, meta, acts, err, agent, lock, edit, ghost, ext } */
+function row(depth, icon, name, o = {}) {
+  const chev = o.chev === undefined ? '<span class="nochev"></span>' : `<span class="chev ${o.chev ? "open" : ""}" data-icon="chevron"></span>`;
+  const right = o.acts ? `<span class="acts">${o.acts.map((a) => `<span class="${a === o.hovAct ? "hov" : ""}" data-icon="${a}"></span>`).join("")}</span>`
+    : `<span class="meta">${o.agent ? '<i class="agentdot" title="Changed by the agent"></i>' : ""}${o.err ? '<i class="err" title="Build error"></i>' : ""}${o.lock ? '<span class="lock" data-icon="lock"></span>' : ""}${o.meta ?? ""}</span>`;
+  const label = o.edit !== undefined ? `<span class="edit ${o.bad ? "bad" : ""}">${o.edit}<span class="cur"></span><span class="ext">${o.ext ?? ""}</span></span>`
+    : `<span class="tn">${name}${o.ext ? `<span class="ext">${o.ext}</span>` : ""}</span>`;
+  const cls = [o.kind ?? "file", o.active && "active", o.hover && "hover", o.sel && "sel", o.ghost && "ghost"].filter(Boolean).join(" ");
+  return `<div class="tr ${cls}" style="padding-left:${8 + depth * 14}px">${chev}${icon ? `<span data-icon="${icon}"></span>` : ""}${label}${o.edit === undefined ? right : ""}</div>`;
+}
+const grp = (depth, name, n, o = {}) => row(depth, "", name, { kind: "group", meta: o.acts ? undefined : n, ...o });
+
+/** The minibrewery project, expanded; opts tweak single rows. */
+function minibrewery(o = {}) {
+  return [
+    row(0, "folderOpen", "minibrewery", { kind: "proj", chev: true, ...(o.proj ?? {}) }),
+    grp(1, "Parts", "4", o.partsGroup ?? {}),
+    row(2, "box", "hub", { ext: ".py", active: true, ...(o.hub ?? {}) }),
+    o.newPart ?? "",
+    row(2, "box", "lid", { ext: ".py", agent: true, ...(o.lid ?? {}) }),
+    o.lidHint ?? "",
+    o.pump === null ? "" : row(2, "box", "pump_body", { ext: ".py", err: true, ...(o.pump ?? {}) }),
+    row(2, "box", "valve_seat", { ext: ".py", ...(o.valve ?? {}) }),
+    grp(1, "Shared code", "1"),
+    row(2, "fileCode", "params", { ext: ".py", ...(o.params ?? {}) }),
+    grp(1, "Exports", "2"),
+    row(2, "fileDown", "hub", { ext: ".step", meta: "1.2 MB" }),
+    row(2, "fileDown", "lid", { ext: ".stl", meta: "640 kB" }),
+    row(1, "gearFile", "pyproject", { ext: ".toml" }),
+  ].join("");
+}
+const otherProjects = (o = {}) => [
+  row(0, "folder", "fermenter", { kind: "proj", chev: false, meta: "6 parts", ...(o.fermenter ?? {}) }),
+  o.ghost ?? "",
+  row(0, "folder", "old-tests", { kind: "proj", chev: false, meta: "2 parts", ...(o.old ?? {}) }),
+].join("");
+const wsBox = (o = {}) => `<div class="ws ${o.open ? "open" : ""}"><span data-icon="folder"></span><div><b>brewing</b><br><small>workspace · 3 projects</small></div><span class="sw" data-icon="${o.open ? "down" : "swap"}" title="Switch workspace"></span></div>`;
+const filesRail = (o = {}) => `<aside class="rail">${rtabs("Files")}${wsBox(o.ws ?? {})}
+  <div class="tree-head">Projects <span class="newbtn" data-icon="plus">New</span></div>
+  <div class="tree">${minibrewery(o.mb ?? {})}${otherProjects(o.others ?? {})}</div>
+  ${o.loose === false ? "" : '<div class="loose"><b>sandbox.py</b> is not in a project. <a>Make it a project</a></div>'}
+  <div class="foot"><span data-icon="check"></span>Saved to disk as you work</div></aside>`;
+const view = (mods = "", extra = "") => `<div class="view"><div data-view="iso" data-mods="${mods}"></div><div class="cube" data-icon="cube"></div>${extra}</div>`;
+const status = '<div class="status"><span><b>minibrewery / hub.py</b> · built</span><span>21 395 mm³</span></div>';
+
+const SCENES = [
+  { title: "1 · The Files tab: projects, parts and files", text: "The left rail has two tabs, Files and Timeline (clicking the project / part name in the top bar opens Files too). At the top, the workspace: the folder you chose. Below it, every project in it; each project lists its files by kind, as doc 07 defines (parts, shared code, exports, the project file). The open part is marked like the active timeline row. A red diamond marks a part that fails to build, a purple dot one the agent changed. Hovering a row shows Rename and More; a click opens the part, and shared code or the project file opens in the code drawer.",
+    html: () => `<div class="app">${topbar(partTools())}${filesRail({ mb: { valve: { hover: true, acts: ["pen", "more"], hovAct: "pen" } } })}${view("", status)}</div>` },
+  { title: "2 · New: one menu, the same as right-clicking a project", text: "New in the tree header offers what can be created where you are: a part or shared code in the open project, or a new project in the workspace. Right-clicking a project or a file opens the same commands for that item (goal 7: one command, several doors). Keys: F2 rename, Delete delete.",
+    html: () => `<div class="app">${topbar(partTools())}${filesRail({ mb: { proj: { sel: true } } })}
+      <div class="pop" style="left:150px;top:150px;width:250px"><div class="h">In minibrewery</div>
+        <div class="it hot" data-icon="box">New part<small style="margin-left:auto">parts/</small></div>
+        <div class="it" data-icon="fileCode">New shared code<small style="margin-left:auto">.py</small></div>
+        <hr><div class="h">In the workspace</div><div class="it" data-icon="folder">New project…</div></div>
+      ${view("", status)}</div>` },
+  { title: "3 · Creating and renaming happen in the tree", text: "New part adds a row in place, already named and selected for typing: Enter creates the file (and opens it with an empty part), Esc cancels. Rename (F2 or the pencil) edits the row the same way. Names are checked as you type; the hint says what is wrong, in the tree, without a popup (goals 5 and 10). Renaming a part that other files import updates those imports too, like renaming a feature.",
+    html: () => `<div class="app">${topbar(partTools())}${filesRail({ mb: {
+        newPart: row(2, "box", "", { edit: "bracket", ext: ".py" }) + '<div class="hint">Enter creates <b>parts/bracket.py</b> · Esc cancels</div>',
+        lid: { edit: "lid-v2", bad: true, ext: ".py" },
+        lidHint: '<div class="hint bad">Part names are Python names: letters, digits and _ (no -), so other files can import them.</div>' } })}
+      ${view("", status)}</div>` },
+  { title: "4 · Removing: at once, with Undo", text: "Delete (key, or More › Delete) removes a part, a file or a whole project right away. There is no confirmation, but the message offers Undo, and CAAD keeps the deleted files' contents in memory until you close the page, so Undo writes them back to disk. The menu shown is right-clicking a project; the Delete item says how much it removes.",
+    html: () => `<div class="app">${topbar(partTools())}${filesRail({ mb: { pump: null }, others: { old: { sel: true } } })}
+      <div class="pop" style="left:120px;top:560px;width:240px"><div class="h">old-tests</div>
+        <div class="it" data-icon="box">New part</div><div class="it" data-icon="fileCode">New shared code</div><hr>
+        <div class="it" data-icon="pen">Rename<kbd>F2</kbd></div><div class="it" data-icon="copy">Duplicate</div><hr>
+        <div class="it danger hot" data-icon="trash">Delete project<span class="r">5 files</span></div></div>
+      ${view("", '<div class="toast">pump_body.py deleted<button>Undo</button></div>')}</div>` },
+  { title: "5 · New project: a dialog docked like every other dialog", text: "A new project needs more than a name, so it uses the docked dialog, with a preview in the tree (a greyed row where it will appear) and a list of the files it will write. The folder name follows the name; the optional params.py gives the parts somewhere to share dimensions. Enter creates the project and opens its first part.",
+    html: () => `<div class="app">${topbar(partTools())}${filesRail({ loose: false, others: { ghost: row(0, "folder", "kegerator", { kind: "proj", ghost: true }) } })}
+      ${view("faded")}
+      <aside class="dock"><header><span data-icon="folder"></span><b>New project</b><span>in brewing/</span></header>
+        <div class="field"><label>Name</label><div class="input focus">kegerator<span class="v"></span></div></div>
+        <div class="field"><label>First part</label><div class="input">tap_handle<span class="suffix">.py</span></div></div>
+        <div class="check"><span class="box on" data-icon="check"></span>Shared parameters (params.py)</div>
+        <div class="field"><label>Creates</label></div>
+        <div class="preview-tree"><b>kegerator/</b><br>&nbsp;├ <span class="new">pyproject.toml</span><br>&nbsp;├ <span class="new">params.py</span><br>&nbsp;└ parts/<br>&nbsp;&nbsp;&nbsp;&nbsp;└ <span class="new">tap_handle.py</span></div>
+        <p class="help">A project is a folder with a pyproject.toml; parts in it can import params.py.</p>
+        <footer><button class="btn">Cancel <kbd>Esc</kbd></button><button class="btn primary">Create <kbd>↵</kbd></button></footer></aside></div>` },
+  { title: "6 · Choosing the folder: the workspace switcher", text: "Clicking the workspace opens a list of recent workspaces, the bundled examples and Open folder…. Open folder uses the browser's own folder picker, the one system dialog CAAD can't replace. Browsers only tell a page a folder's name, not its full path. After a restart they also ask again before CAAD may write to a folder, so a recent workspace says when one click is needed to reconnect.",
+    html: () => `<div class="app">${topbar(partTools())}${filesRail({ ws: { open: true } })}
+      <div class="pop" style="left:10px;top:142px;width:300px"><div class="h">Workspaces</div>
+        <div class="it cur" data-icon="folder"><div>brewing<small>3 projects · open</small></div><span class="r" data-icon="check"></span></div>
+        <div class="it hot" data-icon="folder"><div>work-fixtures<small>5 projects · last week</small></div><span class="r"><span class="tagw warn">click to reconnect</span></span></div>
+        <div class="it" data-icon="folder"><div>caad-scratch<small>1 project · in October</small></div></div>
+        <div class="it" data-icon="lock"><div>Examples<small>bundled · edits stay in the page</small></div></div>
+        <hr><div class="it" data-icon="folderOpen"><div>Open folder…<small>a folder with projects, or one project</small></div></div>
+        <div class="note">Remove a workspace from this list with its More menu; that never deletes files.</div></div>
+      ${view("", status)}</div>` },
+  { title: "7 · The first visit: nothing open yet", text: "With no workspace yet, the view shows the start page instead of a part; the commands are greyed and the rail stays collapsed. Open a folder, create a new workspace folder, or explore the examples (read-only, nothing to set up). Recent workspaces appear here too after the first visit, and dropping a folder on the page opens it.",
+    html: () => `<div class="app" style="grid-template-columns: 0 1fr auto">${topbar(partTools()).replace('class="tools"', 'class="tools off"').replace(/<span class="crumb"[\s\S]*?<\/span><\/span>/, '<span class="crumb" data-icon="folder"><span>No folder open</span></span>')}<aside></aside>
+      <div class="view"><div class="drop"></div><div class="welcome"><h2>Welcome to CAAD</h2><p>Parts are build123d code in a folder on your computer. Pick where to work:</p>
+        <div class="choices"><div class="choice primary"><span data-icon="folderOpen"></span><b>Open a folder</b><span>A folder with CAAD projects, a single project, or any folder to start one in.</span></div>
+          <div class="choice"><span data-icon="lock"></span><b>Explore the examples</b><span>Bundled parts to look at and change. Edits stay in the page.</span></div></div>
+        <div class="recent"><div class="h">Recent</div>
+          <div class="r" data-icon="folder"><b>brewing</b><small>3 projects</small><span class="go">Reconnect</span></div>
+          <div class="r" data-icon="folder"><b>work-fixtures</b><small>5 projects</small><span class="go">Reconnect</span></div></div></div></div></div>` },
+  { title: "8 · Rejected alternative: files and timeline stacked in one rail", text: "Instead of tabs, both can share the rail: the open project's files on top (other projects collapsed), the timeline below, with a divider to drag. You see both at once, at the cost of a shorter timeline. Tabs (scenes 1 to 6) keep each list long and calm. <b>Decided: tabs</b> (doc 10); this variant is kept for the record.",
+    html: () => `<div class="app">${topbar(partTools())}<aside class="rail">
+      <div class="sec"><span data-icon="folder"></span>brewing<span class="r">3 projects</span></div>
+      <div class="tree">${row(0, "folderOpen", "minibrewery", { kind: "proj", chev: true })}${row(1, "box", "hub", { ext: ".py", active: true })}${row(1, "box", "lid", { ext: ".py", agent: true })}${row(1, "box", "pump_body", { ext: ".py", err: true })}${row(1, "box", "valve_seat", { ext: ".py" })}${row(1, "fileCode", "params", { ext: ".py" })}${row(0, "folder", "fermenter", { kind: "proj", chev: false, meta: "6 parts" })}${row(0, "folder", "old-tests", { kind: "proj", chev: false, meta: "2 parts" })}</div>
+      <div class="split"></div>
+      ${timeline({}).replace('<aside class="rail">', "").replace(rtabs("Timeline"), '<div class="sec"><span data-icon="history"></span>Timeline<span class="r">hub.py</span></div>').replace(/<div class="params">[\s\S]*<\/aside>\s*$/, "")}</aside>
+      ${view("", status)}</div>` },
+];
+document.getElementById("scenes").innerHTML = SCENES.map((s) => `<section class="scene"><h2>${s.title}</h2><p>${s.text}</p><div class="screen">${s.html()}</div></section>`).join("");
+</script>
+</body>
+</html>

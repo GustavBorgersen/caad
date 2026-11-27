@@ -46,7 +46,7 @@ A serious iteration on how CAAD looks and works, before more features pile on. D
 | Item | What | Design doc |
 | :-- | :-- | :-- |
 | **Design goals and workflow** | **Done 2026-11-27:** the goals, one loop (select → command → dialog with preview → confirm) in every mode, commands, context menus, first shortcuts, undo, code ↔ timeline | [09](09-design-and-workflow.md) |
-| **Mock-ups and visual system** | Two or three style directions as static pages, in both themes; pick one; write doc 10 (tokens, type, icons, states, 3D look) | 09, 10 |
+| **Mock-ups and visual system** | **Done 2026-11-27:** three style directions as static pages in both themes (`design/mockups/`); direction A ("Studio") chosen, with a Files \| Timeline switch in the left rail and project and file management mocked up; doc 10 written (tokens checked for WCAG AA, type, icons, states, layout, 3D look) | 09, [10](10-visual-system.md) |
 | **Commands and keys** | A command registry behind the toolbar, shortcuts, tooltips and context menus; CAAD's own dialogs and messages instead of `prompt`/`confirm`/`alert` | 09 |
 | **Code ↔ timeline** | Names in the timeline (`sk1 · Sketch: Rectangle`), rename, a blank line between new features, cross-highlighting (replaces "contrast fixes") | 09 |
 | **Undo** | Undo/redo for every change, as a history of the code; agent edits marked | 09 |
@@ -73,6 +73,8 @@ A serious iteration on how CAAD looks and works, before more features pile on. D
 
 ### Phase 4 — Slicing
 
+A print job is its own file in the project's `print/` folder, opened in a slice mode; slicing is not a timeline feature ([11](11-slicing.md)).
+
 | Item | What |
 | :-- | :-- |
 | **Slice in the page** | Embed an open-source browser slicer — first candidate [Kiri:Moto](https://grid.space/kiri) (MIT, runs fully in the browser) |
@@ -93,8 +95,9 @@ A serious iteration on how CAAD looks and works, before more features pile on. D
 | 06 | [Sketches and constraints](06-sketches.md) | 06a–06d built |
 | 07 | [Project structure](07-project-structure.md) | Built |
 | 08 | Part studios and assemblies | To write before phase 2 |
-| 09 | [Design goals, layout and workflow](09-design-and-workflow.md) | Agreed; mock-ups next |
-| 10 | Visual system | To write after the mock-ups |
+| 09 | [Design goals, layout and workflow](09-design-and-workflow.md) | Agreed |
+| 10 | [Visual system](10-visual-system.md) | Agreed (direction A); built in 1.5e and 1.5f |
+| 11 | [Slicing](11-slicing.md) | Stub; details before phase 4 |
 
 ## Future features
 
