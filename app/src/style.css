@@ -149,6 +149,11 @@ body.left-compact .rollback-bar .add { display: none; }
 .sketch-labels .dim { position: absolute; left: 0; top: 0; padding: 0 4px; font: 11px ui-monospace, monospace; background: rgba(255,255,255,0.92); border: 1px solid var(--line); border-radius: 3px; pointer-events: auto; cursor: pointer; white-space: nowrap; }
 .sketch-labels .dim.selected { border-color: var(--accent); color: var(--accent); }
 .sketch-labels .dim.conflict { border-color: var(--error); color: var(--error); }
+.sketch-labels .dim[data-prefix]::before { content: attr(data-prefix); }
+.sketch-labels .dim[data-suffix]::after { content: attr(data-suffix); }
+.sketch-labels .axis-label { position: absolute; left: 0; top: 0; font: 600 10px system-ui, sans-serif; }
+.sketch-labels .axis-label.x { color: #d03a3a; }
+.sketch-labels .axis-label.y { color: #2f9e44; }
 #sketch-panel .state { font-size: 11px; color: #1f6feb; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; }
 #sketch-panel .state.ok { color: var(--muted); }
 #sketch-panel .state.bad { color: var(--error); }

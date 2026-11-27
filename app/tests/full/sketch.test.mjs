@@ -36,6 +36,7 @@ const tool = (t) => page.click(`#sketch-panel [data-tool="${t}"]`);
 const option = (kind) => page.click(`#sketch-panel button.option[data-option="${kind}"]`);
 const state = () => page.$eval("#sketch-panel .state", (s) => s.textContent);
 const labels = () => page.$$eval(".sketch-labels .dim", (d) => d.map((x) => x.textContent).sort().join(" | "));
+const drawing = () => page.evaluate(() => window.caad.sketcher.drawing);
 const typeDim = async (text) => {
   await page.waitForSelector(".sketch-labels .dim-input", { timeout: 10_000 });
   await page.$eval(".sketch-labels .dim-input", (i) => { i.value = ""; });
@@ -114,6 +115,8 @@ step("dimensions: lengths and distances from the origin, a conflict, Done and a 
   await shiftClickAt(-5, 0);
   await option("vdistance");
   await typeDim("0");
+  check((await drawing()).arrows === 2 && (await page.$$eval(".sketch-labels .axis-label", (a) => a.map((x) => x.textContent).join())) === "X,Y",
+    "the horizontal distance has a dimension line with two arrows (lengths sit on their lines; the vertical one is 0); the sketch's X and Y are labelled", await drawing());
   let src = await sketchSrc();
   check(["c.length(rect2.bottom, width / 4)", "c.length(rect2.left, 12)", "c.hdistance(c.origin, rect2.center, -5)", "c.vdistance(c.origin, rect2.center, 0)"].every((l) => src.includes(l)),
     "dimensions written: width / 4, 12, and the centre from the origin", src.split("\n").filter((l) => /c\.(length|hdistance|vdistance)/.test(l)).join(" | "));
@@ -196,6 +199,7 @@ step("a sketch of points only (where holes will go); a point on the origin is ti
   await clickAt(0.2, -0.1);
   const src = await sketchSrc();
   check(/p3 = c\.point\(0, 0\)\n\s+c\.coincident\(p3, c\.origin\)/.test(src), "a click on the origin adds a point there, coincident with it (#7)", src);
+  check((await drawing()).rings === 3, "points made on their own are drawn as rings (the origin stays a dot)", await drawing());
   check(!(await page.$eval("#sketch-panel .primary", (b) => b.disabled)) && /p1 = c\.point\(-20, 5\)\n\s+p2 = c\.point\(20, 5\)/.test(await sketchSrc()), "a sketch of three points can be closed (Done)");
   await done();
   check(await page.evaluate(() => window.caad.state.result.sketches.some((s) => s.points.length === 9)), "its three points show in the view");
@@ -288,6 +292,7 @@ step("Tools: trim a rectangle's side, fillet a corner, a pattern and its count",
   await typeDim("2");
   src = await sketchSrc();
   check(/fillet1 = c\.fillet\(line\d+\.start, 2\)/.test(src) && (await model()).entities.some((e) => e.kind === "arc" && Math.abs(e.r - 2) < 1e-6), "the corner filleted, radius typed: c.fillet(<line>.start, 2)", src);
+  check(await page.$$eval(".sketch-labels .dim[data-prefix='R']", (d) => d.map((x) => x.textContent).join()) === "2", "its radius shows as R2, with a leader and an arrow");
   await tool("circle");
   await clickAt(-7, 0);
   await clickAt(-6.2, 0);

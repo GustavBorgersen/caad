@@ -34,6 +34,7 @@ const COLORS = {
 };
 const SKETCH_COLOR = 0x1f6feb; // outlines of sketches no feature uses yet
 const PLANE_COLOR = 0x8a63d2; // plane features no feature uses yet
+const AXIS_COLORS = { X: 0xd03a3a, Y: 0x2f9e44 }; // a plane's own X and Y, as in the sketch editor
 const EDGE_PICK_PX = 6;
 const MARKED_EDGE_PX = 3; // selected/hovered/highlighted edges are drawn this wide (WebGL lines are always 1 px)
 
@@ -190,22 +191,36 @@ export class Viewer {
       this.scene.remove(this.planes);
       this.planes.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) { o.geometry.dispose(); o.material.dispose(); }
+        if (o instanceof THREE.Sprite) { o.material.map?.dispose(); o.material.dispose(); }
       });
       this.planes = null;
     }
     if (planes?.length) {
-      const tris: number[] = [], segs: number[] = [];
+      const tris: number[] = [], segs: number[] = [], axes = { X: [] as number[], Y: [] as number[] }, labels: THREE.Sprite[] = [];
       for (const { corners: c } of planes) {
         const p = (i: number) => c.slice(3 * i, 3 * i + 3);
         tris.push(...p(0), ...p(1), ...p(2), ...p(0), ...p(2), ...p(3));
         for (let i = 0; i < 4; i++) segs.push(...p(i), ...p((i + 1) % 4));
+        // Its X and Y from the middle: arrows, labelled (corners go -x-y, +x-y, +x+y, -x+y).
+        const [c0, c1, , c3] = [0, 1, 2, 3].map((i) => new THREE.Vector3(...p(i)));
+        const [hx, hy] = [c1.clone().sub(c0).multiplyScalar(0.5), c3.clone().sub(c0).multiplyScalar(0.5)];
+        const mid = c0.clone().add(hx).add(hy);
+        for (const [axis, d, n] of [["X", hx, hy], ["Y", hy, hx]] as const) {
+          const tip = mid.clone().addScaledVector(d, 0.5), back = tip.clone().addScaledVector(d, -0.08);
+          axes[axis].push(...mid.toArray(), ...tip.toArray());
+          for (const side of [1, -1]) axes[axis].push(...tip.toArray(), ...back.clone().addScaledVector(n, 0.035 * side).toArray());
+          labels.push(axisLabel(axis, AXIS_COLORS[axis], tip.clone().addScaledVector(d, 0.12), hx.length() * 0.14));
+        }
       }
       const fill = new THREE.Mesh(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(tris, 3)),
         new THREE.MeshBasicMaterial({ color: PLANE_COLOR, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
       const outline = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(segs, 3)),
         new THREE.LineBasicMaterial({ color: PLANE_COLOR, transparent: true, opacity: 0.7 }));
+      const arrows = (["X", "Y"] as const).map((a) => new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(axes[a], 3)),
+        new THREE.LineBasicMaterial({ color: AXIS_COLORS[a] })));
       fill.renderOrder = outline.renderOrder = 2;
-      this.planes = new THREE.Group().add(fill, outline);
+      for (const o of [...arrows, ...labels]) o.renderOrder = 3;
+      this.planes = new THREE.Group().add(fill, outline, ...arrows, ...labels);
       this.scene.add(this.planes);
     }
     this.render();
@@ -473,4 +488,19 @@ export class Viewer {
     this.marked.renderOrder = 1;
     this.scene.add(this.marked);
   }
+}
+
+/** A letter in the view, `size` across, always facing the camera. */
+function axisLabel(text: string, color: number, at: THREE.Vector3, size: number): THREE.Sprite {
+  const canvas = Object.assign(document.createElement("canvas"), { width: 64, height: 64 });
+  const g = canvas.getContext("2d")!;
+  g.font = "600 48px system-ui, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+  g.fillText(text, 32, 34);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }));
+  sprite.position.copy(at);
+  sprite.scale.setScalar(size);
+  return sprite;
 }
