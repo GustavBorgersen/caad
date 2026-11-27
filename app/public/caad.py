@@ -501,8 +501,12 @@ class Constrained:
         self._add({"type": _round_kind(item, "diameter"), _round_key(item): item.id, "diameter": _number(d, "diameter")})
 
     def angle(self, a, b, degrees):
-        """Angle from line a to line b, counter-clockwise, in degrees."""
-        self._add({"type": "l2l_angle_ll", "l1_id": _l(a).id, "l2_id": _l(b).id, "angle": math.radians(_number(degrees, "angle"))})
+        """Angle between lines a and b in degrees, 0 to 180 (the sign is ignored): the one as drawn, between the
+        sides of the lines away from where they meet. Which of the angles at the corner that is comes from where
+        the lines are now, so they keep their arrangement when the value changes."""
+        a, b = _l(a), _l(b)
+        deg = abs(_number(degrees, "angle"))
+        self._add({"type": "l2l_angle_ll", "l1_id": a.id, "l2_id": b.id, "angle": _directed_angle(a, b, math.radians(deg)), "degrees": deg})
 
     # Internals
 
@@ -1009,6 +1013,23 @@ def _direction(line):
     dx, dy = line.end.x - line.start.x, line.end.y - line.start.y
     n = math.hypot(dx, dy) or 1.0
     return dx / n, dy / n
+
+
+def _directed_angle(a, b, theta):
+    """PlaneGCS's angle (counter-clockwise from a's direction to b's) for lines `theta` apart as drawn: each line's
+    ray from where they meet towards its middle, the angle turning the way it turns now."""
+    d1, d2 = _direction(a), _direction(b)
+    cross = lambda u, v: u[0] * v[1] - u[1] * v[0]  # noqa: E731
+    s1 = s2 = 1
+    cr = cross(d1, d2)
+    if abs(cr) > 1e-9:
+        t = cross((b.start.x - a.start.x, b.start.y - a.start.y), d2) / cr
+        o = (a.start.x + d1[0] * t, a.start.y + d1[1] * t)
+        side = lambda line, d: 1 if ((line.start.x + line.end.x) / 2 - o[0]) * d[0] + ((line.start.y + line.end.y) / 2 - o[1]) * d[1] >= 0 else -1  # noqa: E731
+        s1, s2 = side(a, d1), side(b, d2)
+    turn = 1 if cross((d1[0] * s1, d1[1] * s1), (d2[0] * s2, d2[1] * s2)) >= 0 else -1
+    angle = turn * theta + (math.pi if s1 != s2 else 0)
+    return math.atan2(math.sin(angle), math.cos(angle))
 
 
 def _point_line(p, line):

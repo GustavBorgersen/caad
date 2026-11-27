@@ -55,6 +55,26 @@ describe("constrained sketches", () => {
     check(!r.ok && /must be a number/.test(r.error.message), "a dimension that isn't a number");
   });
 
+  test("angles: between the lines as drawn, whichever way they were drawn", () => {
+    // A V at the origin: l1 out along x, l2 drawn from its far end into the corner (its direction points away).
+    const vee = (deg) => part(`
+l1 = c.line((0, 0), (10, 0))
+l2 = c.line((8.66, 5), (0, 0))
+c.fix(l1.start, l1.end)
+c.coincident(l2.end, l1.start)
+c.length(l2, 10)
+c.line(l1.end, l2.start)
+c.angle(l1, l2, ${deg})`);
+    const far = () => pyval("(_current['ns']['l2'].start.x, _current['ns']['l2'].start.y)");
+    for (const [deg, x, y] of [[30, 8.660254, 5], [-30, 8.660254, 5], [45, 7.071068, 7.071068], [120, -5, 8.660254]]) {
+      const r = call("run", vee(deg), "part.py");
+      const [px, py_] = far();
+      check(r.ok && near(px, x) && near(py_, y), `c.angle(l1, l2, ${deg}): l2 ${Math.abs(deg)}° up from l1, on its side (${px.toFixed(3)}, ${py_.toFixed(3)})`, r.error?.message);
+    }
+    const m = call("sketch_open", vee(-30), 0);
+    check(m.constraints.find((c) => c.method === "angle")?.dim.value === 30, "the editor's value is the angle as drawn (30, not -30 or 150)");
+  });
+
   test("positions: signed horizontal and vertical distances from the origin", () => {
     const r = call("run", part(`
 r = c.rectangle((0, 0), (10, 10))

@@ -311,3 +311,64 @@ step("Tools: trim a rectangle's side, fillet a corner, a pattern and its count",
   await done();
   check(await page.evaluate(() => window.caad.state.result.ok), "saved; the part builds");
 });
+
+step("the dimension tool; angles as drawn; typing while the mouse moves; dragging with an implied constraint", async () => {
+  // A rectangle on the origin and a 30° wedge left of it; the perpendicular is implied (horizontal against a side).
+  const path = "caad-examples/parts/wedge.py";
+  const g = await gen();
+  await page.evaluate((p, s) => window.caad.applyCode(p, s), path, `from build123d import *
+from caad import Constrained
+
+with BuildPart() as wedge:
+    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:
+        with Constrained() as c:
+            rect1 = c.rectangle((0, 0), (30, 20))
+            c.coincident(rect1.corners[0], c.origin)
+            line1 = c.line((-8.66, 15), (0, 15))
+            c.horizontal(line1)
+            c.on(line1.end, rect1.left)
+            c.perpendicular(line1, rect1.left)
+            line2 = c.line(line1.start, rect1.corners[3])
+            c.angle(line2, line1, -30)
+`);
+  await page.waitForFunction((p, x) => window.caad.state.path === p && (window.caad.state.result?.gen ?? 0) > x && window.caad.state.result.ok, { timeout: 60_000 }, path, g);
+  await dblclickFeature(0);
+  await opened();
+  check((await model()).dof === 3 && (await labels()) === "30", `the angle shows as drawn: 30, not -30 (${await labels()}); 3 degrees of freedom`);
+
+  await tool("dimension");
+  await clickAt(-4.33, 15); // line1
+  const s = await screen(-4.33, 8);
+  await page.mouse.move(s.x, s.y);
+  check(await page.$$eval(".sketch-labels .dim.preview", (d) => d.map((x) => x.textContent).join()) === "8.66", "a line picked: its length previewed");
+  await clickAt(-4.33, 8); // beside it: the length
+  await page.waitForSelector(".sketch-labels .dim-input", { timeout: 10_000 });
+  for (const [x, y] of [[20, 10], [-15, 0], [10, 25]]) { const m = await screen(x, y); await page.mouse.move(m.x, m.y); }
+  check(await page.evaluate(() => document.activeElement?.classList.contains("dim-input")), "the value being typed keeps its focus while the mouse moves");
+  await page.keyboard.type("12");
+  await page.keyboard.press("Enter");
+  await idle();
+  check((await sketchSrc()).includes("c.length(line1, 12)"), "the length typed: c.length(line1, 12)");
+  await clickAt(30, 0); // the bottom corners, right then left
+  await clickAt(0, 0);
+  const below = await screen(15, -5);
+  await page.mouse.move(below.x, below.y);
+  const preview = await page.$$eval(".sketch-labels .dim.preview", (d) => d.map((x) => x.textContent));
+  check(preview.length === 1 && Math.abs(preview[0] - 30) < 0.05, `two points, the cursor below them: their horizontal distance previewed (${preview})`);
+  await clickAt(15, -5);
+  await page.waitForSelector(".sketch-labels .dim-input", { timeout: 10_000 });
+  await page.keyboard.press("Enter");
+  await idle();
+  check(/c\.hdistance\(rect1\.corners\[0\], rect1\.corners\[1\], (29\.9\d*|30)\)/.test(await sketchSrc()) && (await model()).dof === 1,
+    "placed, left to right: c.hdistance(rect1.corners[0], rect1.corners[1], ≈30); 1 degree of freedom left", (await sketchSrc()).match(/c\.hdistance.*/)?.[0]);
+  await app.shot("sketch-8-dimension-tool.png");
+
+  await tool("select");
+  const x0 = (await model()).entities.find((e) => e.ref === "rect1.corners[2]").x;
+  const y1 = (await model()).entities.find((e) => e.ref === "line1.end").y;
+  await dragFrom([-9, y1], [-9, 12]); // (its length label is in the middle) // line1 down: its 30° wedge takes the rectangle's top with it
+  const corner = (await model()).entities.find((e) => e.ref === "rect1.corners[2]");
+  check(Math.abs(corner.x - x0) < 1e-3 && Math.abs(corner.y - (12 + 12 * Math.tan(Math.PI / 6))) < 0.2,
+    "line1 drags (the implied perpendicular is left out while dragging); the rectangle's height follows", corner);
+  await leave();
+});

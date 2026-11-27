@@ -102,7 +102,7 @@ with BuildPart() as plate:
 ```
 
 - Numbers in entity and shape calls (`c.point`, `c.line`, `c.circle`, `c.arc`, `c.rectangle`, `c.polygon`) are **geometry**: where it is drawn, the solver's starting point. Write sensible positions.
-- Constraints and dimensions are separate calls; dimension values are any expression. Shared points are coincident (`c.polyline` and `c.rectangle` share their corners).
+- Constraints and dimensions are separate calls; dimension values are any expression. Shared points are coincident (`c.polyline` and `c.rectangle` share their corners). `c.angle(line1, line2, 30)` is the angle between the lines as drawn, 0–180°: draw them roughly at it.
 - A loop inside a loop is a hole; crossing loops merge. `construction=True` entities only guide.
 - The part's own edges: `ref1 = c.project(part.edges().filter_by(Axis.X).sort_by(Axis.Y)[0])` projects one edge (or vertex) of the part as it is before the sketch onto the sketch plane, fixed: then `c.on(p1, ref1)`, `c.coincident(line1.start, ref1.end)`, `c.equal(h, ref2)`… It's a guide; `construction=False` makes it part of the regions. Circles and arcs must be parallel to the sketch plane.
 - Operations: `f = c.fillet(rect1.corners[2], 3)` rounds a corner where two lines end (the radius is a dimension); `c.mirror(line, *items)` copies about a line; `c.linear_pattern([circle1], 4, 10)` and `c.circular_pattern([circle1], 6, c.origin)` copy in a row or around a point (copies as `pattern[copy][item]`, following the originals). `c.point(x, y, construction=True)` is a guide point, not a hole position.

@@ -1150,7 +1150,7 @@ def _sketch_model(src, index):
         if method in (*_DIMENSIONS, "fillet") and call.args:
             value = next(prim[k] for k in ("distance", "difference", "radius", "diameter", "angle") if k in prim)
             item["dim"] = {"expr": ast.get_source_segment(src, call.args[-1]),
-                           "value": math.degrees(value) if method == "angle" else value}
+                           "value": prim["degrees"] if method == "angle" else value}
         constraints.append(item)
     return {"entities": entities, "constraints": constraints, "primitives": sk._primitives(),
             "dof": sk.dof, "conflicting": sk.conflicting, "problem": sk.problem, "error": error, "c": cname,
