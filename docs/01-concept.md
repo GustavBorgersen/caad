@@ -1,6 +1,6 @@
 # CAAD — Computer Agent Aided Design
 
-**Status:** Concept draft v0.1
+**Status:** Concept draft v0.1 — kept as written; where details changed, the later docs are current (an own three.js viewer instead of three-cad-viewer: [03](03-mvp-plan.md); sketches solved by PlaneGCS in the page only, the code storing the solved geometry: [06](06-sketches.md); the roadmap: [04](04-roadmap.md))
 **Date:** 2026-11-23
 
 ## 1. The idea in one paragraph

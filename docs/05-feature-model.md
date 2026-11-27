@@ -150,7 +150,7 @@ All in `caad_kernel.py`, called through the worker like `select` and `resolve` t
 
 **Sketching is its own step.** The sketch editor's *Done* adds only the named sketch; the view draws it as an outline until a feature uses it. *+ Extrude* at the rollback bar then opens the extrude dialog on the latest sketch before the bar (preferring one nothing uses yet), where depth, through all, symmetric, opposite direction and add/remove/intersect are chosen. A field another field hides (depth when *through all* is chosen) is not written.
 
-**Inserting** a new feature: at the rollback bar, with `insert_feature`. **Deleting**: refused (with an explanation) if a later feature refers to its name; otherwise the statement is removed. **Renaming** a sketch updates its references (later).
+**Inserting** a new feature: at the rollback bar, with `insert_feature`. **Deleting**: refused (with an explanation) if a later feature refers to its name; otherwise the statement is removed. **Renaming** a sketch updates its references (planned in [09](09-design-and-workflow.md), phase 1.5).
 
 ## Why surgical patching, not regeneration
 
