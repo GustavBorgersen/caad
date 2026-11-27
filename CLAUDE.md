@@ -1,6 +1,6 @@
 # CAAD — notes for agents working on this repo
 
-A browser CAD program for build123d (static site) plus a small agent bridge. Docs in `docs/` — start with `04-roadmap.md`; design decisions are in numbered design docs (`05-feature-model.md`, …). Write a design doc before building anything that changes how code maps to features, sketches, parts or files.
+A browser CAD program for build123d (static site) plus a small agent bridge. Docs in `docs/` — start with `04-roadmap.md`; design decisions are in numbered design docs (`05-feature-model.md`, …). Write a design doc before building anything that changes how code maps to features, sketches, parts or files. UI work follows the design goals in `09-design-and-workflow.md`.
 
 ## Layout
 

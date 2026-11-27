@@ -1,13 +1,13 @@
 # CAAD — Roadmap
 
-**Date:** 2026-11-24
+**Date:** 2026-11-24, updated 2026-11-27
 **Replaces:** [03 — MVP plan](03-mvp-plan.md) (completed)
 
 ## Where we are
 
-The MVP loop works end to end. You open a folder of build123d files and see a part with its timeline; rollback, errors at the failing feature and editing all work, and edits from you or the agent rebuild in about a second. Faces and edges can be selected and get verified selectors. You can sketch on a plane or face and extrude or cut. An agent (Claude Code) connects through a small bridge program and gets everything else from the page: docs, API lookup, running code, writing parts, selection, highlight and render.
+Phase 1 is done. You open a folder (a workspace of projects) and see a part with its timeline; rollback, errors at the failing feature and editing all work, and edits from you or the agent rebuild in about a second. Features are read back from the code into dialogs with a live preview and patched surgically; sketches are constrained (PlaneGCS) and edited in a sketch editor with dimensions, part edges, trim, fillet, mirror and patterns; planes, revolve axes and extruding the part's own faces are in. Parts export to STEP and STL. An agent (Claude Code) connects through a small bridge program and gets everything else from the page: docs, API lookup, running code, editing parts and features, selection, highlight and render.
 
-The first real session — "what have I selected?" → "chamfer the edge" → "make a toy car" — worked without workarounds.
+What's missing is the feel of one designed tool: the layout, the looks and the workflow grew one feature at a time. That is phase 1.5.
 
 ## Goal from here
 
@@ -37,8 +37,22 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 | **Sketch planes and revolve axes** | **Done 2026-11-27:** a plane feature (`pl1 = Plane.XY.offset(10)`, rotated, or from the selected face; *+ Plane*) shown in the view and offered by *✎ Sketch*; revolve about a (construction) line of a sketch (`axis(sk1, line1)`, offered in the dialog's *Axis*): full freedom of position and angle. The rest of feature-model slice 3 | [05](05-feature-model.md) |
 | **Extrude and remove from faces** | **Done 2026-11-27:** extrude, cut or intersect the part's own faces (selected in the view, kept as a selector), not only sketches: `extrude(part.faces().sort_by(Axis.Z)[-1], amount=5)`. *+ Extrude* takes the selected faces; *Remove* and *Intersect* go into the part | 05 |
 | **Fast tests** | **Done 2026-11-27:** `npm test` runs the quick set in about 30 s (all the kernel tests in Node, the kernel booted once and shared, beside a UI smoke test); `npm run test:all` adds every UI suite and the bridge, each file with its own server and browser, in parallel (about 1.5 min). The Tests workflow runs the complete set on pull requests and releases | — |
-| **Contrast fixes** | Clear marking of the selected/hovered feature in the timeline and the code, stronger colours — the quick part of the visual work | — |
 | **Own repository** | **Done 2026-11-25:** [github.com/GustavBorgersen/caad](https://github.com/GustavBorgersen/caad), MIT licence, deployed to [caad.vercel.app](https://caad.vercel.app) by a GitHub Action that also builds the bridge into the site; each GitHub release gets a self-hosting zip with the site and the bridge for every system | — |
+
+### Phase 1.5 — Layout, visuals and workflow
+
+A serious iteration on how CAAD looks and works, before more features pile on. Design goals: one coherent workflow from sketches to slicing (for the agent too), good-looking and fun, light and dark themes, no clutter with the part as the main character, no system popups, shortcuts — see [09](09-design-and-workflow.md).
+
+| Item | What | Design doc |
+| :-- | :-- | :-- |
+| **Design goals and workflow** | **Done 2026-11-27:** the goals, one loop (select → command → dialog with preview → confirm) in every mode, commands, context menus, first shortcuts, undo, code ↔ timeline | [09](09-design-and-workflow.md) |
+| **Mock-ups and visual system** | Two or three style directions as static pages, in both themes; pick one; write doc 10 (tokens, type, icons, states, 3D look) | 09, 10 |
+| **Commands and keys** | A command registry behind the toolbar, shortcuts, tooltips and context menus; CAAD's own dialogs and messages instead of `prompt`/`confirm`/`alert` | 09 |
+| **Code ↔ timeline** | Names in the timeline (`sk1 · Sketch: Rectangle`), rename, a blank line between new features, cross-highlighting (replaces "contrast fixes") | 09 |
+| **Undo** | Undo/redo for every change, as a history of the code; agent edits marked | 09 |
+| **Themes and layout** | Light and dark; the view fills the window, panels slide in or float | 09, 10 |
+| **The view** | Shading, edges, selection colours, view cube and standard views, smooth camera moves | 10 |
+| **Start-up** | Build once at start-up ([#3](https://github.com/GustavBorgersen/caad/issues/3)) | — |
 
 ### Phase 2 — Part studio
 
@@ -68,7 +82,7 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 
 ### Alongside all phases
 
-- **Visual design**: a separate brainstorm session (style directions as mock-ups to choose from), then a small design system (colours, type, icons, spacing, dark mode), then implementation. Includes a view cube / standard views, panel resizing and better shading and edges.
+- **Design goals**: every UI change is checked against the goals in [09](09-design-and-workflow.md).
 - **Tests**: every feature comes with tests: kernel tests in `app/tests/kernel/` and a headless UI suite in `app/tests/full/` (see Tests in `app/README.md`).
 
 ## Design documents
@@ -79,7 +93,8 @@ The foundation everything else builds on: CAAD must be able to *read code back a
 | 06 | [Sketches and constraints](06-sketches.md) | 06a–06d built |
 | 07 | [Project structure](07-project-structure.md) | Built |
 | 08 | Part studios and assemblies | To write before phase 2 |
-| — | Visual design | Brainstorm session first |
+| 09 | [Design goals, layout and workflow](09-design-and-workflow.md) | Agreed; mock-ups next |
+| 10 | Visual system | To write after the mock-ups |
 
 ## Future features
 

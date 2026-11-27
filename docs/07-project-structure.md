@@ -45,7 +45,7 @@ my-workspace/              the folder you open
 - **Each project's folder is its import root.** CAAD runs every file with the project's folder on `sys.path`, like `python -m`: a part imports shared code as `from params import wall`, an assembly a part as `from parts.lid import lid`. Shared code is shared within a project, not across projects.
 - **Loose build123d files** (in the workspace but in no project) still open as today. CAAD offers *Make this a CAAD project* for their folder, which only adds a `pyproject.toml` (or the `[tool.caad]` table to an existing one) — it never moves files.
 - **Line endings**: files with Windows line endings (`\r\n`, e.g. from a git checkout with `core.autocrlf`) are read as `\n` (the code panel, the kernel and the agent's `edit_part` all see `\n`) and written back with `\r\n`, so saving never mixes the two.
-- **New project** (next to *Open folder*): a name → CAAD creates the project's folder in the workspace with `pyproject.toml` and `parts/part.py` (an empty part), and opens it.
+- **New project** (in the project browser's header, beside *+ Part*): a name → CAAD creates the project's folder in the workspace with `pyproject.toml` and `parts/part.py` (an empty part), and opens it.
 - **Git is the user's business**: CAAD reads and writes files in the folder you picked; committing, ignoring and branching are up to you (GitHub mode stays a future feature).
 
 ## The project file: `pyproject.toml`
