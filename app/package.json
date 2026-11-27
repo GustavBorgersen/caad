@@ -7,13 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test:smoke": "node tests/smoke.mjs",
-    "build:bridge": "mise exec -C ../bridge -- ../bridge/build.sh",
-    "test:bridge": "node tests/bridge.mjs",
-    "test:agent": "node tests/agent-e2e.mjs",
-    "test:sketch": "node tests/sketch-e2e.mjs",
-    "test:feature": "node tests/feature-e2e.mjs",
-    "test:project": "node tests/project-e2e.mjs"
+    "test": "node scripts/kernel-fetch.mjs && node --test \"tests/*.test.mjs\"",
+    "test:all": "node scripts/kernel-fetch.mjs && node --test \"tests/*.test.mjs\" \"tests/full/*.test.mjs\"",
+    "test:kernel": "node --test tests/kernel.test.mjs",
+    "test:bridge": "node --test tests/full/bridge.test.mjs",
+    "build:bridge": "mise exec -C ../bridge -- ../bridge/build.sh"
   },
   "dependencies": {
     "@codemirror/lang-python": "^6.2.1",

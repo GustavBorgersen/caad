@@ -183,4 +183,4 @@ The agent keeps writing code with `write_part` / `edit_part`. The build123d guid
 - **Surgical edits**: changing one parameter changes exactly one span; comments around and inside the feature survive; adding and removing keywords keeps the call's layout.
 - **Current forms**: the examples read without changes; implicit sketches pair with the right extrudes.
 - **Concurrent edits**: `patch_feature` refuses when the feature at the index changed kind.
-- **Kernel tests** in Node: `spike/01-build123d-wasm/feature-test.mjs`. **End to end**: a headless UI test double-clicks features, edits them and checks the file and the built part.
+- **Kernel tests** in Node: `app/tests/kernel/feature.mjs`. **End to end**: `app/tests/full/feature.test.mjs` double-clicks features, edits them and checks the file and the built part.

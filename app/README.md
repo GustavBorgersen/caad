@@ -6,13 +6,9 @@ The browser app: a static site (Vite + TypeScript). build123d runs in a Web Work
 npm install
 npm run dev          # http://localhost:5173 — open in Chrome or Edge
 npm run build        # static files in dist/, deployable as-is (e.g. Vercel)
-npm run test:smoke   # drives the app in headless Chromium (CHROME=/path/to/chrome to override)
+npm test             # the quick test set, ~30 s (see Tests below)
+npm run test:all     # the complete set, as CI runs it
 npm run build:bridge # builds the agent bridge for all systems into public/bridge (needs Go, see ../bridge)
-npm run test:bridge  # bridge protocol test
-npm run test:agent   # the real bridge + app in headless Chromium, every agent tool
-npm run test:sketch  # sketch mode: draw, cut, sketch on a face, new part
-npm run test:feature # feature dialog: double-click, edit with live preview, OK/Cancel
-npm run test:project # workspace and projects: browser, shared code, New project, + Part
 ```
 
 The first start takes about a minute while the CAD kernel loads (see `../docs/02-spike-results.md`).
@@ -35,3 +31,21 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | `src/agent-dialog.ts` | Agent button and setup dialog (bridge download, `claude mcp add` line) |
 | `src/sketcher.ts` | Sketch editor for constrained sketches: tools, snapping, dragging with live PlaneGCS solving; every action is a kernel code edit (`sketch_action`) |
 | `public/agent/guide.md` | build123d guide for the agent (every example is tested) |
+
+## Tests
+
+Node's test runner (`node:test`); test files run in parallel, each in its own process.
+
+| Command | What | Time |
+| :-- | :-- | :-- |
+| `npm test` | The quick set, while developing: `tests/kernel.test.mjs` (the kernel in Node: building, selectors, features, sketches, the agent guide) and `tests/ui-smoke.test.mjs` (the app in headless Chrome) | ~30 s |
+| `npm run test:all` | Adds `tests/full/`: feature dialog, sketch editor, projects, no-reload, the agent end to end and the bridge protocol | ~1.5 min |
+| `npm run test:kernel` | Only the kernel tests; no browser needed | ~30 s |
+| `npm run test:bridge` | Only the bridge protocol | seconds |
+
+- `CHROME=/path/to/chrome` for the UI tests (default `/usr/bin/chromium`; Chrome or Edge work).
+- `SHOTS=dir` saves screenshots there, and `<suite>-error.png` when a step fails.
+- The agent and bridge tests need the bridge binary (`npm run build:bridge`, or `CAAD_MCP=path`); without it they are skipped.
+- One test by name: `node --test --test-name-pattern="sketch planes" tests/kernel.test.mjs`.
+- The kernel tests (`tests/kernel/*.mjs`) share one kernel, booted by `tests/kernel/env.mjs` as the page's worker boots it. Each UI file opens the app with `openApp()` from `tests/ui/env.mjs`: its own Vite server on a free port, its own browser, and a page kept off every caad-mcp bridge but its own. A UI suite is a series of `step`s; after a failure the rest are skipped.
+- `node tests/ui-shots.mjs [dir] [width] [height]`: screenshots of the main UI states at a laptop size, for checking the layout by eye.
