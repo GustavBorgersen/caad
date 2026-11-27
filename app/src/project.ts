@@ -69,8 +69,17 @@ export function projectFile(name: string): string {
 
 class FolderWorkspace implements Workspace {
   readonly writable = true;
+  // Files with Windows line endings (\r\n): CAAD works on their text with \n, and writes them back with \r\n.
+  private crlf = new Set<string>();
   constructor(private root: FileSystemDirectoryHandle) {}
   get name() { return this.root.name; }
+
+  /** A file's text with \n line endings, remembering whether it had \r\n. */
+  private lf(path: string, text: string) {
+    if (text.includes("\r\n")) this.crlf.add(path);
+    else this.crlf.delete(path);
+    return text.replace(/\r\n/g, "\n");
+  }
 
   async scan() {
     const out: ScannedFile[] = [];
@@ -79,7 +88,7 @@ class FolderWorkspace implements Workspace {
         if (handle.kind === "directory") {
           if (!SKIP.has(name) && !name.startsWith(".") && depth < MAX_DEPTH) await walk(handle, prefix + name + "/", depth + 1);
         } else if (name.endsWith(".py") || name === "pyproject.toml") {
-          out.push({ path: prefix + name, text: await (await handle.getFile()).text() });
+          out.push({ path: prefix + name, text: this.lf(prefix + name, await (await handle.getFile()).text()) });
         } else if (EXPORTS.test(name) || PRINT.test(name)) out.push({ path: prefix + name });
       }
     };
@@ -94,12 +103,13 @@ class FolderWorkspace implements Workspace {
     return dir.getFileHandle(parts[parts.length - 1], { create });
   }
 
-  async read(path: string) { return (await (await this.file(path)).getFile()).text(); }
+  async read(path: string) { return this.lf(path, await (await this.file(path)).getFile().then((f) => f.text())); }
   async blob(path: string) { return (await this.file(path)).getFile(); }
   async modified(path: string) { return (await (await this.file(path)).getFile()).lastModified; }
   async write(path: string, text: string) {
+    text = text.replace(/\r\n/g, "\n");
     const w = await (await this.file(path, true)).createWritable();
-    await w.write(text);
+    await w.write(this.crlf.has(path) ? text.replace(/\n/g, "\r\n") : text);
     await w.close();
   }
   async writeBytes(path: string, data: Uint8Array) {

@@ -33,6 +33,7 @@ export type FeatureField = {
   type: "number" | "choice" | "bool" | "sketch" | "edges" | "faces" | "plane" | "expr" | "flip";
   of?: string; template?: string; // flip: the expression is template with {} = field `of`'s expression; pick: {} = the selection
   pick?: "face"; // a choice that can also take the face selected in the view (through template)
+  inward?: Record<string, string[]>; // flip, when field `of` holds the part's faces: on while these fields have one of these expressions
   options?: { expr?: string; label: string }[];
   show_if?: Record<string, string | null>;
   extra?: boolean; // not one of the feature type's own fields

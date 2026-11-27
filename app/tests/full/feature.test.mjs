@@ -330,3 +330,28 @@ step("+ Plane on the selected top face, offset; ✎ Sketch on it; it hides once 
   check((await code()).includes("    with BuildSketch(pl1, mode=Mode.PRIVATE) as sk1:\n") && (await page.evaluate(() => window.caad.state.result.planes.length)) === 0,
     "Done: a sketch on pl1, which isn't drawn any more");
 });
+
+step("+ Extrude the face selected in the view; Remove goes into the part", async () => {
+  await open("caad-examples/parts/faces.py", `from build123d import *\n\nwith BuildPart() as block:\n    Box(20, 20, 10)\n`);
+  await page.evaluate(async () => {
+    const r = await window.caad.kernel.highlightIndices("block.faces().sort_by(Axis.Z)[-1]");
+    window.caad.viewer.onSelect(r.faces.map((index) => ({ kind: "face", index })));
+  });
+  await page.waitForFunction(() => window.caad.state.selection.length === 1, { timeout: 30_000 });
+  await addAtBar("+ Extrude");
+  await panelOpen();
+  const source = await page.$eval('#feature-panel [data-field="to_extrude"] select', (s) => s.selectedOptions[0].textContent);
+  check(/^Faces: block\.faces\(\)/.test(source) && !(await page.$("#feature-panel .note")), "the selected face is what's extruded (no sketch regions to click)", source);
+  const flip = () => page.$eval('#feature-panel [data-field="dir"] input', (i) => i.checked);
+  check(!(await flip()), "adding: out of the part");
+  await page.select('#feature-panel [data-field="mode"] select', "Mode.SUBTRACT");
+  check(await flip(), "Remove turns Opposite direction on: into the part");
+  await type("amount", "4");
+  await ok();
+  const src = await code();
+  const face = source.slice("Faces: ".length);
+  check(src.endsWith(`    extrude(${face}, amount=4, dir=-${face}.faces()[0].normal_at(), mode=Mode.SUBTRACT)\n`) && Math.abs((await volume()) - 20 * 20 * 6) < 1e-6,
+    "OK: 4 mm cut from the top face", src.split("\n").at(-2));
+  check(/Cut face, 4 mm/.test(await page.$eval("#timeline", (t) => t.textContent)), "labelled Cut face in the timeline");
+  await app.shot("feature-7-face.png");
+});

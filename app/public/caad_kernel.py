@@ -150,13 +150,25 @@ def _sketch_name(expr):
     return None
 
 
+def _faces_count(expr):
+    """For a selector of the part's faces (`part.faces()...`): "face" when it picks one (ends in an index), else
+    "faces"; None for anything else."""
+    try:
+        node = ast.parse(expr or "", mode="eval").body
+    except SyntaxError:
+        return None
+    if not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "faces" for n in ast.walk(node)):
+        return None
+    return "face" if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice) else "faces"
+
+
 def _sketch_label(expr):
-    """sk1 for sk1.sketch, "sk1 (2 regions)" for regions(sk1, a, b), else the expression."""
+    """sk1 for sk1.sketch, "sk1 (2 regions)" for regions(sk1, a, b), "face(s)" for the part's faces, else the expression."""
     name = _sketch_name(expr)
     if name and not expr.strip().endswith(".sketch"):
         n = len(ast.parse(expr, mode="eval").body.args) - 1
         return f"{name} ({n} region{'' if n == 1 else 's'})"
-    return name or (expr or "")
+    return name or _faces_count(expr) or (expr or "")
 
 
 def _extrude_label(a, pending):
@@ -171,14 +183,16 @@ def _extrude_label(a, pending):
 FEATURE_TYPES = {
     "extrude": {
         "fields": [
-            {"name": "to_extrude", "label": "Sketch", "type": "sketch"},
+            {"name": "to_extrude", "label": "Sketch or faces", "type": "sketch"},
             {"name": "until", "label": "End", "type": "choice",
              "options": _choices((None, "Depth"), ("Until.LAST", "Through all"), ("Until.NEXT", "Up to next"))},
             {"name": "amount", "label": "Depth", "type": "number", "show_if": {"until": None}},
             {"name": "both", "label": "Symmetric", "type": "bool"},
             # A sketch on a face has its normal pointing out of the part: cutting into it needs the opposite.
+            # The part's own faces point out of it too: removing or intersecting goes inward, so for faces
+            # the dialog turns the flip on with those results (`inward`).
             {"name": "dir", "label": "Opposite direction", "type": "flip", "of": "to_extrude",
-             "template": "-{}.faces()[0].normal_at()"},
+             "template": "-{}.faces()[0].normal_at()", "inward": {"mode": ["Mode.SUBTRACT", "Mode.INTERSECT"]}},
             {"name": "taper", "label": "Taper angle", "type": "number"},
             {"name": "mode", "label": "Result", "type": "choice", "options": _MODES},
         ],
@@ -187,7 +201,7 @@ FEATURE_TYPES = {
     },
     "revolve": {
         "fields": [
-            {"name": "profiles", "label": "Sketch", "type": "sketch"},
+            {"name": "profiles", "label": "Sketch or faces", "type": "sketch"},
             {"name": "axis", "label": "Axis", "type": "choice",
              "options": _choices(("Axis.Z", "Z"), ("Axis.X", "X"), ("Axis.Y", "Y"))},
             {"name": "revolution_arc", "label": "Angle", "type": "number"},

@@ -89,3 +89,22 @@ step("the agent's list_parts shows where parts go", async () => {
   check(listing !== null, "list_parts is a page tool");
   check(listing.content[0].text.includes("Project fermenter/: parts go in fermenter/parts/"), "it names each project's parts folder", listing.content[0].text);
 });
+
+step("a folder with Windows line endings: CAAD works with \\n, the file keeps its \\r\\n", async () => {
+  const crlf = "from build123d import *\r\n\r\nwith BuildPart() as box:\r\n    Box(10, 10, 10)\r\n    fillet(box.edges(), radius=1)\r\n";
+  await page.evaluate(async (text) => {
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle("crlf", { create: true });
+    const w = await (await dir.getFileHandle("box.py", { create: true })).createWritable();
+    await w.write(text);
+    await w.close();
+    window.showDirectoryPicker = async () => dir; // the folder the user would pick
+  }, crlf);
+  await builds("box.py", () => page.click("#open-folder"));
+  check((await page.evaluate(() => window.caad.editor.text)) === crlf.replace(/\r\n/g, "\n"), "the code panel has the text with \\n");
+  // The agent's edit_part with text over two lines: found only if the file's \r\n became \n.
+  const r = await page.evaluate(() => window.caad.agents.handlers.edit_part({ path: "box.py",
+    old_text: "    Box(10, 10, 10)\n    fillet(box.edges(), radius=1)", new_text: "    Box(10, 10, 20)\n    fillet(box.edges(), radius=1)" }));
+  check(r.content[0].text.includes("built OK"), "edit_part across lines works", r.content[0].text);
+  const disk = await page.evaluate(async () => (await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle("crlf")).getFileHandle("box.py")).getFile()).text());
+  check(disk === crlf.replace("Box(10, 10, 10)", "Box(10, 10, 20)"), "written back with \\r\\n only", JSON.stringify(disk));
+});
