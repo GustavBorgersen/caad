@@ -3,6 +3,7 @@ import { Agents, localAccess } from "./agent";
 import { setupAgentDialog } from "./agent-dialog";
 import { Editor } from "./editor";
 import { FeatureDialog } from "./feature-dialog";
+import { RegionPicker } from "./regions";
 import { Kernel, type BuildResult, type Feature, type Kind, type SelectInfo } from "./kernel";
 import { canOpenFolders, examples, indexWorkspace, lastFolder, openFolder, projectFile, projectOf, reopen,
   type FileKind, type ScannedFile, type Workspace, type WorkspaceIndex } from "./project";
@@ -314,7 +315,13 @@ const featureDialog = new FeatureDialog($("feature-panel"), {
     rebuild();
   },
   selection: selected,
+  regions(r, toggle) {
+    if (regionPicker) { regionPicker.dispose(); if (viewer.tool === regionPicker) viewer.tool = null; }
+    regionPicker = r ? new RegionPicker(viewer, r.regions, toggle) : null;
+    if (regionPicker) viewer.tool = regionPicker;
+  },
 });
+let regionPicker: RegionPicker | null = null;
 
 /** Double-click in the timeline: roll back to just before the feature and open its dialog. */
 async function editFeature(f: Feature) {
@@ -616,4 +623,4 @@ $("new-part").onclick = async () => {
 };
 
 // For tests and debugging in the console.
-Object.assign(window, { caad: { editor, viewer, kernel, state, rebuild, openPart, applyCode, agents, sketcher, startSketch, editFeature, featureDialog } });
+Object.assign(window, { caad: { editor, viewer, kernel, state, rebuild, openPart, applyCode, agents, sketcher, startSketch, editFeature, featureDialog, regionPicker: () => regionPicker } });

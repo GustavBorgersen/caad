@@ -1,6 +1,6 @@
 // Sketch editor end to end (docs/06-sketches.md): converting a plain sketch, draw, dimension, Done, extrude;
 // reopen and change a dimension; line chains with snapping and inferred constraints; delete; sketches on faces;
-// Cancel; a new part.
+// Cancel; a new part; Use (a part edge in the sketch, constrained to); trim, fillet and a pattern.
 import { after } from "node:test";
 import { check } from "../common.mjs";
 import { openApp, sleep, steps } from "../ui/env.mjs";
@@ -36,6 +36,7 @@ const tool = (t) => page.click(`#sketch-panel [data-tool="${t}"]`);
 const option = (kind) => page.click(`#sketch-panel button.option[data-option="${kind}"]`);
 const state = () => page.$eval("#sketch-panel .state", (s) => s.textContent);
 const labels = () => page.$$eval(".sketch-labels .dim", (d) => d.map((x) => x.textContent).sort().join(" | "));
+const drawing = () => page.evaluate(() => window.caad.sketcher.drawing);
 const typeDim = async (text) => {
   await page.waitForSelector(".sketch-labels .dim-input", { timeout: 10_000 });
   await page.$eval(".sketch-labels .dim-input", (i) => { i.value = ""; });
@@ -98,7 +99,7 @@ step("a new sketch on Top: two clicks draw a rectangle; nothing is saved before 
 step("dimensions: lengths and distances from the origin, a conflict, Done and a cut", async () => {
   await tool("select");
   await clickAt(-3, -6); // the bottom side
-  check((await page.$$eval("#sketch-panel button.option", (b) => b.map((x) => x.dataset.option))).join() === "horizontal,vertical,length",
+  check((await page.$$eval("#sketch-panel button.option:not(.op)", (b) => b.map((x) => x.dataset.option))).join() === "horizontal,vertical,length",
     "a line offers horizontal, vertical, length", await page.$$eval("#sketch-panel button.option", (b) => b.map((x) => x.title).join(", ")));
   await option("length");
   check(await page.$$eval("#sketch-params option", (o) => o.map((x) => x.value).join()) === "width,depth,thickness,hole_d", "the part's parameters are offered");
@@ -114,6 +115,8 @@ step("dimensions: lengths and distances from the origin, a conflict, Done and a 
   await shiftClickAt(-5, 0);
   await option("vdistance");
   await typeDim("0");
+  check((await drawing()).arrows === 2 && (await page.$$eval(".sketch-labels .axis-label", (a) => a.map((x) => x.textContent).join())) === "X,Y",
+    "the horizontal distance has a dimension line with two arrows (lengths sit on their lines; the vertical one is 0); the sketch's X and Y are labelled", await drawing());
   let src = await sketchSrc();
   check(["c.length(rect2.bottom, width / 4)", "c.length(rect2.left, 12)", "c.hdistance(c.origin, rect2.center, -5)", "c.vdistance(c.origin, rect2.center, 0)"].every((l) => src.includes(l)),
     "dimensions written: width / 4, 12, and the centre from the origin", src.split("\n").filter((l) => /c\.(length|hdistance|vdistance)/.test(l)).join(" | "));
@@ -188,14 +191,18 @@ step("deleting a line takes what depends on it; Cancel saves nothing", async () 
   check(!(await code()).includes("sk2"), "Cancel saves nothing");
 });
 
-step("a sketch of points only (where holes will go)", async () => {
+step("a sketch of points only (where holes will go); a point on the origin is tied to it", async () => {
   await startOn("bracket.faces().filter_by(Axis.Z).sort_by(Axis.Z)[0]", "the bottom");
   await tool("point");
   await clickAt(-20, 5);
   await clickAt(20, 5);
-  check(!(await page.$eval("#sketch-panel .primary", (b) => b.disabled)) && /p1 = c\.point\(-20, 5\)\n\s+p2 = c\.point\(20, 5\)/.test(await sketchSrc()), "a sketch of two points can be closed (Done)");
+  await clickAt(0.2, -0.1);
+  const src = await sketchSrc();
+  check(/p3 = c\.point\(0, 0\)\n\s+c\.coincident\(p3, c\.origin\)/.test(src), "a click on the origin adds a point there, coincident with it (#7)", src);
+  check((await drawing()).rings === 3, "points made on their own are drawn as rings (the origin stays a dot)", await drawing());
+  check(!(await page.$eval("#sketch-panel .primary", (b) => b.disabled)) && /p1 = c\.point\(-20, 5\)\n\s+p2 = c\.point\(20, 5\)/.test(await sketchSrc()), "a sketch of three points can be closed (Done)");
   await done();
-  check(await page.evaluate(() => window.caad.state.result.sketches.some((s) => s.points.length === 6)), "its points show in the view");
+  check(await page.evaluate(() => window.caad.state.result.sketches.some((s) => s.points.length === 9)), "its three points show in the view");
 });
 
 step("a circle on the top face, snapped to the origin, extruded", async () => {
@@ -238,4 +245,130 @@ step("a new part: a closed polyline, then its extrude", async () => {
   await extrude();
   check(Math.abs((await volume()) - 5000) < 1, "extruded 10: volume 5000 mm³", await volume());
   await app.shot("sketch-5-newpart.png");
+});
+step("Use: a part edge in the sketch, fixed, and a point constrained to it", async () => {
+  await startOn("Plane.XY.offset(10)", "the top");
+  await tool("use");
+  await clickAt(15, 0); // the polyline part's front edge, on top
+  let m = await model();
+  const ref = m.entities.find((e) => e.ref === "ref1");
+  const ends = m.entities.filter((e) => e.ref === "ref1.start" || e.ref === "ref1.end");
+  check(/ref1 = c\.project\(\w+\.edges\(\)/.test(await sketchSrc()) && ref?.kind === "line" && ref.reference && ends.length === 2 && ends.every((p) => Math.abs(p.y) < 1e-6),
+    "a click on the edge projects it: c.project(<its selector>), a line along y = 0", (await sketchSrc()).match(/ref1 = .*/)?.[0]);
+  await tool("point");
+  await clickAt(15, 5);
+  await tool("select");
+  await clickAt(15, 5);
+  await shiftClickAt(8, 0);
+  await option("on");
+  await idle();
+  m = await model();
+  check(Math.abs(m.entities.find((e) => e.ref === "p1").y) < 1e-6 && /c\.on\(p1, ref1\)/.test(await sketchSrc()), "a point put on it goes to y = 0");
+  const before = await sketchSrc();
+  await dragFrom([5, 0], [5, 6]);
+  check((await sketchSrc()) === before && (await model()).entities.filter((e) => e.reference && e.kind === "point").every((p) => Math.abs(p.y) < 1e-6), "the reference can't be dragged");
+  await app.shot("sketch-6-use.png");
+  await done();
+  check(/ref1 = c\.project\(/.test(await code()) && await page.evaluate(() => window.caad.state.result.ok), "saved; the part builds");
+});
+
+step("Tools: trim a rectangle's side, fillet a corner, a pattern and its count", async () => {
+  await startOn("Plane.XY.offset(10)", "the top");
+  await clickAt(-10, -6); // the rectangle tool: a fresh sketch starts with it
+  await clickAt(10, 6);
+  await tool("line");
+  await clickAt(0, -9);
+  await clickAt(0.1, 9);
+  await page.keyboard.press("Escape");
+  await tool("trim");
+  await clickAt(5, 6); // the top, right of the line
+  let src = await sketchSrc();
+  const top = src.match(/(line\d+) = c\.line\(\(0, 6\), \(-10, 6\)\)/)?.[1];
+  check(!src.includes("c.rectangle") && top && new RegExp(`c\\.on\\(${top}\\.start, line\\d+\\)`).test(src),
+    "trimmed: the rectangle became lines, its top now ends at the line, kept on it", src);
+  await tool("select");
+  await clickAt(-10, -6);
+  await option("fillet");
+  await typeDim("2");
+  src = await sketchSrc();
+  check(/fillet1 = c\.fillet\(line\d+\.start, 2\)/.test(src) && (await model()).entities.some((e) => e.kind === "arc" && Math.abs(e.r - 2) < 1e-6), "the corner filleted, radius typed: c.fillet(<line>.start, 2)", src);
+  check(await page.$$eval(".sketch-labels .dim[data-prefix='R']", (d) => d.map((x) => x.textContent).join()) === "2", "its radius shows as R2, with a leader and an arrow");
+  await tool("circle");
+  await clickAt(-7, 0);
+  await clickAt(-6.2, 0);
+  await tool("select");
+  await clickAt(-6.2, 0);
+  await option("linear_pattern");
+  await idle();
+  check(/pattern1 = c\.linear_pattern\(\[circle1\], 3, 2, 0\)/.test(await sketchSrc()), "a linear pattern: 3 copies 2 apart (from the circle's size)", (await sketchSrc()).match(/pattern1 = .*/)?.[0]);
+  await clickAt(-4.2, 0); // the second copy: its pattern's fields show
+  await page.$eval('#sketch-panel input[data-arg="count"]', (i) => { i.value = ""; });
+  await page.type('#sketch-panel input[data-arg="count"]', "4");
+  await page.keyboard.press("Enter");
+  await idle();
+  check(/pattern1 = c\.linear_pattern\(\[circle1\], 4, 2, 0\)/.test(await sketchSrc()) && (await model()).entities.filter((e) => e.kind === "circle").length === 4, "the count field: 4 circles");
+  await app.shot("sketch-7-tools.png");
+  await done();
+  check(await page.evaluate(() => window.caad.state.result.ok), "saved; the part builds");
+});
+
+step("the dimension tool; angles as drawn; typing while the mouse moves; dragging with an implied constraint", async () => {
+  // A rectangle on the origin and a 30° wedge left of it; the perpendicular is implied (horizontal against a side).
+  const path = "caad-examples/parts/wedge.py";
+  const g = await gen();
+  await page.evaluate((p, s) => window.caad.applyCode(p, s), path, `from build123d import *
+from caad import Constrained
+
+with BuildPart() as wedge:
+    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:
+        with Constrained() as c:
+            rect1 = c.rectangle((0, 0), (30, 20))
+            c.coincident(rect1.corners[0], c.origin)
+            line1 = c.line((-8.66, 15), (0, 15))
+            c.horizontal(line1)
+            c.on(line1.end, rect1.left)
+            c.perpendicular(line1, rect1.left)
+            line2 = c.line(line1.start, rect1.corners[3])
+            c.angle(line2, line1, -30)
+`);
+  await page.waitForFunction((p, x) => window.caad.state.path === p && (window.caad.state.result?.gen ?? 0) > x && window.caad.state.result.ok, { timeout: 60_000 }, path, g);
+  await dblclickFeature(0);
+  await opened();
+  check((await model()).dof === 3 && (await labels()) === "30", `the angle shows as drawn: 30, not -30 (${await labels()}); 3 degrees of freedom`);
+
+  await tool("dimension");
+  await clickAt(-4.33, 15); // line1
+  const s = await screen(-4.33, 8);
+  await page.mouse.move(s.x, s.y);
+  check(await page.$$eval(".sketch-labels .dim.preview", (d) => d.map((x) => x.textContent).join()) === "8.66", "a line picked: its length previewed");
+  await clickAt(-4.33, 8); // beside it: the length
+  await page.waitForSelector(".sketch-labels .dim-input", { timeout: 10_000 });
+  for (const [x, y] of [[20, 10], [-15, 0], [10, 25]]) { const m = await screen(x, y); await page.mouse.move(m.x, m.y); }
+  check(await page.evaluate(() => document.activeElement?.classList.contains("dim-input")), "the value being typed keeps its focus while the mouse moves");
+  await page.keyboard.type("12");
+  await page.keyboard.press("Enter");
+  await idle();
+  check((await sketchSrc()).includes("c.length(line1, 12)"), "the length typed: c.length(line1, 12)");
+  await clickAt(30, 0); // the bottom corners, right then left
+  await clickAt(0, 0);
+  const below = await screen(15, -5);
+  await page.mouse.move(below.x, below.y);
+  const preview = await page.$$eval(".sketch-labels .dim.preview", (d) => d.map((x) => x.textContent));
+  check(preview.length === 1 && Math.abs(preview[0] - 30) < 0.05, `two points, the cursor below them: their horizontal distance previewed (${preview})`);
+  await clickAt(15, -5);
+  await page.waitForSelector(".sketch-labels .dim-input", { timeout: 10_000 });
+  await page.keyboard.press("Enter");
+  await idle();
+  check(/c\.hdistance\(rect1\.corners\[0\], rect1\.corners\[1\], (29\.9\d*|30)\)/.test(await sketchSrc()) && (await model()).dof === 1,
+    "placed, left to right: c.hdistance(rect1.corners[0], rect1.corners[1], ≈30); 1 degree of freedom left", (await sketchSrc()).match(/c\.hdistance.*/)?.[0]);
+  await app.shot("sketch-8-dimension-tool.png");
+
+  await tool("select");
+  const x0 = (await model()).entities.find((e) => e.ref === "rect1.corners[2]").x;
+  const y1 = (await model()).entities.find((e) => e.ref === "line1.end").y;
+  await dragFrom([-9, y1], [-9, 12]); // (its length label is in the middle) // line1 down: its 30° wedge takes the rectangle's top with it
+  const corner = (await model()).entities.find((e) => e.ref === "rect1.corners[2]");
+  check(Math.abs(corner.x - x0) < 1e-3 && Math.abs(corner.y - (12 + 12 * Math.tan(Math.PI / 6))) < 0.2,
+    "line1 drags (the implied perpendicular is left out while dragging); the rectangle's height follows", corner);
+  await leave();
 });

@@ -8,11 +8,12 @@ import ast
 import enum
 import inspect
 import math
+import re
 import sys
 import time
 import traceback
 
-from build123d import Axis, BuildPart, BuildSketch, CenterOf, GeomType, Part
+from build123d import Axis, BuildPart, BuildSketch, CenterOf, GeomType, Part, Plane
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRep import BRep_Tool
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -135,9 +136,32 @@ def _num(expr):
         return expr
 
 
+def _sketch_name(expr):
+    """The sketch a sketch field's expression uses: sk1 for sk1.sketch or regions(sk1, ...), else None."""
+    try:
+        node = ast.parse(expr or "", mode="eval").body
+    except SyntaxError:
+        return None
+    if isinstance(node, ast.Attribute) and node.attr == "sketch" and isinstance(node.value, ast.Name):
+        return node.value.id
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "regions" and node.args \
+            and isinstance(node.args[0], ast.Name) and not node.keywords:
+        return node.args[0].id
+    return None
+
+
+def _sketch_label(expr):
+    """sk1 for sk1.sketch, "sk1 (2 regions)" for regions(sk1, a, b), else the expression."""
+    name = _sketch_name(expr)
+    if name and not expr.strip().endswith(".sketch"):
+        n = len(ast.parse(expr, mode="eval").body.args) - 1
+        return f"{name} ({n} region{'' if n == 1 else 's'})"
+    return name or (expr or "")
+
+
 def _extrude_label(a, pending):
     verb = {"Mode.SUBTRACT": "Cut", "Mode.INTERSECT": "Intersect"}.get(a.get("mode"), "Extrude")
-    sketch = (a.get("to_extrude") or "").removesuffix(".sketch") or ", ".join(pending)
+    sketch = _sketch_label(a.get("to_extrude")) or ", ".join(pending)
     depth = {"Until.LAST": "through all", "Until.NEXT": "up to next"}.get(a.get("until")) or _num(a.get("amount"))
     return ", ".join(x for x in [f"{verb} {sketch}".strip(), depth, "symmetric" if a.get("both") == "True" else None] if x)
 
@@ -170,7 +194,7 @@ FEATURE_TYPES = {
             {"name": "mode", "label": "Result", "type": "choice", "options": _MODES},
         ],
         "sketch_arg": "profiles",
-        "label": lambda a, p: ", ".join(x for x in [f"Revolve {(a.get('profiles') or '').removesuffix('.sketch') or ', '.join(p)}".strip(),
+        "label": lambda a, p: ", ".join(x for x in [f"Revolve {_sketch_label(a.get('profiles')) or ', '.join(p)}".strip(),
                                                     f"{a.get('revolution_arc') or 360}°", _axis_label(a.get("axis"))] if x),
     },
     "mirror": {
@@ -481,7 +505,7 @@ def _axis_options(src, feats, env, first=None):
 
 
 def _ensure_caad_imports(src):
-    """Source importing caad's axis() and points() if calls use them and the file doesn't define them otherwise."""
+    """Source importing caad's axis(), points() and regions() if calls use them and the file doesn't define them otherwise."""
     tree = ast.parse(src)
     bound = set()
     for n in ast.walk(tree):
@@ -492,7 +516,7 @@ def _ensure_caad_imports(src):
         elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
             bound.add(n.id)
     called = {n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    for name in ("axis", "points"):
+    for name in ("axis", "points", "regions"):
         if name in called and name not in bound:
             src = _ensure_import(src, "caad", name)
     return src
@@ -617,7 +641,7 @@ def read_feature(src, index):
         if f["name"] == "about" and call.func.id == "mirror":  # the plane features before it
             f["options"] = f["options"] + [{"expr": n, "label": n} for n in _plane_names(feats[:index])]
         if f["name"] == "axis" and call.func.id == "revolve":  # lines of the sketches before it
-            profile = ast.get_source_segment(src, args["profiles"][0]).removesuffix(".sketch") if "profiles" in args else None
+            profile = _sketch_name(ast.get_source_segment(src, args["profiles"][0])) if "profiles" in args else None
             f["options"] = f["options"] + _axis_options(src, feats[:index], env, profile)
     return out
 
@@ -987,7 +1011,9 @@ def delete_feature(src, index):
 
 _DIMENSIONS = ("distance", "hdistance", "vdistance", "length", "radius", "diameter", "angle")
 _NAME_PREFIX = {"point": "p", "line": "line", "polyline": "line", "circle": "circle", "arc": "arc",
-                "rectangle": "rect", "polygon": "poly"}
+                "rectangle": "rect", "polygon": "poly", "project": "ref", "fillet": "fillet", "mirror": "mirror",
+                "linear_pattern": "pattern", "circular_pattern": "pattern"}
+_OPERATIONS = ("fillet", "mirror", "linear_pattern", "circular_pattern")
 
 
 def _constrained_block(src, index):
@@ -1027,13 +1053,18 @@ def _sketch_run(src, index):
     session = globals()["_sketch_session"]
     filename = session["filename"]
     linecache.cache[filename] = (len(src), None, src.splitlines(True), filename)
-    _, block, cname = _constrained_block(src, index)
+    stmt, block, cname = _constrained_block(src, index)
     env = dict(session["env"])
     sk = caad.Constrained()
     sk._line = block.lineno
     env[cname] = sk
     error = None
     try:
+        args = stmt.items[0].context_expr.args
+        if args:  # the plane BuildSketch would use, for c.project
+            where = eval(compile(ast.Expression(args[0]), filename, "eval"), env)
+            where = where[0] if isinstance(where, list) and len(where) == 1 else where
+            sk._plane = where if isinstance(where, Plane) else Plane(where)
         exec(compile(ast.Module(body=block.body, type_ignores=[]), filename, "exec"), env)
         sk._build(strict=False)
     except Exception as e:  # noqa: BLE001 - shown in the editor
@@ -1051,16 +1082,20 @@ def _sketch_refs(block, cname, env, sk):
             names += [t.id] if isinstance(t, ast.Name) else [e.id for e in getattr(t, "elts", []) if isinstance(e, ast.Name)]
     # c.origin and the axes are made when first used: only refer to them if the sketch did
     exprs = ([f"{cname}.origin"] if sk._origin is not None else []) + ([f"{cname}.x_axis", f"{cname}.y_axis"] if sk._axes else [])
+    def items(expr, obj, depth=0):  # lists: polylines, mirrored copies, patterns ([copy][item])
+        if isinstance(obj, (list, tuple)) and depth < 2:
+            for i, x in enumerate(obj):
+                exprs.extend([f"{expr}[{i}]", f"{expr}[{i}].start", f"{expr}[{i}].end", f"{expr}[{i}].center"])
+                items(f"{expr}[{i}]", x, depth + 1)
+
     for n in names:
-        exprs += [n, f"{n}.start", f"{n}.end", f"{n}.center", *[f"{n}.corners[{i}]" for i in range(4)],
+        exprs += [n, f"{n}.start", f"{n}.end", f"{n}.center", f"{n}.corner", *[f"{n}.corners[{i}]" for i in range(4)],
                   f"{n}.bottom", f"{n}.right", f"{n}.top", f"{n}.left"]
         obj = env.get(n)
         for attr in ("lines", "points"):
             for i in range(len(getattr(obj, attr, []) or [])):
                 exprs += [f"{n}.{attr}[{i}]", f"{n}.{attr}[{i}].start", f"{n}.{attr}[{i}].end"]
-        if isinstance(obj, (list, tuple)):
-            for i in range(len(obj)):
-                exprs += [f"{n}[{i}]", f"{n}[{i}].start", f"{n}[{i}].end"]
+        items(n, obj)
     refs = {}
     for e in exprs:
         if f"{cname}." in e and not e.startswith(cname):
@@ -1091,7 +1126,7 @@ def _sketch_model(src, index):
     entities = []
     for e in sk._entities:
         item = {"id": e.id, "kind": type(e).__name__.lower(), "ref": refs.get(id(e)), "stmt": stmt_of(e.line),
-                "construction": e.construction}
+                "construction": e.construction, "reference": e.reference, "hidden": e.hidden}
         if isinstance(e, caad.Point):
             item.update(x=e.x, y=e.y, fixed=e.fixed)
         elif isinstance(e, caad.Line):
@@ -1107,16 +1142,44 @@ def _sketch_model(src, index):
         st = block.body[i] if i is not None else None
         call = st.value if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call) else None
         method = call.func.attr if call is not None and isinstance(call.func, ast.Attribute) else None
+        op = _stmt_call(st, cname) if st is not None else None
+        if op and op[1] == "fillet" and prim["type"] == "arc_radius":  # a fillet's radius is its dimension
+            call, method = op[2], "fillet"
         item = {"id": prim["id"], "type": prim["type"], "method": method, "stmt": i, "text": text,
                 "builtin": method is None, "involves": _involves(prim)}
-        if method in _DIMENSIONS and call.args:
+        if method in (*_DIMENSIONS, "fillet") and call.args:
             value = next(prim[k] for k in ("distance", "difference", "radius", "diameter", "angle") if k in prim)
             item["dim"] = {"expr": ast.get_source_segment(src, call.args[-1]),
-                           "value": math.degrees(value) if method == "angle" else value}
+                           "value": prim["degrees"] if method == "angle" else value}
         constraints.append(item)
     return {"entities": entities, "constraints": constraints, "primitives": sk._primitives(),
             "dof": sk.dof, "conflicting": sk.conflicting, "problem": sk.problem, "error": error, "c": cname,
-            "statements": [{"line": st.lineno, "end": st.end_lineno, "text": ast.get_source_segment(src, st)} for st in block.body]}
+            "statements": [_statement(src, st, cname) for st in block.body]}
+
+
+def _statement(src, st, cname):
+    out = {"line": st.lineno, "end": st.end_lineno, "text": ast.get_source_segment(src, st)}
+    op = _stmt_call(st, cname)
+    if op:  # c.<method>(...): its arguments as code, for the editor's fields (a pattern's count and spacing)
+        out["call"] = {"method": op[1], "args": [ast.get_source_segment(src, a) for a in op[2].args],
+                       "kwargs": {k.arg: ast.get_source_segment(src, k.value) for k in op[2].keywords if k.arg}}
+    return out
+
+
+def _stmt_call(st, cname):
+    """(target names or None, method, call) of a statement `x = c.method(...)` or `c.method(...)`, else None."""
+    value = st.value if isinstance(st, (ast.Assign, ast.Expr)) else None
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) and isinstance(value.func.value, ast.Name)
+            and value.func.value.id == cname):
+        return None
+    targets = None
+    if isinstance(st, ast.Assign) and len(st.targets) == 1:
+        t = st.targets[0]
+        if isinstance(t, ast.Name):
+            targets = [t.id]
+        elif isinstance(t, (ast.Tuple, ast.List)) and all(isinstance(x, ast.Name) for x in t.elts):
+            targets = [x.id for x in t.elts]
+    return targets, value.func.attr, value
 
 
 def _free_name(src, prefix, taken=()):
@@ -1241,6 +1304,312 @@ def _sketch_delete(src, index, entity_ids, constraint_ids):
     return src
 
 
+# --- Trim: cutting a line, circle or arc away at its crossings, as code edits ---
+
+def _ref_re(expr):
+    """`expr` as a whole reference in code (`line1.end`, not `line1.end_x` or `xline1.end`; `rect1.corners`, not
+    `rect1.corners[0]`)."""
+    return re.compile(r"(?<![\w.])" + re.escape(expr) + r"(?![\w\[])")
+
+
+def _rewrite_block(src, block, edits=None, after=None, drop=(), move=(), renames=(), append=()):
+    """The block's statements rewritten: `edits` {statement index: [(node, text)]} replace argument nodes, `after`
+    {index: [lines]} adds statements after one, `drop` removes statements, `move` puts statements at the end,
+    `renames` [(expression, new expression, from index)] change references in the statements after `from`, and
+    `append` adds lines at the end. Comments between statements stay."""
+    t = _Text(src)
+    body = block.body
+    indent = t.lines[body[0].lineno - 1][: body[0].col_offset]
+    pieces, moved = [], []
+    for k, st in enumerate(body):
+        a = t.starts[st.lineno - 1]
+        b = t.starts[body[k + 1].lineno - 1] if k + 1 < len(body) else t.starts[st.end_lineno]
+        text = src[a:b]
+        for node, new in sorted((edits or {}).get(k, []), key=lambda e: -t.start(e[0])):
+            text = text[: t.start(node) - a] + new + text[t.end(node) - a:]
+        for old, new, frm in sorted(renames, key=lambda r: -len(r[0])):
+            if k > frm:
+                text = _ref_re(old).sub(new, text)
+        if k in drop:
+            text = ""
+        elif k in move:
+            moved.append(text.strip("\n") + "\n")
+            text = ""
+        pieces.append(text + "".join(indent + line + "\n" for line in (after or {}).get(k, [])))
+    out = "".join(pieces) + "".join(moved) + "".join(indent + line + "\n" for line in append)
+    if not out.strip():
+        out = indent + "pass\n"
+    start, end = t.starts[body[0].lineno - 1], t.starts[body[-1].end_lineno]
+    return src[:start] + out + src[end:]
+
+
+def _sketch_explode(src, index, i):
+    """Source with statement `i` (a rectangle, polygon or polyline) written as single lines with the constraints it
+    had built in, so its sides can be trimmed; and the references it renamed ({old: new}, also in later statements)."""
+    block, cname, sk, env, _ = _sketch_run(src, index)
+    targets, method, call = _stmt_call(block.body[i], cname)
+    seg = lambda n: ast.get_source_segment(src, n)  # noqa: E731
+    kw = "".join(f", construction={seg(k.value)}" for k in call.keywords if k.arg == "construction")
+    taken = []
+
+    def name():
+        taken.append(_free_name(src, "line", taken))
+        return taken[-1]
+
+    def lit(p):
+        return f"({_fmt(p.x)}, {_fmt(p.y)})"
+
+    def chain(names, firsts, close):  # lines through the points, each starting where the last ended
+        out = [f"{names[0]} = {cname}.line({firsts[0]}, {firsts[1]}{kw})"]
+        for j in range(1, len(names)):
+            end = f"{names[0]}.start" if close and j == len(names) - 1 else firsts[j + 1]
+            out.append(f"{names[j]} = {cname}.line({names[j - 1]}.end, {end}{kw})")
+        return out
+
+    renames = {}
+    obj = env.get(targets[0]) if targets else None
+    if method == "rectangle":
+        r, L = targets[0], [name() for _ in range(4)]
+        k, given = obj.corners, [None if isinstance(x, ast.Tuple) else seg(x) for x in call.args[:2]]
+        lines = chain(L, [given[0] or lit(k[0]), lit(k[1]), given[1] or lit(k[2]), lit(k[3])], True)
+        lines += [f"{cname}.horizontal({L[0]}, {L[2]})", f"{cname}.vertical({L[3]}, {L[1]})"]
+        for j, side in enumerate(("bottom", "right", "top", "left")):
+            renames.update({f"{r}.{side}": L[j], f"{r}.lines[{j}]": L[j], f"{r}.corners[{j}]": f"{L[j]}.start"})
+        renames[f"{r}.lines"] = f"[{', '.join(L)}]"
+        renames[f"{r}.corners"] = "[" + ", ".join(f"{x}.start" for x in L) + "]"
+        later = "".join(ast.get_source_segment(src, st) for st in block.body[i + 1:])
+        if _ref_re(f"{r}.center").search(later):
+            pc = _free_name(src, "p", taken)
+            lines += [f"{pc} = {cname}.point({_fmt(obj.center.x)}, {_fmt(obj.center.y)}, construction=True)",
+                      f"{cname}.symmetric({L[0]}.start, {L[2]}.start, {pc})"]
+            renames[f"{r}.center"] = pc
+    else:  # polygon, polyline: the points as written (expressions stay), new points at their solved positions
+        kept = method == "polyline" and isinstance(block.body[i].targets[0], (ast.Tuple, ast.List))
+        if method == "polygon":
+            pts = obj.points
+        else:
+            segs = [env[t] for t in targets] if kept else obj
+            pts = [x.start for x in segs] + [segs[-1].end]
+        close = method == "polygon" or any(k.arg == "close" and getattr(k.value, "value", False) for k in call.keywords)
+        firsts = [lit(pts[j]) if isinstance(a, ast.Tuple) else seg(a) for j, a in enumerate(call.args)]
+        n = len(firsts) - (0 if close else 1)
+        L = list(targets) if kept else [name() for _ in range(n)]
+        lines = chain(L, firsts, close)
+        r = targets[0]
+        if method == "polygon":
+            for j in range(n):
+                renames.update({f"{r}.lines[{j}]": L[j], f"{r}.points[{j}]": f"{L[j]}.start"})
+            renames[f"{r}.lines"] = f"[{', '.join(L)}]"
+            renames[f"{r}.points"] = "[" + ", ".join(f"{x}.start" for x in L) + "]"
+        elif not kept:
+            renames.update({f"{r}[{j}]": L[j] for j in range(n)})
+            renames[r] = f"[{', '.join(L)}]"
+    src = _rewrite_block(src, block, after={i: lines}, drop={i}, renames=[(o, n_, i) for o, n_ in renames.items()])
+    return src, renames
+
+
+def _curve_geo(e):
+    import caad
+    if isinstance(e, caad.Line):
+        return "line", (e.start.x, e.start.y), (e.end.x, e.end.y)
+    return "circle", (e.center.x, e.center.y), e.r
+
+
+def _crossings(a, b):
+    """Where two curves (lines, circles, arcs) cross, within both."""
+    ga, gb = _curve_geo(a), _curve_geo(b)
+    if ga[0] == "circle" and gb[0] == "line":
+        ga, gb = gb, ga
+    pts = []
+    if ga[0] == "line" and gb[0] == "line":
+        (p, q), (r_, s_) = ga[1:], gb[1:]
+        d1, d2 = (q[0] - p[0], q[1] - p[1]), (s_[0] - r_[0], s_[1] - r_[1])
+        den = d1[0] * d2[1] - d1[1] * d2[0]
+        if abs(den) > 1e-12:
+            t = ((r_[0] - p[0]) * d2[1] - (r_[1] - p[1]) * d2[0]) / den
+            pts.append((p[0] + t * d1[0], p[1] + t * d1[1]))
+    elif ga[0] == "line":
+        (p, q), (c, r) = ga[1:], gb[1:]
+        d = (q[0] - p[0], q[1] - p[1])
+        n = math.hypot(*d) or 1.0
+        d = (d[0] / n, d[1] / n)
+        t0 = (c[0] - p[0]) * d[0] + (c[1] - p[1]) * d[1]
+        foot = (p[0] + t0 * d[0], p[1] + t0 * d[1])
+        h = math.dist(foot, c)
+        if h <= r + 1e-9:
+            half = math.sqrt(max(0.0, r * r - h * h))
+            pts += [(foot[0] - half * d[0], foot[1] - half * d[1])] + ([(foot[0] + half * d[0], foot[1] + half * d[1])] if half > 1e-9 else [])
+    else:
+        (c1, r1), (c2, r2) = ga[1:], gb[1:]
+        d = math.dist(c1, c2)
+        if 1e-12 < d <= r1 + r2 + 1e-9 and d >= abs(r1 - r2) - 1e-9:
+            x = (d * d + r1 * r1 - r2 * r2) / (2 * d)
+            h = math.sqrt(max(0.0, r1 * r1 - x * x))
+            u = ((c2[0] - c1[0]) / d, (c2[1] - c1[1]) / d)
+            m = (c1[0] + x * u[0], c1[1] + x * u[1])
+            pts += [(m[0] - h * u[1], m[1] + h * u[0])] + ([(m[0] + h * u[1], m[1] - h * u[0])] if h > 1e-9 else [])
+    return [pt for pt in pts if _within(a, pt) and _within(b, pt)]
+
+
+def _param(e, pt):
+    """Where `pt` is along a curve: 0..1 along a line, the angle from its start (radians) on an arc, the angle on a circle."""
+    import caad
+    if isinstance(e, caad.Line):
+        d = (e.end.x - e.start.x, e.end.y - e.start.y)
+        return ((pt[0] - e.start.x) * d[0] + (pt[1] - e.start.y) * d[1]) / ((d[0] ** 2 + d[1] ** 2) or 1e-12)
+    a = math.atan2(pt[1] - e.center.y, pt[0] - e.center.x)
+    if isinstance(e, caad.Arc):
+        return (a - e._angles()[0]) % (2 * math.pi)
+    return a % (2 * math.pi)
+
+
+def _span(e):
+    import caad
+    if isinstance(e, caad.Line):
+        return 1.0
+    if isinstance(e, caad.Arc):
+        a0, a1 = e._angles()
+        return a1 - a0
+    return 2 * math.pi
+
+
+def _within(e, pt, eps=1e-6):
+    import caad
+    if isinstance(e, caad.Circle):
+        return True
+    t, size = _param(e, pt), (e.length if isinstance(e, caad.Line) else e.r) or 1.0
+    if isinstance(e, caad.Arc) and t > _span(e) + eps / size:  # just before the start: negative
+        t -= 2 * math.pi
+    return -eps / size <= t <= _span(e) + eps / size
+
+
+def _sketch_trim(src, index, entity_id, at):
+    """Source with the piece of a line, circle or arc around `at` cut away, between the crossings nearest to it (or
+    its ends): a line or arc gets shorter or is split in two, a circle becomes an arc, a piece with no crossings
+    goes. The new ends stay on what crossed there (c.on). Rectangles, polygons and polylines become single lines first."""
+    import caad
+    block, cname, sk, env, error = _sketch_run(src, index)
+    if error:
+        raise ValueError(f"Fix the sketch first: {error['message']}")
+    refs = _sketch_refs(block, cname, env, sk)
+    e = next((x for x in sk._entities if x.id == entity_id), None)
+    if not isinstance(e, (caad.Line, caad.Circle, caad.Arc)) or e.hidden:
+        raise ValueError("Trim cuts lines, circles and arcs: click one.")
+    if e.reference:
+        raise ValueError("Part edges used in the sketch can't be trimmed.")
+    i = next((k for k, st in enumerate(block.body) if e.line and st.lineno <= e.line <= st.end_lineno), None)
+    op = _stmt_call(block.body[i], cname) if i is not None else None
+    if op and op[1] in ("rectangle", "polygon", "polyline") and op[0]:
+        ref = refs.get(id(e))
+        src, renames = _sketch_explode(src, index, i)
+        new = renames.get(ref, ref)
+        block, cname, sk, env, _ = _sketch_run(src, index)
+        refs = _sketch_refs(block, cname, env, sk)
+        e2 = next((x for x in sk._entities if refs.get(id(x)) == new), None)
+        if e2 is None:
+            raise ValueError("Couldn't find the side to trim after writing the shape as lines.")
+        return _sketch_trim(src, index, e2.id, at)
+    if op and op[1] in _OPERATIONS:
+        raise ValueError(f"What {op[1].replace('_', ' ')} makes can't be trimmed: change what it copies or rounds, or delete it.")
+    if not op or op[1] not in ("line", "circle", "arc") or not op[0] or len(op[0]) != 1:
+        text = ast.get_source_segment(src, block.body[i]) if i is not None else "?"
+        raise ValueError(f"Only lines, circles and arcs drawn on their own, or the sides of a rectangle, polygon or polyline, "
+                         f"can be trimmed; this one comes from `{text}`.")
+    name, method, call = op[0][0], op[1], op[2]
+    axes = sk._axes or ()
+    cuts = []  # (parameter, point, the curve crossing there)
+    size = (e.length if isinstance(e, caad.Line) else e.r) or 1.0
+    for o in sk._entities:
+        if o is e or o.hidden or any(o is x for x in axes) or not isinstance(o, (caad.Line, caad.Circle, caad.Arc)):
+            continue
+        for pt in _crossings(e, o):
+            t = _param(e, pt)
+            inside = 1e-6 / size < t < _span(e) - 1e-6 / size if not isinstance(e, caad.Circle) else True
+            if inside and not any(abs(t - c[0]) < 1e-9 for c in cuts):
+                cuts.append((t, pt, o))
+    cuts.sort(key=lambda c: c[0])
+    tc = min(max(_param(e, at), 0.0), _span(e)) if isinstance(e, caad.Line) else _param(e, at)
+    if isinstance(e, caad.Arc) and tc > _span(e):  # outside the arc: the nearer end
+        tc = _span(e) if tc - _span(e) < 2 * math.pi - tc else 0.0
+    closed = isinstance(e, caad.Circle)
+    if not cuts or (closed and len(cuts) < 2):
+        return _sketch_delete(src, index, {e.id}, set())
+    lo = max((c for c in cuts if c[0] < tc), key=lambda c: c[0], default=cuts[-1] if closed else None)
+    hi = min((c for c in cuts if c[0] > tc), key=lambda c: c[0], default=cuts[0] if closed else None)
+    if lo is None and hi is None:
+        return _sketch_delete(src, index, {e.id}, set())
+
+    seg = lambda n: ast.get_source_segment(src, n)  # noqa: E731
+    lit = lambda xy: f"({_fmt(xy[0])}, {_fmt(xy[1])})"  # noqa: E731
+    kw = "".join(f", {k.arg}={seg(k.value)}" for k in call.keywords if k.arg)
+    edits, after, drop, move, renames, append = {}, {}, set(), set(), [], []
+
+    def on(point, o):
+        if refs.get(id(o)):
+            append.append(f"{cname}.on({point}, {refs[id(o)]})")
+
+    def redirect(old, arg, pt):
+        """Later uses of the end `old` (moving away) meant the point `arg` made or named: keep them on that point."""
+        if not isinstance(arg, ast.Tuple):  # an existing point's expression
+            renames.append((old, seg(arg), i))
+            return
+        uses = [k for k in range(i + 1, len(block.body)) if _ref_re(old).search(seg(block.body[k]))]
+        for k in uses:  # the first line, circle or arc that starts or ends there takes the point over
+            o2 = _stmt_call(block.body[k], cname)
+            if not (o2 and o2[0] and len(o2[0]) == 1 and o2[1] in ("line", "arc", "circle")):
+                continue
+            j = next((j for j, a in enumerate(o2[2].args) if seg(a) == old), None)
+            if j is None:
+                continue
+            attr = {"line": ("start", "end"), "arc": ("center", "start", "end"), "circle": ("center",)}[o2[1]][j]
+            edits.setdefault(k, []).append((o2[2].args[j], lit((pt.x, pt.y))))
+            renames.append((old, f"{o2[0][0]}.{attr}", k))
+            move.update(u for u in uses if u < k)  # constraints on it before that: after it now
+            return
+        drop.update(uses)  # only constraints used it: they go with it
+
+    if isinstance(e, caad.Line):  # its length (and what depends on it) changes: those dimensions go
+        for k in range(i + 1, len(block.body)):
+            o2 = _stmt_call(block.body[k], cname)
+            if o2 and o2[1] in ("length", "equal", "midpoint") and any(seg(a) == name for a in o2[2].args):
+                drop.add(k)
+    if closed:
+        new = _free_name(src, "arc")
+        drop.add(i)
+        after[i] = [f"{new} = {cname}.arc({seg(call.args[0])}, {lit(hi[1])}, {lit(lo[1])}{kw})"]
+        renames.append((name, new, i))
+        on(f"{new}.start", hi[2])
+        on(f"{new}.end", lo[2])
+    else:
+        first, last = (0, 1) if isinstance(e, caad.Line) else (1, 2)  # the argument of the start and of the end
+        if lo is None:  # the start's piece: the line starts at the crossing now
+            edits.setdefault(i, []).append((call.args[first], lit(hi[1])))
+            redirect(f"{name}.start", call.args[first], e.start)
+            on(f"{name}.start", hi[2])
+        elif hi is None:
+            edits.setdefault(i, []).append((call.args[last], lit(lo[1])))
+            redirect(f"{name}.end", call.args[last], e.end)
+            on(f"{name}.end", lo[2])
+        else:  # a piece in the middle: split in two, the second from the far crossing to the old end
+            rest = _free_name(src, "line" if isinstance(e, caad.Line) else "arc")
+            end = seg(call.args[last]) if not isinstance(call.args[last], ast.Tuple) else lit((e.end.x, e.end.y))
+            edits.setdefault(i, []).append((call.args[last], lit(lo[1])))
+            if isinstance(e, caad.Line):
+                after[i] = [f"{rest} = {cname}.line({lit(hi[1])}, {end}{kw})"]
+                append += [f"{cname}.parallel({name}, {rest})", f"{cname}.on({rest}.start, {name})"]
+            else:
+                after[i] = [f"{rest} = {cname}.arc({name}.center, {lit(hi[1])}, {end}{kw})"]
+                append.append(f"{cname}.equal({name}, {rest})")
+            renames.append((f"{name}.end", f"{rest}.end", i))
+            on(f"{name}.end", lo[2])
+            on(f"{rest}.start", hi[2])
+    out = _rewrite_block(src, block, edits, after, drop, move, renames, append)
+    error = _sketch_run(out, index)[4]
+    if error:
+        raise ValueError(f"Trimming there would break the sketch: {error['message']}")
+    return out
+
+
 _PLAIN_SHAPES = ("Rectangle", "Circle", "Polygon")
 
 
@@ -1356,7 +1725,15 @@ def sketch_action(src, index, actions):
     """Apply editor actions to sketch `index` and return {src, model, made}. Actions, in order:
       {"op": "add", "kind": point|line|polyline|circle|arc|rectangle|polygon, "args": [...], "construction": bool}
          points are [x, y] (new) or expressions of existing ones ("p1", "rect1.corners[0]", "$0.end": made by
-         action 0); a circle's radius is a number
+         add k, counting adds only); a circle's radius is a number
+      {"op": "add", "kind": "project", "args": [selector expression], "construction": false (optional)}
+         part geometry as a reference (c.project)
+      {"op": "add", "kind": "fillet", "args": [corner point, radius expression or number]}
+      {"op": "add", "kind": "mirror", "args": [line, *entities]}                       (expressions)
+      {"op": "add", "kind": "linear_pattern", "args": [[entities], count, dx, dy]}
+      {"op": "add", "kind": "circular_pattern", "args": [[entities], count, center point], "angle": degrees (optional)}
+      {"op": "arg", "stmt": statement index, "arg": position or keyword, "expr": expression}  - change an argument
+      {"op": "trim", "entity": id, "at": [x, y]}  - cut away the piece of a line, circle or arc around a point
       {"op": "constrain", "kind": method name, "refs": [expressions], "value": expression or None}
       {"op": "dimension", "constraint": id, "expr": expression}   - a dimension's new value
       {"op": "move", "points": {id: [x, y]}, "circles": {id: r}}  - geometry after dragging
@@ -1370,7 +1747,24 @@ def sketch_action(src, index, actions):
         if op == "add":
             kind = a["kind"]
             args = list(a.get("args") or [])
-            if kind == "circle":
+            if kind == "project":
+                if len(args) != 1 or not isinstance(args[0], str):
+                    raise ValueError("A project action takes one selector expression.")
+                ast.parse(args[0], mode="eval")
+                parts = [args[0].strip()] + (["construction=False"] if a.get("construction") is False else [])
+            elif kind in _OPERATIONS:
+                def expr(v):
+                    if isinstance(v, list):
+                        return "[" + ", ".join(expr(x) for x in v) + "]"
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        return _fmt(v)
+                    v = _point_arg(str(v), made).strip()
+                    ast.parse(v, mode="eval")
+                    return v
+                parts = [expr(x) for x in args]
+                if kind == "circular_pattern" and a.get("angle") is not None:
+                    parts.append(f"angle={expr(a['angle'])}")
+            elif kind == "circle":
                 parts = [_point_arg(args[0], made), _fmt(args[1])]
             elif kind == "point":
                 parts = [_fmt(args[0]), _fmt(args[1])]
@@ -1378,7 +1772,7 @@ def sketch_action(src, index, actions):
                 parts = [_point_arg(p, made) for p in args]
             if kind == "polyline" and a.get("close"):
                 parts.append("close=True")
-            if a.get("construction"):
+            if a.get("construction") and kind not in ("project", *_OPERATIONS):
                 parts.append("construction=True")
             if kind == "polyline":
                 n = len(args) - (0 if a.get("close") else 1)
@@ -1418,6 +1812,25 @@ def sketch_action(src, index, actions):
                                 {k: v for k, v in dict(a.get("circles") or {}).items()})
         elif op == "delete":
             src = _sketch_delete(src, index, set(a.get("entities") or []), set(a.get("constraints") or []))
+        elif op == "arg":
+            expr = str(a["expr"]).strip()
+            try:
+                ast.parse(expr, mode="eval")
+            except SyntaxError as e:
+                raise ValueError(f"{e.msg} in {expr!r}") from None
+            call = _stmt_call(block.body[a["stmt"]], cname)[2]
+            key = a["arg"]
+            node = call.args[key] if isinstance(key, int) else next((k.value for k in call.keywords if k.arg == key), None)
+            t = _Text(src)
+            if node is not None:
+                src = src[: t.start(node)] + expr + src[t.end(node):]
+            elif isinstance(key, str) and key.isidentifier():  # a keyword left at its default: add it
+                at = t.end(call) - 1
+                src = src[:at] + f", {key}={expr}" + src[at:]
+            else:
+                raise ValueError(f"No argument {key!r} to change.")
+        elif op == "trim":
+            src = _sketch_trim(src, index, a["entity"], a["at"])
         else:
             raise ValueError(f"Unknown sketch action '{op}'.")
     ast.parse(src)
@@ -1632,6 +2045,60 @@ def _sketch_outlines(ns, feats, last, tol=0.05, angular=0.2):
             out.append({"name": name, "index": f["index"], "points": placed,
                         "edges": [{"points": _edge_points(e, tol, angular)} for e in sketch.edges()] if sketch is not None else []})
     return out
+
+
+def sketch_regions(expr):
+    """The regions of the sketch a sketch field uses (sk1.sketch or regions(sk1, ...)) in the latest run, to pick them
+    in the view: {"name", "regions": [{"at": [x, y], "selected", "triangles": [x y z…], "lines": [x y z…] (segments)}]}.
+    Selected: the regions the expression uses (for sk1.sketch, those that are material)."""
+    import caad
+    from build123d import Vector
+    name = _sketch_name(expr)
+    ns = (globals().get("_current") or {}).get("ns") or {}
+    sk = ns.get(name) if name else None
+    if not isinstance(sk, BuildSketch):
+        return {"name": None, "regions": []}
+    areas = caad._sketch_areas(sk)
+    node = ast.parse(expr, mode="eval").body
+    if isinstance(node, ast.Call):
+        picked = set()
+        for arg in node.args[1:]:
+            try:
+                x, y = eval(compile(ast.Expression(arg), "<regions>", "eval"), dict(ns))  # noqa: S307 - the user's own code
+                picked.add(caad._area_at(areas, float(x), float(y)))
+            except Exception:  # noqa: BLE001 - a point that isn't one: picks nothing
+                pass
+        selected = [i in picked for i in range(len(areas))]
+    else:
+        try:
+            material = sk.sketch_local.faces()
+        except Exception:  # noqa: BLE001 - no regions
+            material = []
+        selected = []
+        for a in areas:
+            x, y = caad._region_point(a)
+            selected.append(any(f.is_inside(Vector(x, y, 0)) for f in material))
+    out = []
+    for a, sel in zip(areas, selected):
+        tris, lines = [], []
+        for pl in sk.output_placements:
+            face = a.moved(pl)
+            BRepMesh_IncrementalMesh(face.wrapped, 0.05, True, 0.2, True)
+            loc = TopLoc_Location()
+            tri = BRep_Tool.Triangulation_s(face.wrapped, loc)
+            if tri is not None:
+                trsf = loc.Transformation()
+                nodes = [tri.Node(i).Transformed(trsf) for i in range(1, tri.NbNodes() + 1)]
+                for i in range(1, tri.NbTriangles() + 1):
+                    for k in tri.Triangle(i).Get():
+                        p = nodes[k - 1]
+                        tris += [p.X(), p.Y(), p.Z()]
+            for e in face.edges():
+                pts = _edge_points(e, 0.05, 0.2)
+                for k in range(0, len(pts) - 3, 3):
+                    lines += pts[k:k + 6]
+        out.append({"at": list(caad._region_point(a)), "selected": sel, "triangles": tris, "lines": lines})
+    return {"name": name, "regions": out}
 
 
 def tessellate(shape, tol=0.05, angular=0.2):
@@ -1894,7 +2361,7 @@ def api_help(name):
     import inspect
     import build123d
     name = name.strip().removeprefix("build123d.")
-    if name.split(".")[0] in ("Constrained", "caad", "points", "axis"):  # CAAD's own (build123d has Axis, not axis)
+    if name.split(".")[0] in ("Constrained", "caad", "points", "axis", "regions"):  # CAAD's own (build123d has Axis, not axis)
         return _caad_help(name)
     obj = build123d
     try:

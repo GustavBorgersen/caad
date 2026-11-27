@@ -55,6 +55,26 @@ describe("constrained sketches", () => {
     check(!r.ok && /must be a number/.test(r.error.message), "a dimension that isn't a number");
   });
 
+  test("angles: between the lines as drawn, whichever way they were drawn", () => {
+    // A V at the origin: l1 out along x, l2 drawn from its far end into the corner (its direction points away).
+    const vee = (deg) => part(`
+l1 = c.line((0, 0), (10, 0))
+l2 = c.line((8.66, 5), (0, 0))
+c.fix(l1.start, l1.end)
+c.coincident(l2.end, l1.start)
+c.length(l2, 10)
+c.line(l1.end, l2.start)
+c.angle(l1, l2, ${deg})`);
+    const far = () => pyval("(_current['ns']['l2'].start.x, _current['ns']['l2'].start.y)");
+    for (const [deg, x, y] of [[30, 8.660254, 5], [-30, 8.660254, 5], [45, 7.071068, 7.071068], [120, -5, 8.660254]]) {
+      const r = call("run", vee(deg), "part.py");
+      const [px, py_] = far();
+      check(r.ok && near(px, x) && near(py_, y), `c.angle(l1, l2, ${deg}): l2 ${Math.abs(deg)}° up from l1, on its side (${px.toFixed(3)}, ${py_.toFixed(3)})`, r.error?.message);
+    }
+    const m = call("sketch_open", vee(-30), 0);
+    check(m.constraints.find((c) => c.method === "angle")?.dim.value === 30, "the editor's value is the angle as drawn (30, not -30 or 150)");
+  });
+
   test("positions: signed horizontal and vertical distances from the origin", () => {
     const r = call("run", part(`
 r = c.rectangle((0, 0), (10, 10))
@@ -79,6 +99,30 @@ c.vdistance(c.origin, r.center, 20)`), "part.py");
     const xz = call("run", part("c.rectangle((0, 0), (20, 10))", { plane: "Plane.XZ" }), "part.py");
     const plain = call("run", "from build123d import *\nwith BuildPart() as p:\n    with BuildSketch(Plane.XZ, mode=Mode.PRIVATE) as s:\n        with Locations((10, 5)):\n            Rectangle(20, 10)\n    extrude(s.sketch, amount=5)\n", "part.py");
     check(xz.ok && JSON.stringify(xz.summary.bbox.map((v) => +v.toFixed(3))) === JSON.stringify(plain.summary.bbox.map((v) => +v.toFixed(3))), `on Plane.XZ it lands where a plain build123d sketch does (${xz.summary?.bbox})`);
+  });
+
+  test("regions(sketch, *at): single areas, by a point inside each", () => {
+    const at = (body, pts, plane = "Plane.XY") => part(body, { plane }).replace("from caad import Constrained", "from caad import Constrained, regions")
+      .replace("extrude(sk1.sketch, amount=5)", `extrude(regions(sk1, ${pts}), amount=5)`);
+    const vol = (body, pts, plane) => { const x = call("run", at(body, pts, plane), "part.py"); return x.ok ? x.summary.volume : `error: ${x.error?.message}`; };
+    const ring = "c.rectangle((0, 0), (60, 40))\nc.circle((30, 20), 10)";
+    check(near(vol(ring, "(30, 20)"), Math.PI * 100 * 5, 0.01), "the disc inside a rectangle is a region of its own (sk1.sketch makes it a hole)");
+    check(near(vol(ring, "(5, 5)"), (2400 - Math.PI * 100) * 5, 0.01), "the ring around it");
+    check(near(vol(ring, "(5, 5), (30, 20), (50, 30)"), 2400 * 5, 0.01), "both (a point twice picks it once): merged into one plate");
+    const split = "r = c.rectangle((0, 0), (60, 40))\nc.line((20, 0), (20, 40))\nc.line((40, 20), (50, 20))";
+    check(near(vol(split, "(10, 20)"), 800 * 5, 0.01), "a line across a rectangle splits it; a line with a free end doesn't");
+    check(near(vol("c.circle((0, 0), 10)\nc.circle((10, 0), 10)", "(5, 0)"), (2 * 100 * Math.acos(0.5) - 5 * Math.sqrt(300)) * 5, 0.01), "crossing circles: the lens between them");
+    let r = call("run", at(ring, "(30, 20)", "Plane.XZ"), "part.py");
+    check(r.ok && near(r.summary.bbox[0], 20) && near(r.summary.bbox[2], 10) && near(r.summary.bbox[1], -5) && near(r.summary.bbox[4], 0),
+      `on Plane.XZ: located like sk1.sketch, extruded along the plane's normal (bbox ${r.summary?.bbox})`);
+    r = call("run", at(ring, "(80, 0)"), "part.py");
+    check(!r.ok && /No region of the sketch contains \(80, 0\)/.test(r.error.message) && r.error.feature === 1, "a point outside: a clear error at the extrude", r.error?.message);
+    r = call("run", at(ring, "(0, 20)"), "part.py");
+    check(!r.ok && /on a line/.test(r.error.message), "a point on a line picks nothing");
+    check(/Choose at least one region/.test(call("run", at(ring, "").replace("regions(sk1, )", "regions(sk1)"), "part.py").error?.message ?? ""), "no points: an error");
+    const plain = "from build123d import *\nfrom caad import regions\nwith BuildPart() as p:\n    with BuildSketch(mode=Mode.PRIVATE) as s:\n        Rectangle(20, 20)\n        Circle(5, mode=Mode.SUBTRACT)\n    extrude(regions(s, (0, 0)), amount=2)\n";
+    r = call("run", plain, "part.py");
+    check(r.ok && near(r.summary.volume, Math.PI * 25 * 2, 0.01), "a plain build123d sketch: its edges' regions (the hole is one)", r.error?.message);
   });
 
   test("points(sketch): where holes go", () => {

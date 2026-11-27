@@ -4,14 +4,15 @@
 import * as THREE from "three";
 import gcsWasm from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
 import { loadSolver } from "./gcs-solve";
-import type { Kernel, SketchAction, SketchEntity, SketchModel } from "./kernel";
+import type { Kernel, SketchAction, SketchConstraint, SketchEntity, SketchModel, SketchStatement } from "./kernel";
 import { num } from "./sketch-code";
 import type { PointerTool, SketchPlane, Viewer } from "./viewer";
 
-type Tool = "select" | "line" | "rect" | "circle" | "arc" | "point";
+type Tool = "select" | "line" | "rect" | "circle" | "arc" | "point" | "dimension" | "trim" | "use";
 const TOOLS: [Tool, string, string][] = [
   ["select", "↖", "Select and drag"], ["line", "╱", "Line"], ["rect", "▭", "Rectangle"],
-  ["circle", "◯", "Circle"], ["arc", "◠", "Arc"], ["point", "•", "Point"],
+  ["circle", "◯", "Circle"], ["arc", "◠", "Arc"], ["point", "•", "Point"], ["dimension", "⟷", "Dimension"], ["trim", "✂", "Trim"],
+  ["use", "⤓", "Use part edges: bring them into the sketch to constrain to"],
 ];
 const HINTS: Record<Tool, string> = {
   select: "Click to select (Shift: more), drag to move, Delete to remove.",
@@ -19,12 +20,23 @@ const HINTS: Record<Tool, string> = {
   rect: "Click one corner, then the opposite corner.",
   circle: "Click the centre, then a point on the circle.",
   arc: "Click the centre, the start, then the end (counter-clockwise).",
-  point: "Click to place a point.",
+  point: "Click to place a point (construction: a guide point, not a hole position).",
+  dimension: "Click a line, circle or arc, then beside it: its length, diameter or radius. Or click two of points, lines and circles: "
+    + "the distance or angle between them (two points: place it above or below for a horizontal distance, left or right for a vertical one). "
+    + "Then type its value.",
+  trim: "Click the piece of a line, circle or arc to cut away: it goes up to the nearest crossings (with none, the whole curve).",
+  use: "Click an edge of the part: it comes into the sketch as fixed guide geometry to constrain to (construction=False in the code makes it part of the regions).",
 };
 const COLOR = {
   free: 0x1f6feb, constrained: 0x1d2228, construction: 0x8a96a3, selected: 0xe06000, hover: 0xf0a040,
-  conflict: 0xc62828, preview: 0xe67e22, grid: 0xdfe4ea, axis: 0xb0bac5,
+  conflict: 0xc62828, preview: 0xe67e22, grid: 0xdfe4ea, axis: 0xb0bac5, reference: 0x8a63d2,
+  dimension: 0x5b6773, xAxis: 0xd03a3a, yAxis: 0x2f9e44,
 };
+// Points made on their own (the point tool, and their mirrored or patterned copies) are drawn as rings, unlike
+// line ends, centres and reference points (the origin, a rectangle's centre).
+const OWN_POINTS = new Set(["point", "mirror", "linear_pattern", "circular_pattern"]);
+const ARROW_PX = 8; // dimension arrows' length on screen
+const AXIS_PX = 48; // the sketch's X and Y arrows' length on screen
 // Constraints shown as small glyphs in the view (not the ones built into shapes).
 const GLYPHS: Record<string, string> = {
   horizontal: "H", vertical: "V", parallel: "∥", perpendicular: "⊥", tangent: "⌒", equal: "=",
@@ -39,8 +51,10 @@ type XY = [number, number];
 /** A cursor position, snapped to an existing point when close: `ref` is how code refers to that point. */
 type Snap = { at: XY; ref?: string; id?: string };
 export type SketchSession = { src: string; index: number; model: SketchModel };
+/** A dimension the dimension tool would make, and a constraint-like description of it to draw (dimShape). */
+type Measure = { kind: string; refs: SketchEntity[]; value: number; shape: Pick<SketchConstraint, "type" | "method" | "involves"> };
 /** A constraint or dimension the selection allows. */
-type Option = { icon: string; title: string; action: SketchAction; dim: boolean };
+type Option = { icon: string; title: string; action: SketchAction; dim: boolean; op?: boolean };
 export type SketchHost = {
   kernel: Kernel;
   done: (src: string) => void; // Done: the part's source with the edited sketch
@@ -52,6 +66,7 @@ export class Sketcher implements PointerTool {
   active = false;
   private group = new THREE.Group(); // in the sketch plane's coordinates
   private gridGroup = new THREE.Group();
+  private dimGroup = new THREE.Group(); // dimension and extension lines, arrows: rebuilt with the labels (sized in pixels)
   private plane!: SketchPlane;
   private label = "";
   private session!: SketchSession;
@@ -68,6 +83,7 @@ export class Sketcher implements PointerTool {
   private labels = document.createElement("div"); // dimension labels and constraint glyphs over the view
   private params: { name: string; value: number }[] = []; // the part's parameters, offered in dimensions
   private editing: string | null = null; // the dimension whose expression is being typed
+  private measuring: string[] = []; // dimension tool: what has been clicked
   private input = document.createElement("input"); // that expression (kept while the labels redraw)
 
   constructor(private viewer: Viewer, private panel: HTMLElement, private host: SketchHost) {
@@ -94,6 +110,15 @@ export class Sketcher implements PointerTool {
   /** For tests: no kernel action running. */
   get idle(): boolean { return !this.busy; }
 
+  /** For tests: how many points are drawn as dots and as rings, and how many arrows the dimensions have. */
+  get drawing(): { dots: number; rings: number; arrows: number } {
+    const count = (o?: THREE.Object3D) => (o as THREE.Mesh | undefined)?.geometry.getAttribute("position").count ?? 0;
+    const clouds = this.group.children.filter((o): o is THREE.Points => o instanceof THREE.Points);
+    const ringed = (p: THREE.Points) => !!(p.material as THREE.PointsMaterial).map;
+    const arrows = this.dimGroup.children.filter((o) => o instanceof THREE.Mesh).reduce((n, m) => n + count(m) / 3, 0);
+    return { dots: count(clouds.find((p) => !ringed(p))), rings: count(clouds.find(ringed)), arrows };
+  }
+
   /** For tests: where a sketch point is on the screen (client coordinates). */
   screen(at: XY): { x: number; y: number } {
     const p = this.viewer.toScreen(new THREE.Vector3(at[0], at[1], 0).applyMatrix4(this.group.matrix));
@@ -117,7 +142,7 @@ export class Sketcher implements PointerTool {
     const [x, y, z, o] = [plane.x, plane.y, plane.z, plane.origin].map((v) => new THREE.Vector3(...v));
     this.group.matrix.makeBasis(x, y, z).setPosition(o);
     this.group.matrixWorldNeedsUpdate = true;
-    this.group.add(this.gridGroup);
+    this.group.add(this.gridGroup, this.dimGroup);
     this.viewer.lookAtPlane(plane, size);
     this.viewer.setFacesFaded(true);
     this.viewer.tool = this;
@@ -131,6 +156,7 @@ export class Sketcher implements PointerTool {
 
   stop() {
     this.active = false;
+    this.viewer.hoverPick(null);
     this.viewer.tool = null;
     this.viewer.onCameraChange = () => {};
     this.viewer.remove(this.group);
@@ -162,7 +188,8 @@ export class Sketcher implements PointerTool {
   // --- Geometry helpers ---------------------------------------------------------------------------
 
   private entity(id: string | undefined): SketchEntity | undefined {
-    return id ? this.model.entities.find((e) => e.id === id) : undefined;
+    if (!id) return undefined;
+    return this.model.entities.find((e) => e.id === id) ?? (id === "origin" ? this.origin : undefined);
   }
 
   private xy(id: string | undefined): XY {
@@ -176,10 +203,10 @@ export class Sketcher implements PointerTool {
     return this.model.entities.find((e) => e.ref === ref) ?? { id: "origin", kind: "point", ref, x: 0, y: 0, fixed: true, construction: true };
   }
 
-  /** Entities drawn in the view: not the origin and its axes (the grid's axes show them). */
+  /** Entities drawn in the view: not the origin and its axes (the grid's axes show them), nor operations' helpers; references are. */
   private drawn(e: SketchEntity): boolean {
     const c = this.model.c;
-    return !(e.fixed || e.ref?.startsWith(`${c}.x_axis`) || e.ref?.startsWith(`${c}.y_axis`));
+    return !((e.fixed && !e.reference) || e.hidden || e.ref?.startsWith(`${c}.x_axis`) || e.ref?.startsWith(`${c}.y_axis`));
   }
 
   private local(ev: PointerEvent): XY | null {
@@ -206,12 +233,12 @@ export class Sketcher implements PointerTool {
     return best;
   }
 
-  /** The entity under the cursor: points first, then lines, circles and arcs. */
-  private pick(at: XY): string | null {
+  /** The entity under the cursor: points first (unless only curves), then lines, circles and arcs. */
+  private pick(at: XY, curves = false): string | null {
     const px = this.px();
     let best: string | null = null;
     let bestD = SNAP_PX * px;
-    for (const e of [...this.model.entities.filter((x) => this.drawn(x)), this.origin]) {
+    for (const e of curves ? [] : [...this.model.entities.filter((x) => this.drawn(x)), this.origin]) {
       if (e.kind !== "point") continue;
       const d = Math.hypot(e.x! - at[0], e.y! - at[1]);
       if (d < bestD) { best = e.id; bestD = d; }
@@ -235,10 +262,17 @@ export class Sketcher implements PointerTool {
   // --- Pointer ------------------------------------------------------------------------------------
 
   move(ev: PointerEvent) {
+    if (this.tool === "use") {
+      const edge = this.viewer.pickEdge(ev);
+      this.viewer.hoverPick(edge);
+      this.viewer.canvas.style.cursor = edge ? "pointer" : "";
+      return;
+    }
     const at = this.local(ev);
     if (!at) return;
-    this.cursor = this.tool === "select" ? { at } : this.snap(at);
-    this.hover = this.tool === "select" ? this.pick(at) : null;
+    const trim = this.tool === "trim", picking = this.tool === "select" || this.tool === "dimension";
+    this.cursor = picking ? { at } : trim ? null : this.snap(at);
+    this.hover = picking || trim ? this.pick(at, trim) : null;
     this.viewer.canvas.style.cursor = this.hover ? "pointer" : "";
     this.redraw();
   }
@@ -250,6 +284,7 @@ export class Sketcher implements PointerTool {
     if (!id || !at) return false;
     this.dragging = { id, from: at, moved: false };
     this.dragStart = null;
+    this.dragSkip = null;
     return true;
   }
 
@@ -257,6 +292,7 @@ export class Sketcher implements PointerTool {
     const d = this.dragging;
     const at = this.local(ev);
     if (!d || !at) return;
+    if (this.entity(d.id)?.reference) return; // part geometry stays put (released, it's a click: selected)
     if (!d.moved && Math.hypot(at[0] - d.from[0], at[1] - d.from[1]) < 3 * this.px()) return;
     d.moved = true;
     this.solveDrag(d.id, d.from, at);
@@ -278,8 +314,15 @@ export class Sketcher implements PointerTool {
   }
 
   click(ev: PointerEvent) {
+    if (this.tool === "use") { if (!this.busy) this.use(ev); return; }
     const at = this.local(ev);
     if (!at || this.busy) return;
+    if (this.tool === "trim") {
+      const id = this.pick(at, true);
+      if (id) this.act([{ op: "trim", entity: id, at }]);
+      return;
+    }
+    if (this.tool === "dimension") { this.measureClick(at); return; }
     if (this.tool === "select") {
       const id = this.pick(at);
       if (id) this.select(id, ev.shiftKey || ev.ctrlKey || ev.metaKey);
@@ -287,6 +330,78 @@ export class Sketcher implements PointerTool {
       return;
     }
     this.place(this.snap(at));
+  }
+
+  /**
+   * Dimension tool: a click on something picks it (two at most); a click beside one line, circle or arc, or any
+   * click after two, makes the dimension previewed (measure) and opens its value.
+   */
+  private measureClick(at: XY) {
+    const id = this.pick(at);
+    if (this.measuring.length < 2 && id && !this.measuring.includes(id)) {
+      if (this.measuring.length === 1 && !this.measure([...this.measuring, id], at)) this.host.status("No dimension between those: pick points, lines, circles or arcs.");
+      else this.measuring.push(id);
+      this.redraw();
+      return;
+    }
+    const m = this.measuring.length ? this.measure(this.measuring, at) : null;
+    this.measuring = [];
+    if (!m) { this.redraw(); return; }
+    this.apply({ icon: "", title: "", dim: true, action: { op: "constrain", kind: m.kind, refs: m.refs.map((e) => e.ref!), value: num(m.value) } });
+  }
+
+  /**
+   * The dimension of what was picked (`ids`), at its current value: a line's length, a circle's diameter, an arc's
+   * radius; between two things (a circle or arc: its centre) the angle of two lines, a point's distance to a line
+   * (parallel lines: one's start to the other), and between points the distance, or with the cursor `at` above
+   * or below them a horizontal one, left or right a vertical one (both from left to right, bottom to top: positive).
+   */
+  private measure(ids: string[], at: XY | null): Measure | null {
+    const origin = this.origin;
+    const ents = ids.map((id) => (id === origin.id ? origin : this.entity(id)));
+    if (!ents.length || ents.some((e) => !e?.ref)) return null;
+    const ends = (l: SketchEntity): [XY, XY] => [this.xy(l.p1), this.xy(l.p2)];
+    if (ents.length === 1) {
+      const e = ents[0]!;
+      if (e.kind === "line") return { kind: "length", refs: [e], value: dist(...ends(e)), shape: { type: "p2p_distance", method: "length", involves: [e.p1!, e.p2!] } };
+      if (e.kind === "circle") return { kind: "diameter", refs: [e], value: 2 * e.r!, shape: { type: "circle_diameter", method: "diameter", involves: [e.id] } };
+      if (e.kind === "arc") return { kind: "radius", refs: [e], value: e.r!, shape: { type: "arc_radius", method: "radius", involves: [e.id] } };
+      return null;
+    }
+    let [a, b] = ents.map((e) => (e!.kind === "circle" || e!.kind === "arc" ? this.entity(e!.c) : e));
+    if (!a?.ref || !b?.ref || a.id === b.id) return null;
+    if (a.kind === "line" && b.kind === "line") {
+      const c = corner(...ends(a), ...ends(b));
+      if (c.O) return { kind: "angle", refs: [a, b], value: Math.acos(Math.max(-1, Math.min(1, dot(c.r1, c.r2)))) * 180 / Math.PI, shape: { type: "l2l_angle_ll", method: "angle", involves: [a.id, b.id] } };
+      a = this.entity(a.p1);
+      if (!a?.ref) return null;
+    }
+    if (a.kind === "line") [a, b] = [b, a];
+    const P: XY = [a.x!, a.y!];
+    if (b.kind === "line") {
+      const [A, B] = ends(b);
+      const value = Math.abs(cross(sub(P, A), sub(B, A))) / (dist(A, B) || 1);
+      return { kind: "distance", refs: [a, b], value, shape: { type: "p2l_distance", method: "distance", involves: [a.id, b.id] } };
+    }
+    const Q: XY = [b.x!, b.y!];
+    const beside = (k: number) => at !== null && (at[k] < Math.min(P[k], Q[k]) || at[k] > Math.max(P[k], Q[k]));
+    const kind = beside(1) && !beside(0) ? "hdistance" : beside(0) && !beside(1) ? "vdistance" : "distance";
+    const k = kind === "vdistance" ? 1 : 0;
+    if (kind !== "distance" && P[k] > Q[k]) [a, b] = [b, a];
+    const value = kind === "distance" ? dist(P, Q) : Math.abs(Q[k] - P[k]);
+    return { kind, refs: [a, b], value, shape: { type: kind === "distance" ? "p2p_distance" : "difference", method: kind, involves: [a.id, b.id] } };
+  }
+
+  /** The dimension tool's preview: what was picked, with what the cursor is on (else beside it). */
+  private measurePreview(): Measure | null {
+    if (this.tool !== "dimension" || !this.measuring.length) return null;
+    const at = this.cursor?.at ?? null;
+    const h = this.hover;
+    if (this.measuring.length === 1 && h && h !== this.measuring[0]) {
+      const m = this.measure([...this.measuring, h], at);
+      if (m) return m;
+    }
+    return this.measure(this.measuring, at);
   }
 
   private select(id: string, add: boolean) {
@@ -332,7 +447,10 @@ export class Sketcher implements PointerTool {
       if (p.kind === "point" && !p.fixed && !pulled.has(p.id) && (ofCurves.has(p.id) || !constrained.has(p.id))) set(p.id, start[p.id][0], start[p.id][1], 1);
     }
     const solver = await this.solver;
-    const r = JSON.parse(solver.solve(JSON.stringify(prims)));
+    // Constraints implied by others (a perpendicular to a vertical line on a horizontal one) leave the sketch
+    // solvable, but with the temporary ones PlaneGCS calls them conflicting and moves nothing: leave them out.
+    const skip = this.dragSkip ??= new Set(JSON.parse(solver.solve(JSON.stringify(this.model.primitives))).redundant);
+    const r = JSON.parse(solver.solve(JSON.stringify(prims.filter((p) => !skip.has(p.id as string)))));
     if (r.status !== 0 && r.status !== 1) return; // can't follow (fully constrained): stay
     const byId = new Map<string, Record<string, number>>(r.primitives.map((p: { id: string }) => [p.id, p]));
     for (const ent of this.model.entities) {
@@ -350,15 +468,43 @@ export class Sketcher implements PointerTool {
   }
 
   private dragStart: Record<string, XY> | null = null;
+  private dragSkip: Set<string> | null = null;
 
   // --- Drawing tools --------------------------------------------------------------------------------
 
   private arg(s: Snap): string | XY { return s.ref ?? s.at; }
 
+  /** Use: the part's edge under the cursor into the sketch, as `c.project(<its selector>)`. The view shows the part
+   * as it is before the sketch, which is what the sketch's code sees, so the selector picks the same edge. */
+  private async use(ev: PointerEvent) {
+    const edge = this.viewer.pickEdge(ev);
+    if (!edge) { this.host.status("Click an edge of the part to use it in the sketch."); return; }
+    this.busy = true;
+    let expr: string | undefined;
+    try { expr = (await this.host.kernel.select("edge", [edge.index])).selectors[0]?.expr; }
+    catch (e) { this.host.status((e as Error).message); }
+    finally { this.busy = false; }
+    if (!expr) { this.host.status("No selector found for that edge."); return; }
+    const before = this.session;
+    await this.act([{ op: "add", kind: "project", args: [expr] }]);
+    const error = this.model.error;
+    if (error && !before.model.error) { // e.g. a circle seen from the side: leave the sketch as it was
+      this.session = before;
+      this.renderPanel();
+      this.redraw();
+      this.host.status(`Can't use that edge: ${error.message.replace(/^\w+Error: /, "")}`);
+      return;
+    }
+    this.host.status(`Using ${expr}`);
+  }
+
   private async place(s: Snap) {
     const cons = this.construction || undefined;
     if (this.tool === "point") {
-      if (!s.ref) await this.act([{ op: "add", kind: "point", args: s.at }]);
+      // On an existing point (the origin, a rectangle's centre…): a new point there, tied to it.
+      const actions: SketchAction[] = [{ op: "add", kind: "point", args: s.at, construction: cons }];
+      if (s.ref) actions.push({ op: "constrain", kind: "coincident", refs: ["$0", s.ref] });
+      await this.act(actions);
       return;
     }
     if (this.tool === "line") {
@@ -410,14 +556,17 @@ export class Sketcher implements PointerTool {
   private endChain() { this.chain = null; this.pending = []; this.redraw(); }
 
   private escape() {
-    if (this.pending.length || this.chain) this.endChain();
+    if (this.measuring.length) { this.measuring = []; this.redraw(); }
+    else if (this.pending.length || this.chain) this.endChain();
     else if (this.tool !== "select") this.setTool("select");
     else if (this.selected.size) { this.selected.clear(); this.renderPanel(); this.redraw(); }
   }
 
   private setTool(t: Tool) {
+    if (this.tool === "use") this.viewer.hoverPick(null);
     this.tool = t;
     this.pending = [];
+    this.measuring = [];
     this.chain = null;
     this.hover = null;
     this.renderPanel();
@@ -463,11 +612,31 @@ export class Sketcher implements PointerTool {
       add("⟷", "Distance to the line", "distance", [P[0], L[0]], Math.abs((p[0] - a[0]) * (b[1] - a[1]) - (p[1] - a[1]) * (b[0] - a[0])) / (Math.hypot(b[0] - a[0], b[1] - a[1]) || 1));
     }
     if (L.length === 2 && n === 2) {
-      const [d1, d2] = L.map((l) => { const [a, b] = ends(l); return [b[0] - a[0], b[1] - a[1]]; });
-      add("∠", "Angle (counter-clockwise from the first line)", "angle", L, Math.atan2(d1[0] * d2[1] - d1[1] * d2[0], d1[0] * d2[0] + d1[1] * d2[1]) * 180 / Math.PI);
+      const c = corner(...ends(L[0]), ...ends(L[1]));
+      add("∠", "Angle between the lines", "angle", L, Math.acos(Math.max(-1, Math.min(1, dot(c.r1, c.r2)))) * 180 / Math.PI);
     }
     if (C.length === 1 && n === 1) add("⌀", "Diameter", "diameter", C, 2 * C[0].r!);
     if (A.length === 1 && n === 1) add("R", "Radius", "radius", A, A[0].r!);
+    // Operations: fillet a corner, mirror, patterns (code like c.fillet(…); their numbers are fields after).
+    const op = (icon: string, title: string, action: SketchAction, dim = false) => out.push({ icon, title, action, dim, op: true });
+    const lines = this.model.entities.filter((e) => e.kind === "line" && this.drawn(e));
+    if (P.length === 1 && n === 1) {
+      const at = lines.filter((l) => l.p1 === P[0].id || l.p2 === P[0].id);
+      if (at.length === 2) {
+        const short = Math.min(...at.map((l) => { const [a, b] = ends(l); return Math.hypot(b[0] - a[0], b[1] - a[1]); }));
+        op("◜", "Fillet the corner", { op: "add", kind: "fillet", args: [P[0].ref!, +(0.2 * short).toPrecision(2)] }, true);
+      }
+    }
+    const last = sel[n - 1], rest = sel.slice(0, -1).filter((e) => e.id !== origin.id);
+    if (n >= 2 && last.kind === "line" && rest.length === n - 1) op("⇆", "Mirror about the last selected line", { op: "add", kind: "mirror", args: [last.ref!, ...rest.map((e) => e.ref!)] });
+    const items = sel.filter((e) => e.id !== origin.id);
+    if (items.length === n) {
+      const xs = items.flatMap((e) => this.outline2(e).map((p) => p[0]));
+      const step = +((Math.max(...xs) - Math.min(...xs)) * 1.25 || 10).toPrecision(2);
+      op("⋯", "Linear pattern: copies in a row (count and spacing after)", { op: "add", kind: "linear_pattern", args: [items.map((e) => e.ref!), 3, step, 0] });
+    }
+    if (n >= 2 && last.kind === "point" && rest.length === n - 1)
+      op("⟳", "Circular pattern around the last selected point (count and angle after)", { op: "add", kind: "circular_pattern", args: [rest.map((e) => e.ref!), 4, last.ref!], angle: 360 });
     return out;
   }
 
@@ -500,21 +669,44 @@ export class Sketcher implements PointerTool {
   }
 
   private deleteSelected() {
-    const ents = this.model.entities.filter((e) => !e.fixed).map((e) => e.id).filter((id) => this.selected.has(id));
+    const ents = this.model.entities.filter((e) => !e.fixed || e.reference).map((e) => e.id).filter((id) => this.selected.has(id));
     const cons = this.model.constraints.map((c) => c.id).filter((id) => this.selected.has(id));
     this.selected.clear();
     this.act([{ op: "delete", entities: ents, constraints: cons }]);
   }
 
+  /** The pattern statement the selection came from, for its fields (count, spacing, angle). */
+  private pattern(): { stmt: number; call: NonNullable<SketchStatement["call"]> } | null {
+    for (const id of this.selected) {
+      const stmt = this.entity(id)?.stmt;
+      const call = stmt === undefined ? undefined : this.model.statements[stmt]?.call;
+      if (call && (call.method === "linear_pattern" || call.method === "circular_pattern")) return { stmt: stmt!, call };
+    }
+    return null;
+  }
+
   // --- Rendering ------------------------------------------------------------------------------------
 
   private color(e: SketchEntity): number {
-    if (this.selected.has(e.id)) return COLOR.selected;
+    if (this.selected.has(e.id) || this.measuring.includes(e.id)) return COLOR.selected;
     if (this.hover === e.id) return COLOR.hover;
     const conflicting = new Set(this.model.conflicting);
     if (this.model.constraints.some((c) => conflicting.has(c.id) && c.involves.includes(e.id))) return COLOR.conflict;
+    if (e.reference) return COLOR.reference;
     if (e.construction && e.kind !== "point") return COLOR.construction;
     return this.model.dof === 0 ? COLOR.constrained : COLOR.free;
+  }
+
+  /** A point made on its own (drawn as a ring), not a line's end, a centre or a shape's reference point. */
+  private ownPoint(e: SketchEntity): boolean {
+    const method = e.stmt === undefined ? undefined : this.model.statements[e.stmt]?.call?.method;
+    if (e.reference || !method || !OWN_POINTS.has(method)) return false;
+    return !this.model.entities.some((o) => o.kind !== "point" && [o.p1, o.p2, o.c, o.s, o.e].includes(e.id));
+  }
+
+  /** Where an entity is drawn, points too. */
+  private outline2(e: SketchEntity): XY[] {
+    return e.kind === "point" ? [[e.x!, e.y!]] : this.outline(e);
   }
 
   private outline(e: SketchEntity): XY[] {
@@ -539,23 +731,24 @@ export class Sketcher implements PointerTool {
   private redraw() {
     if (!this.active) return;
     for (const c of [...this.group.children]) {
-      if (c === this.gridGroup) continue;
+      if (c === this.gridGroup || c === this.dimGroup) continue;
       this.group.remove(c);
       (c as THREE.Line).geometry.dispose();
     }
-    const points: number[] = [], colors: number[] = [];
+    const points: number[] = [], colors: number[] = [], rings: number[] = [], ringColors: number[] = [];
     for (const e of this.model.entities) {
       if (!this.drawn(e)) continue;
       if (e.kind === "point") {
-        points.push(e.x!, e.y!, 0);
-        colors.push(...new THREE.Color(this.color(e)).toArray());
+        const own = this.ownPoint(e);
+        (own ? rings : points).push(e.x!, e.y!, 0);
+        (own ? ringColors : colors).push(...new THREE.Color(this.color(e)).toArray());
       } else this.group.add(this.polyline(this.outline(e), this.color(e), e.construction));
     }
     const o = this.origin; // drawn as a dot: selectable for dimensions
     points.push(0, 0, 0);
-    colors.push(...new THREE.Color(this.selected.has(o.id) ? COLOR.selected : this.hover === o.id ? COLOR.hover : COLOR.constrained).toArray());
+    colors.push(...new THREE.Color(this.selected.has(o.id) || this.measuring.includes(o.id) ? COLOR.selected : this.hover === o.id ? COLOR.hover : COLOR.constrained).toArray());
     const s = this.cursor;
-    if (s && this.tool !== "select") {
+    if (s && this.tool !== "select" && this.tool !== "dimension") {
       const from = this.chain ? this.chainAt() : this.pending[0]?.at;
       const [a, b] = [this.pending[0]?.at, this.pending[1]?.at];
       if (this.tool === "line" && from) this.group.add(this.polyline([from, s.at], COLOR.preview));
@@ -570,14 +763,8 @@ export class Sketcher implements PointerTool {
       points.push(s.at[0], s.at[1], 0);
       colors.push(...new THREE.Color(s.ref ? COLOR.selected : COLOR.preview).toArray());
     }
-    if (points.length) {
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
-      geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-      const dots = new THREE.Points(geo, new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, vertexColors: true, depthTest: false }));
-      dots.renderOrder = 3;
-      this.group.add(dots);
-    }
+    if (points.length) this.group.add(pointCloud(points, colors, 7));
+    if (rings.length) this.group.add(pointCloud(rings, ringColors, 11, ringTexture()));
     const pos = this.panel.querySelector(".cursor");
     if (pos) pos.textContent = s ? `(${num(s.at[0])}, ${num(s.at[1])})` : "";
     this.placeLabels();
@@ -590,32 +777,56 @@ export class Sketcher implements PointerTool {
    */
   private placeLabels() {
     if (!this.active) return;
-    const list = document.createElement("datalist");
-    list.id = "sketch-params";
-    for (const p of this.params) list.append(Object.assign(document.createElement("option"), { value: p.name, label: `= ${num(p.value)}` }));
-    this.labels.replaceChildren(list);
+    // The input being typed in (and its parameter list) stays put: moving it would take its focus away.
+    const editing = this.editing && this.input.isConnected;
+    for (const el of [...this.labels.children]) if (!editing || (el !== this.input && el.id !== "sketch-params")) el.remove();
+    if (!editing) {
+      const list = document.createElement("datalist");
+      list.id = "sketch-params";
+      for (const p of this.params) list.append(Object.assign(document.createElement("option"), { value: p.name, label: `= ${num(p.value)}` }));
+      this.labels.append(list);
+    }
+    for (const o of [...this.dimGroup.children]) {
+      this.dimGroup.remove(o);
+      (o as THREE.Mesh).geometry.dispose();
+      ((o as THREE.Mesh).material as THREE.Material).dispose();
+    }
+    const px = this.px();
     const conflicting = new Set(this.model.conflicting);
-    const screen = (ids: string[], dy = 0, dx = 0) => {
-      const a = this.anchor(ids);
-      if (!a) return null;
+    const place = (a: XY, dy = 0) => {
       const p = this.viewer.toScreen(new THREE.Vector3(a[0], a[1], 0).applyMatrix4(this.group.matrix));
-      return `translate(${p.x + dx}px, ${p.y + dy}px) translate(-50%, -50%)`;
+      return `translate(${p.x}px, ${p.y + dy}px) translate(-50%, -50%)`;
     };
+    const screen = (ids: string[], dy = 0) => {
+      const a = this.anchor(ids);
+      return a ? place(a, dy) : null;
+    };
+    for (const [axis, at] of [["X", [(AXIS_PX + 10) * px, 0]], ["Y", [0, (AXIS_PX + 10) * px]]] as [string, XY][]) {
+      const el = document.createElement("div");
+      el.className = `axis-label ${axis.toLowerCase()}`;
+      el.textContent = axis;
+      el.style.transform = place(at);
+      this.labels.append(el);
+    }
     const glyphs = new Map<number, typeof this.model.constraints>();
     for (const c of this.model.constraints) {
       if (c.dim) {
-        // A horizontal and a vertical distance between the same points would overlap: nudge them apart.
-        const at = screen(c.involves, c.method === "hdistance" ? -11 : 0, c.method === "vdistance" ? 22 : 0);
-        if (!at) continue;
+        const shape = this.dimShape(c, px);
+        if (!shape) continue;
+        const color = conflicting.has(c.id) ? COLOR.conflict : this.selected.has(c.id) ? COLOR.selected : COLOR.dimension;
+        for (const o of dimObjects(shape, color, px)) this.dimGroup.add(o);
+        const at = place(shape.at);
         if (this.editing === c.id) {
           this.input.style.transform = at;
-          this.labels.append(this.input);
+          if (!this.input.isConnected) this.labels.append(this.input);
           continue;
         }
         const el = document.createElement("div");
         el.className = `dim${this.selected.has(c.id) ? " selected" : ""}${conflicting.has(c.id) ? " conflict" : ""}`;
         const value = num(c.dim.value);
-        el.textContent = c.dim.expr === value ? value : `${c.dim.expr} = ${value}`;
+        el.textContent = Number.isFinite(Number(c.dim.expr)) ? value : `${c.dim.expr} = ${value}`; // a number: as solved (an angle's -30 is 30)
+        if (shape.prefix) el.dataset.prefix = shape.prefix;
+        if (shape.suffix) el.dataset.suffix = shape.suffix;
         el.title = `${c.text} — double-click to change`;
         el.style.transform = at;
         el.onclick = (e) => this.select(c.id, e.shiftKey);
@@ -624,6 +835,18 @@ export class Sketcher implements PointerTool {
       } else if (!c.builtin && c.method && GLYPHS[c.method] && c.stmt !== undefined) {
         glyphs.set(c.stmt, [...(glyphs.get(c.stmt) ?? []), c]);
       }
+    }
+    const preview = this.measurePreview();
+    const shape = preview && this.dimShape(preview.shape as SketchConstraint, px);
+    if (preview && shape) {
+      for (const o of dimObjects(shape, COLOR.preview, px)) this.dimGroup.add(o);
+      const el = document.createElement("div");
+      el.className = "dim preview";
+      el.textContent = num(preview.value);
+      if (shape.prefix) el.dataset.prefix = shape.prefix;
+      if (shape.suffix) el.dataset.suffix = shape.suffix;
+      el.style.transform = place(shape.at);
+      this.labels.append(el);
     }
     for (const group of glyphs.values()) {
       const c = group[0];
@@ -643,6 +866,80 @@ export class Sketcher implements PointerTool {
       };
       this.labels.append(el);
     }
+  }
+
+  /**
+   * How a dimension is drawn, Onshape-like (sketch coordinates; `px` is a pixel): a line's length is a label on
+   * it; other distances get a dimension line with arrows to what they measure and extension lines out to it
+   * (horizontal and vertical ones above or right of their points); radii and diameters a leader through the
+   * circle; angles the arc between the two lines, from where they meet.
+   */
+  private dimShape(c: SketchConstraint, px: number): DimShape | null {
+    const es = c.involves.map((id) => this.entity(id));
+    const at = this.anchor(c.involves);
+    if (!at || es.some((e) => !e)) return null;
+    const out: DimShape = { at, segs: [], arrows: [] };
+    const [a, b] = es as SketchEntity[];
+    const pt = (e: SketchEntity): XY => [e.x!, e.y!];
+    if ((c.method === "hdistance" || c.method === "vdistance") && a && b) {
+      const [p, q] = [pt(a), pt(b)];
+      const k = c.method === "hdistance" ? 1 : 0; // the coordinate the dimension line keeps: y for a horizontal one
+      const level = Math.max(p[k], q[k]) + 24 * px;
+      const to = (r: XY, d = 0): XY => (k ? [r[0], level + d] : [level + d, r[1]]);
+      out.segs.push(p, to(p, 4 * px), q, to(q, 4 * px));
+      dimLine(out, to(p), to(q), px);
+    } else if (c.type === "p2p_distance" && a && b) {
+      const ids = new Set([a.id, b.id]);
+      if (!this.model.entities.some((l) => l.kind === "line" && ids.has(l.p1!) && ids.has(l.p2!))) dimLine(out, pt(a), pt(b), px);
+    } else if (c.type === "p2l_distance" && a && b) {
+      const [p, l] = a.kind === "point" ? [a, b] : [b, a];
+      const [P, A, B] = [pt(p), this.xy(l.p1), this.xy(l.p2)];
+      const len = dist(A, B);
+      if (len < 1e-12) return out;
+      const u: XY = [(B[0] - A[0]) / len, (B[1] - A[1]) / len];
+      const t = dot(sub(P, A), u);
+      const F = along(A, u, t);
+      if (t < 0) out.segs.push(A, along(F, u, -4 * px)); // the line extended to the foot of the dimension
+      if (t > len) out.segs.push(B, along(F, u, 4 * px));
+      dimLine(out, P, F, px);
+    } else if (/_(radius|diameter)$/.test(c.type) && a && (a.kind === "circle" || a.kind === "arc")) {
+      const diameter = c.type.endsWith("diameter"); // c.radius, c.diameter, and a fillet's radius
+      const C = this.xy(a.c), r = a.r!;
+      const [a0, a1] = a.kind === "arc" ? arcAngles(C, this.xy(a.s), this.xy(a.e)) : [Math.PI / 4, Math.PI / 4];
+      const th = (a0 + a1) / 2;
+      const u: XY = [Math.cos(th), Math.sin(th)];
+      const back = polar(C, r, th + Math.PI);
+      out.segs.push(diameter ? back : C, polar(C, r + 12 * px, th));
+      out.arrows.push([polar(C, r, th), u]);
+      if (diameter) out.arrows.push([back, [-u[0], -u[1]]]);
+      out.at = polar(C, r + 30 * px, th);
+      out.prefix = diameter ? "Ø" : "R";
+    } else if (c.method === "angle" && a?.kind === "line" && b?.kind === "line") {
+      out.suffix = "°";
+      const [A1, B1, A2, B2] = [this.xy(a.p1), this.xy(a.p2), this.xy(b.p1), this.xy(b.p2)];
+      const { O, r1, r2 } = corner(A1, B1, A2, B2);
+      if (!O) return out; // parallel: no corner to draw the arc at
+      const reach = (r: XY, A: XY, B: XY): [number, number] => {
+        const [ta, tb] = [dot(sub(A, O), r), dot(sub(B, O), r)];
+        return [Math.min(ta, tb), Math.max(ta, tb)];
+      };
+      let rays: [XY, [number, number]][] = [[r1, reach(r1, A1, B1)], [r2, reach(r2, A2, B2)]]; // each ray, and where its line is along it
+      let span = Math.atan2(r2[1], r2[0]) - Math.atan2(r1[1], r1[0]);
+      span = ((span % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      if (span > Math.PI) { rays = [rays[1], rays[0]]; span = 2 * Math.PI - span; } // the angle as seen: under 180°
+      const t0 = Math.atan2(rays[0][0][1], rays[0][0][0]), t1 = t0 + span;
+      const R = Math.min(Math.max(0.6 * Math.min(rays[0][1][1], rays[1][1][1]), 32 * px), 90 * px);
+      const n = Math.max(8, Math.ceil(span / (Math.PI / 48)));
+      for (let i = 0; i < n; i++) out.segs.push(polar(O, R, t0 + (span * i) / n), polar(O, R, t0 + (span * (i + 1)) / n));
+      out.arrows.push([polar(O, R, t0), [Math.sin(t0), -Math.cos(t0)]], [polar(O, R, t1), [-Math.sin(t1), Math.cos(t1)]]);
+      const top = R + 6 * px;
+      for (const [r, [lo, hi]] of rays) { // extension lines where a line stops short of the arc
+        if (lo > 0) out.segs.push(O, along(O, r, Math.min(lo, top)));
+        if (hi < top) out.segs.push(along(O, r, Math.max(hi, 0)), along(O, r, top));
+      }
+      out.at = polar(O, R, t0 + span / 2);
+    }
+    return out;
   }
 
   private anchor(ids: string[]): XY | null {
@@ -670,7 +967,17 @@ export class Sketcher implements PointerTool {
       new THREE.LineBasicMaterial({ color: COLOR.grid, transparent: true, opacity: 0.5, depthTest: false }));
     const axes = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute([-half, 0, 0, half, 0, 0, 0, -half, 0, 0, half, 0], 3)),
       new THREE.LineBasicMaterial({ color: COLOR.axis, depthTest: false }));
-    this.gridGroup.add(grid, axes);
+    const arrows = ([dx, dy]: XY, color: number) => {
+      const [L, A] = [AXIS_PX * px, ARROW_PX * px];
+      const tip: XY = [dx * L, dy * L];
+      const wing = (side: number): number[] => [tip[0], tip[1], 0, tip[0] - dx * A - dy * A * 0.45 * side, tip[1] - dy * A + dx * A * 0.45 * side, 0];
+      const seg = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, tip[0], tip[1], 0, ...wing(1), ...wing(-1)], 3)),
+        new THREE.LineBasicMaterial({ color, depthTest: false }));
+      seg.renderOrder = 1;
+      return seg;
+    };
+    // The sketch's own X and Y (as Onshape shows them at the origin), labelled over the view.
+    this.gridGroup.add(grid, axes, arrows([1, 0], COLOR.xAxis), arrows([0, 1], COLOR.yAxis));
   }
 
   // --- Panel ----------------------------------------------------------------------------------------
@@ -713,10 +1020,32 @@ export class Sketcher implements PointerTool {
     const options = this.options();
     sub.append(el("span", { className: "hint muted", textContent: this.selected.size ? (options.length ? "Constrain or dimension:" : "") : HINTS[this.tool] }));
     for (const o of options) {
-      const b = el<HTMLButtonElement>("button", { textContent: o.icon, title: o.title, className: o.dim ? "option dim" : "option" });
-      b.dataset.option = o.action.op === "constrain" ? o.action.kind : "";
+      if (o.op && o === options.find((x) => x.op)) sub.append(el("span", { className: "sep" }));
+      const b = el<HTMLButtonElement>("button", { textContent: o.icon, title: o.title, className: `option${o.dim ? " dim" : ""}${o.op ? " op" : ""}` });
+      b.dataset.option = o.action.op === "constrain" || o.action.op === "add" ? o.action.kind : "";
       b.onclick = () => this.apply(o);
       sub.append(b);
+    }
+    const pattern = this.pattern();
+    if (pattern) {
+      const { stmt, call } = pattern;
+      const linear = call.method === "linear_pattern";
+      const fields: [string, string, number | string, string][] = [["count", "Count (the original included)", 1, call.args[1]]];
+      if (linear) {
+        fields.push(["dx", "Step in x", 2, call.args[2]]);
+        fields.push(["dy", "Step in y", call.args.length > 3 ? 3 : "dy", call.args[3] ?? call.kwargs.dy ?? "0"]);
+      } else fields.push(["angle", "Angle covered (360: all round, else from the first copy to the last)", call.args.length > 3 ? 3 : "angle", call.args[3] ?? call.kwargs.angle ?? "360"]);
+      sub.append(el("span", { className: "muted", textContent: linear ? "Pattern:" : "Circular pattern:" }));
+      for (const [name, title, arg, value] of fields) {
+        const label = el("label", { className: "field", title });
+        const input = el<HTMLInputElement>("input", { value, spellcheck: false, size: Math.max(3, value.length) });
+        input.dataset.arg = name;
+        const commit = () => { const v = input.value.trim(); if (v && v !== value) this.act([{ op: "arg", stmt, arg, expr: v }]); };
+        input.onkeydown = (e) => { if (e.key === "Enter") commit(); e.stopPropagation(); };
+        input.onchange = commit;
+        label.append(`${name} `, input);
+        sub.append(label);
+      }
     }
     if (this.selected.size) {
       const del = el("button", { textContent: `Delete ${this.selected.size}`, title: "Delete the selection and what depends on it (Delete)" });
@@ -728,7 +1057,89 @@ export class Sketcher implements PointerTool {
   }
 }
 
+/** A dimension as drawn: where its label goes, its lines (pairs of ends), its arrows (tip, the way it points). */
+type DimShape = { at: XY; segs: XY[]; arrows: [XY, XY][]; prefix?: string; suffix?: string };
+
+/** A dimension line from p to q, its label in the middle: arrows out to both ends, or in from outside when short. */
+function dimLine(out: DimShape, p: XY, q: XY, px: number) {
+  out.at = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+  const len = dist(p, q);
+  if (len < 1e-9) return;
+  const u: XY = [(q[0] - p[0]) / len, (q[1] - p[1]) / len];
+  if (len >= 3 * ARROW_PX * px) {
+    out.segs.push(p, q);
+    out.arrows.push([p, [-u[0], -u[1]]], [q, u]);
+  } else {
+    const ext = 2.5 * ARROW_PX * px;
+    out.segs.push(along(p, u, -ext), along(q, u, ext));
+    out.arrows.push([p, u], [q, [-u[0], -u[1]]]);
+  }
+}
+
+function dimObjects(s: DimShape, color: number, px: number): THREE.Object3D[] {
+  const v = (p: XY) => [p[0], p[1], 0];
+  const out: THREE.Object3D[] = [];
+  if (s.segs.length) {
+    out.push(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(s.segs.flatMap(v), 3)),
+      new THREE.LineBasicMaterial({ color, depthTest: false })));
+  }
+  if (s.arrows.length) {
+    const [L, W] = [ARROW_PX * px, ARROW_PX * px * 0.3];
+    const tris = s.arrows.flatMap(([t, d]) => {
+      const b = along(t, d, -L);
+      return [...v(t), ...v([b[0] - d[1] * W, b[1] + d[0] * W]), ...v([b[0] + d[1] * W, b[1] - d[0] * W])];
+    });
+    out.push(new THREE.Mesh(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(tris, 3)),
+      new THREE.MeshBasicMaterial({ color, depthTest: false, side: THREE.DoubleSide })));
+  }
+  for (const o of out) o.renderOrder = 2;
+  return out;
+}
+
+function pointCloud(positions: number[], colors: number[], size: number, map?: THREE.Texture): THREE.Points {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  const dots = new THREE.Points(geo, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, depthTest: false, ...(map && { map, alphaTest: 0.5 }) }));
+  dots.renderOrder = 3;
+  return dots;
+}
+
+let ring: THREE.Texture | null = null;
+/** A ring, for points drawn as circles (white: the points' colours tint it). */
+function ringTexture(): THREE.Texture {
+  if (ring) return ring;
+  const canvas = Object.assign(document.createElement("canvas"), { width: 32, height: 32 });
+  const g = canvas.getContext("2d")!;
+  g.strokeStyle = "#fff";
+  g.lineWidth = 5;
+  g.beginPath();
+  g.arc(16, 16, 12, 0, 2 * Math.PI);
+  g.stroke();
+  return (ring = new THREE.CanvasTexture(canvas));
+}
+
+function sub(a: XY, b: XY): XY { return [a[0] - b[0], a[1] - b[1]]; }
+function dot(a: XY, b: XY): number { return a[0] * b[0] + a[1] * b[1]; }
+function cross(a: XY, b: XY): number { return a[0] * b[1] - a[1] * b[0]; }
+function dist(a: XY, b: XY): number { return Math.hypot(b[0] - a[0], b[1] - a[1]); }
+function unit(a: XY): XY { const l = Math.hypot(a[0], a[1]); return l < 1e-12 ? [0, 0] : [a[0] / l, a[1] / l]; }
+function along(p: XY, u: XY, t: number): XY { return [p[0] + u[0] * t, p[1] + u[1] * t]; }
+
 function polar(c: XY, r: number, a: number): XY { return [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]; }
+
+/**
+ * Where lines A1B1 and A2B2 meet (null when parallel), and the ray along each from there towards its middle: the
+ * angle between the rays is the one c.angle measures (caad.py's _directed_angle).
+ */
+function corner(A1: XY, B1: XY, A2: XY, B2: XY): { O: XY | null; r1: XY; r2: XY } {
+  const [d1, d2] = [unit(sub(B1, A1)), unit(sub(B2, A2))];
+  const cr = cross(d1, d2);
+  if (Math.abs(cr) < 1e-9) return { O: null, r1: d1, r2: d2 };
+  const O = along(A1, d1, cross(sub(A2, A1), d2) / cr);
+  const ray = (d: XY, A: XY, B: XY): XY => (dot(sub([(A[0] + B[0]) / 2, (A[1] + B[1]) / 2], O), d) >= 0 ? d : [-d[0], -d[1]]);
+  return { O, r1: ray(d1, A1, B1), r2: ray(d2, A2, B2) };
+}
 
 /** Start and end angle of a counter-clockwise arc, end > start. */
 function arcAngles(c: XY, s: XY, e: XY): [number, number] {
