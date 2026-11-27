@@ -4,14 +4,14 @@
 import * as THREE from "three";
 import gcsWasm from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
 import { loadSolver } from "./gcs-solve";
-import type { Kernel, SketchAction, SketchEntity, SketchModel } from "./kernel";
+import type { Kernel, SketchAction, SketchEntity, SketchModel, SketchStatement } from "./kernel";
 import { num } from "./sketch-code";
 import type { PointerTool, SketchPlane, Viewer } from "./viewer";
 
-type Tool = "select" | "line" | "rect" | "circle" | "arc" | "point" | "use";
+type Tool = "select" | "line" | "rect" | "circle" | "arc" | "point" | "trim" | "use";
 const TOOLS: [Tool, string, string][] = [
   ["select", "↖", "Select and drag"], ["line", "╱", "Line"], ["rect", "▭", "Rectangle"],
-  ["circle", "◯", "Circle"], ["arc", "◠", "Arc"], ["point", "•", "Point"],
+  ["circle", "◯", "Circle"], ["arc", "◠", "Arc"], ["point", "•", "Point"], ["trim", "✂", "Trim"],
   ["use", "⤓", "Use part edges: bring them into the sketch to constrain to"],
 ];
 const HINTS: Record<Tool, string> = {
@@ -20,7 +20,8 @@ const HINTS: Record<Tool, string> = {
   rect: "Click one corner, then the opposite corner.",
   circle: "Click the centre, then a point on the circle.",
   arc: "Click the centre, the start, then the end (counter-clockwise).",
-  point: "Click to place a point.",
+  point: "Click to place a point (construction: a guide point, not a hole position).",
+  trim: "Click the piece of a line, circle or arc to cut away: it goes up to the nearest crossings (with none, the whole curve).",
   use: "Click an edge of the part: it comes into the sketch as fixed guide geometry to constrain to (construction=False in the code makes it part of the regions).",
 };
 const COLOR = {
@@ -42,7 +43,7 @@ type XY = [number, number];
 type Snap = { at: XY; ref?: string; id?: string };
 export type SketchSession = { src: string; index: number; model: SketchModel };
 /** A constraint or dimension the selection allows. */
-type Option = { icon: string; title: string; action: SketchAction; dim: boolean };
+type Option = { icon: string; title: string; action: SketchAction; dim: boolean; op?: boolean };
 export type SketchHost = {
   kernel: Kernel;
   done: (src: string) => void; // Done: the part's source with the edited sketch
@@ -179,10 +180,10 @@ export class Sketcher implements PointerTool {
     return this.model.entities.find((e) => e.ref === ref) ?? { id: "origin", kind: "point", ref, x: 0, y: 0, fixed: true, construction: true };
   }
 
-  /** Entities drawn in the view: not the origin and its axes (the grid's axes show them); references are. */
+  /** Entities drawn in the view: not the origin and its axes (the grid's axes show them), nor operations' helpers; references are. */
   private drawn(e: SketchEntity): boolean {
     const c = this.model.c;
-    return !((e.fixed && !e.reference) || e.ref?.startsWith(`${c}.x_axis`) || e.ref?.startsWith(`${c}.y_axis`));
+    return !((e.fixed && !e.reference) || e.hidden || e.ref?.startsWith(`${c}.x_axis`) || e.ref?.startsWith(`${c}.y_axis`));
   }
 
   private local(ev: PointerEvent): XY | null {
@@ -209,12 +210,12 @@ export class Sketcher implements PointerTool {
     return best;
   }
 
-  /** The entity under the cursor: points first, then lines, circles and arcs. */
-  private pick(at: XY): string | null {
+  /** The entity under the cursor: points first (unless only curves), then lines, circles and arcs. */
+  private pick(at: XY, curves = false): string | null {
     const px = this.px();
     let best: string | null = null;
     let bestD = SNAP_PX * px;
-    for (const e of [...this.model.entities.filter((x) => this.drawn(x)), this.origin]) {
+    for (const e of curves ? [] : [...this.model.entities.filter((x) => this.drawn(x)), this.origin]) {
       if (e.kind !== "point") continue;
       const d = Math.hypot(e.x! - at[0], e.y! - at[1]);
       if (d < bestD) { best = e.id; bestD = d; }
@@ -246,8 +247,9 @@ export class Sketcher implements PointerTool {
     }
     const at = this.local(ev);
     if (!at) return;
-    this.cursor = this.tool === "select" ? { at } : this.snap(at);
-    this.hover = this.tool === "select" ? this.pick(at) : null;
+    const trim = this.tool === "trim";
+    this.cursor = this.tool === "select" ? { at } : trim ? null : this.snap(at);
+    this.hover = this.tool === "select" || trim ? this.pick(at, trim) : null;
     this.viewer.canvas.style.cursor = this.hover ? "pointer" : "";
     this.redraw();
   }
@@ -291,6 +293,11 @@ export class Sketcher implements PointerTool {
     if (this.tool === "use") { if (!this.busy) this.use(ev); return; }
     const at = this.local(ev);
     if (!at || this.busy) return;
+    if (this.tool === "trim") {
+      const id = this.pick(at, true);
+      if (id) this.act([{ op: "trim", entity: id, at }]);
+      return;
+    }
     if (this.tool === "select") {
       const id = this.pick(at);
       if (id) this.select(id, ev.shiftKey || ev.ctrlKey || ev.metaKey);
@@ -394,7 +401,7 @@ export class Sketcher implements PointerTool {
     const cons = this.construction || undefined;
     if (this.tool === "point") {
       // On an existing point (the origin, a rectangle's centre…): a new point there, tied to it.
-      const actions: SketchAction[] = [{ op: "add", kind: "point", args: s.at }];
+      const actions: SketchAction[] = [{ op: "add", kind: "point", args: s.at, construction: cons }];
       if (s.ref) actions.push({ op: "constrain", kind: "coincident", refs: ["$0", s.ref] });
       await this.act(actions);
       return;
@@ -507,6 +514,26 @@ export class Sketcher implements PointerTool {
     }
     if (C.length === 1 && n === 1) add("⌀", "Diameter", "diameter", C, 2 * C[0].r!);
     if (A.length === 1 && n === 1) add("R", "Radius", "radius", A, A[0].r!);
+    // Operations: fillet a corner, mirror, patterns (code like c.fillet(…); their numbers are fields after).
+    const op = (icon: string, title: string, action: SketchAction, dim = false) => out.push({ icon, title, action, dim, op: true });
+    const lines = this.model.entities.filter((e) => e.kind === "line" && this.drawn(e));
+    if (P.length === 1 && n === 1) {
+      const at = lines.filter((l) => l.p1 === P[0].id || l.p2 === P[0].id);
+      if (at.length === 2) {
+        const short = Math.min(...at.map((l) => { const [a, b] = ends(l); return Math.hypot(b[0] - a[0], b[1] - a[1]); }));
+        op("◜", "Fillet the corner", { op: "add", kind: "fillet", args: [P[0].ref!, +(0.2 * short).toPrecision(2)] }, true);
+      }
+    }
+    const last = sel[n - 1], rest = sel.slice(0, -1).filter((e) => e.id !== origin.id);
+    if (n >= 2 && last.kind === "line" && rest.length === n - 1) op("⇆", "Mirror about the last selected line", { op: "add", kind: "mirror", args: [last.ref!, ...rest.map((e) => e.ref!)] });
+    const items = sel.filter((e) => e.id !== origin.id);
+    if (items.length === n) {
+      const xs = items.flatMap((e) => this.outline2(e).map((p) => p[0]));
+      const step = +((Math.max(...xs) - Math.min(...xs)) * 1.25 || 10).toPrecision(2);
+      op("⋯", "Linear pattern: copies in a row (count and spacing after)", { op: "add", kind: "linear_pattern", args: [items.map((e) => e.ref!), 3, step, 0] });
+    }
+    if (n >= 2 && last.kind === "point" && rest.length === n - 1)
+      op("⟳", "Circular pattern around the last selected point (count and angle after)", { op: "add", kind: "circular_pattern", args: [rest.map((e) => e.ref!), 4, last.ref!], angle: 360 });
     return out;
   }
 
@@ -545,6 +572,16 @@ export class Sketcher implements PointerTool {
     this.act([{ op: "delete", entities: ents, constraints: cons }]);
   }
 
+  /** The pattern statement the selection came from, for its fields (count, spacing, angle). */
+  private pattern(): { stmt: number; call: NonNullable<SketchStatement["call"]> } | null {
+    for (const id of this.selected) {
+      const stmt = this.entity(id)?.stmt;
+      const call = stmt === undefined ? undefined : this.model.statements[stmt]?.call;
+      if (call && (call.method === "linear_pattern" || call.method === "circular_pattern")) return { stmt: stmt!, call };
+    }
+    return null;
+  }
+
   // --- Rendering ------------------------------------------------------------------------------------
 
   private color(e: SketchEntity): number {
@@ -555,6 +592,11 @@ export class Sketcher implements PointerTool {
     if (e.reference) return COLOR.reference;
     if (e.construction && e.kind !== "point") return COLOR.construction;
     return this.model.dof === 0 ? COLOR.constrained : COLOR.free;
+  }
+
+  /** Where an entity is drawn, points too. */
+  private outline2(e: SketchEntity): XY[] {
+    return e.kind === "point" ? [[e.x!, e.y!]] : this.outline(e);
   }
 
   private outline(e: SketchEntity): XY[] {
@@ -753,10 +795,32 @@ export class Sketcher implements PointerTool {
     const options = this.options();
     sub.append(el("span", { className: "hint muted", textContent: this.selected.size ? (options.length ? "Constrain or dimension:" : "") : HINTS[this.tool] }));
     for (const o of options) {
-      const b = el<HTMLButtonElement>("button", { textContent: o.icon, title: o.title, className: o.dim ? "option dim" : "option" });
-      b.dataset.option = o.action.op === "constrain" ? o.action.kind : "";
+      if (o.op && o === options.find((x) => x.op)) sub.append(el("span", { className: "sep" }));
+      const b = el<HTMLButtonElement>("button", { textContent: o.icon, title: o.title, className: `option${o.dim ? " dim" : ""}${o.op ? " op" : ""}` });
+      b.dataset.option = o.action.op === "constrain" || o.action.op === "add" ? o.action.kind : "";
       b.onclick = () => this.apply(o);
       sub.append(b);
+    }
+    const pattern = this.pattern();
+    if (pattern) {
+      const { stmt, call } = pattern;
+      const linear = call.method === "linear_pattern";
+      const fields: [string, string, number | string, string][] = [["count", "Count (the original included)", 1, call.args[1]]];
+      if (linear) {
+        fields.push(["dx", "Step in x", 2, call.args[2]]);
+        fields.push(["dy", "Step in y", call.args.length > 3 ? 3 : "dy", call.args[3] ?? call.kwargs.dy ?? "0"]);
+      } else fields.push(["angle", "Angle covered (360: all round, else from the first copy to the last)", call.args.length > 3 ? 3 : "angle", call.args[3] ?? call.kwargs.angle ?? "360"]);
+      sub.append(el("span", { className: "muted", textContent: linear ? "Pattern:" : "Circular pattern:" }));
+      for (const [name, title, arg, value] of fields) {
+        const label = el("label", { className: "field", title });
+        const input = el<HTMLInputElement>("input", { value, spellcheck: false, size: Math.max(3, value.length) });
+        input.dataset.arg = name;
+        const commit = () => { const v = input.value.trim(); if (v && v !== value) this.act([{ op: "arg", stmt, arg, expr: v }]); };
+        input.onkeydown = (e) => { if (e.key === "Enter") commit(); e.stopPropagation(); };
+        input.onchange = commit;
+        label.append(`${name} `, input);
+        sub.append(label);
+      }
     }
     if (this.selected.size) {
       const del = el("button", { textContent: `Delete ${this.selected.size}`, title: "Delete the selection and what depends on it (Delete)" });

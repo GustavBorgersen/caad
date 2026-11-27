@@ -107,6 +107,7 @@ h2 .small { float: right; margin-top: -3px; padding: 0 6px; font-size: 11px; tex
 #sketch-panel button.primary { background: var(--accent); color: white; border-color: var(--accent); }
 #sketch-panel button.primary:disabled { opacity: 0.5; }
 #sketch-panel input[type=number] { width: 54px; font: inherit; padding: 0 3px; }
+#sketch-panel .field input { font: inherit; padding: 0 3px; }
 #sketch-panel .shape { display: inline-flex; gap: 4px; align-items: center; padding: 1px 4px; background: #fdf3ea; border-radius: 4px; }
 #sketch-panel .shape button { padding: 0 5px; border: none; background: none; }
 body.sketching #selection, body.sketching #view-tools, body.sketching #agent-note { display: none !important; }

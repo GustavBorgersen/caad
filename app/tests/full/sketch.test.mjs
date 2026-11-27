@@ -1,6 +1,6 @@
 // Sketch editor end to end (docs/06-sketches.md): converting a plain sketch, draw, dimension, Done, extrude;
 // reopen and change a dimension; line chains with snapping and inferred constraints; delete; sketches on faces;
-// Cancel; a new part; Use (a part edge in the sketch, constrained to).
+// Cancel; a new part; Use (a part edge in the sketch, constrained to); trim, fillet and a pattern.
 import { after } from "node:test";
 import { check } from "../common.mjs";
 import { openApp, sleep, steps } from "../ui/env.mjs";
@@ -98,7 +98,7 @@ step("a new sketch on Top: two clicks draw a rectangle; nothing is saved before 
 step("dimensions: lengths and distances from the origin, a conflict, Done and a cut", async () => {
   await tool("select");
   await clickAt(-3, -6); // the bottom side
-  check((await page.$$eval("#sketch-panel button.option", (b) => b.map((x) => x.dataset.option))).join() === "horizontal,vertical,length",
+  check((await page.$$eval("#sketch-panel button.option:not(.op)", (b) => b.map((x) => x.dataset.option))).join() === "horizontal,vertical,length",
     "a line offers horizontal, vertical, length", await page.$$eval("#sketch-panel button.option", (b) => b.map((x) => x.title).join(", ")));
   await option("length");
   check(await page.$$eval("#sketch-params option", (o) => o.map((x) => x.value).join()) === "width,depth,thickness,hole_d", "the part's parameters are offered");
@@ -266,4 +266,43 @@ step("Use: a part edge in the sketch, fixed, and a point constrained to it", asy
   await app.shot("sketch-6-use.png");
   await done();
   check(/ref1 = c\.project\(/.test(await code()) && await page.evaluate(() => window.caad.state.result.ok), "saved; the part builds");
+});
+
+step("Tools: trim a rectangle's side, fillet a corner, a pattern and its count", async () => {
+  await startOn("Plane.XY.offset(10)", "the top");
+  await clickAt(-10, -6); // the rectangle tool: a fresh sketch starts with it
+  await clickAt(10, 6);
+  await tool("line");
+  await clickAt(0, -9);
+  await clickAt(0.1, 9);
+  await page.keyboard.press("Escape");
+  await tool("trim");
+  await clickAt(5, 6); // the top, right of the line
+  let src = await sketchSrc();
+  const top = src.match(/(line\d+) = c\.line\(\(0, 6\), \(-10, 6\)\)/)?.[1];
+  check(!src.includes("c.rectangle") && top && new RegExp(`c\\.on\\(${top}\\.start, line\\d+\\)`).test(src),
+    "trimmed: the rectangle became lines, its top now ends at the line, kept on it", src);
+  await tool("select");
+  await clickAt(-10, -6);
+  await option("fillet");
+  await typeDim("2");
+  src = await sketchSrc();
+  check(/fillet1 = c\.fillet\(line\d+\.start, 2\)/.test(src) && (await model()).entities.some((e) => e.kind === "arc" && Math.abs(e.r - 2) < 1e-6), "the corner filleted, radius typed: c.fillet(<line>.start, 2)", src);
+  await tool("circle");
+  await clickAt(-7, 0);
+  await clickAt(-6.2, 0);
+  await tool("select");
+  await clickAt(-6.2, 0);
+  await option("linear_pattern");
+  await idle();
+  check(/pattern1 = c\.linear_pattern\(\[circle1\], 3, 2, 0\)/.test(await sketchSrc()), "a linear pattern: 3 copies 2 apart (from the circle's size)", (await sketchSrc()).match(/pattern1 = .*/)?.[0]);
+  await clickAt(-4.2, 0); // the second copy: its pattern's fields show
+  await page.$eval('#sketch-panel input[data-arg="count"]', (i) => { i.value = ""; });
+  await page.type('#sketch-panel input[data-arg="count"]', "4");
+  await page.keyboard.press("Enter");
+  await idle();
+  check(/pattern1 = c\.linear_pattern\(\[circle1\], 4, 2, 0\)/.test(await sketchSrc()) && (await model()).entities.filter((e) => e.kind === "circle").length === 4, "the count field: 4 circles");
+  await app.shot("sketch-7-tools.png");
+  await done();
+  check(await page.evaluate(() => window.caad.state.result.ok), "saved; the part builds");
 });

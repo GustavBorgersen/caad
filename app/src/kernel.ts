@@ -60,6 +60,7 @@ export type SketchEntity = {
   stmt?: number; // the block statement that made it
   construction: boolean;
   reference?: boolean; // part geometry brought in with c.project: fixed
+  hidden?: boolean; // a helper of an operation (a fillet's or pattern's spokes): not drawn
   x?: number; y?: number; fixed?: boolean; // point
   p1?: string; p2?: string; // line: point ids
   c?: string; r?: number; s?: string; e?: string; // circle, arc: centre (and ends) as point ids, radius
@@ -74,12 +75,20 @@ export type SketchModel = {
   entities: SketchEntity[]; constraints: SketchConstraint[];
   primitives: Record<string, unknown>[]; // PlaneGCS primitives, for solving while dragging
   dof?: number; conflicting: string[]; problem?: string; error?: { line?: number; message: string };
-  c: string; statements: { line: number; end: number; text: string }[];
+  c: string; statements: SketchStatement[];
   plane?: string; name?: string; // from sketchOpen
   params?: { name: string; value: number }[]; // from sketchOpen: the part's numeric parameters
 };
+/** A statement of the sketch's block; `call`: a c.<method>(...) call's arguments as code. */
+export type SketchStatement = {
+  line: number; end: number; text: string;
+  call?: { method: string; args: string[]; kwargs: Record<string, string> };
+};
 export type SketchAction =
   | { op: "add"; kind: "point" | "line" | "polyline" | "circle" | "arc" | "rectangle" | "polygon" | "project"; args: unknown[]; close?: boolean; construction?: boolean }
+  | { op: "add"; kind: "fillet" | "mirror" | "linear_pattern" | "circular_pattern"; args: (string | number | string[])[]; angle?: string | number }
+  | { op: "arg"; stmt: number; arg: number | string; expr: string }
+  | { op: "trim"; entity: string; at: [number, number] }
   | { op: "constrain"; kind: string; refs: string[]; value?: string | number }
   | { op: "dimension"; constraint: string; expr: string }
   | { op: "move"; points: Record<string, [number, number]>; circles?: Record<string, number> }

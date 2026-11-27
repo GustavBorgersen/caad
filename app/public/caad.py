@@ -10,7 +10,8 @@
 
 Numbers in entity and shape calls are geometry: the last solved positions, which are the solver's
 starting point and the fallback without a solver. Constraints and dimensions are separate calls.
-`c.project(edge)` brings the part's own edges and vertices in as fixed references to constrain to.
+`c.project(edge)` brings the part's own edges and vertices in as fixed references to constrain to;
+`c.fillet`, `c.mirror`, `c.linear_pattern` and `c.circular_pattern` make geometry from geometry.
 Leaving the block solves the sketch with PlaneGCS and adds its regions to the enclosing BuildSketch:
 loops inside loops alternate between material and hole; loops that cross are merged.
 
@@ -33,6 +34,7 @@ solves = []  # per solved sketch: {"line", "dof", "solver", "message"}; CAAD sho
 
 class _Entity:
     reference = False  # part geometry projected with c.project: fixed
+    hidden = False  # a helper of an operation (a circular pattern's spokes): not shown in the editor
 
     def __init__(self, sketch, construction):
         self.id = f"{type(self).__name__.lower()}{len(sketch._entities)}"
@@ -172,6 +174,7 @@ class Constrained:
         self.faces = None  # after the block: the regions that were added
         self.dof = None  # after the block: degrees of freedom left (None without a solver)
         self.conflicting, self.problem = [], None  # see _build(strict=False)
+        self._implied = set()  # constraint ids of copies (mirror, patterns): redundant for arcs, which is expected
 
     def __enter__(self):
         self._line = _caller()[0]
@@ -188,9 +191,9 @@ class Constrained:
 
     # Entities and shapes. Numbers here are geometry: where it is drawn.
 
-    def point(self, x, y):
-        """A point at (x, y). Points drawn this way are where `points(sketch)` puts holes."""
-        return Point(self, x, y, placed=True)
+    def point(self, x, y, construction=False):
+        """A point at (x, y). Points drawn this way are where `points(sketch)` puts holes, unless construction=True."""
+        return Point(self, x, y, placed=not construction)
 
     def line(self, start, end, construction=False):
         """A line between two points (points or (x, y) pairs)."""
@@ -264,6 +267,112 @@ class Constrained:
         if (s[0] - center[0]) * (m[1] - center[1]) - (s[1] - center[1]) * (m[0] - center[0]) < 0:
             s, e = e, s  # arcs go counter-clockwise
         return made(Arc(self, point(center), point(s), point(e), construction))
+
+    # Operations: new geometry from existing geometry, kept related to it by constraints
+
+    def fillet(self, corner, r):
+        """Round the corner where two lines meet with an arc of radius `r` (a dimension), tangent to both; returns
+        the arc. The lines now end where the arc starts; the sharp corner stays where they would meet, as a
+        construction point (`<arc>.corner`), so dimensions to it keep working."""
+        corner = _p(corner)
+        lines = [e for e in self._entities if isinstance(e, Line) and (e.start is corner or e.end is corner)]
+        if len(lines) != 2:
+            raise ValueError(f"fillet() rounds a corner where two lines meet; {len(lines)} line(s) end at {corner!r}.")
+        r = _number(r, "radius")
+        if r <= 0:
+            raise ValueError("fillet() needs a radius above 0.")
+        l1, l2 = lines
+        far = [ln.start if ln.end is corner else ln.end for ln in lines]
+        u, v = (_unit(p.x - corner.x, p.y - corner.y) for p in far)
+        theta = math.acos(max(-1.0, min(1.0, u[0] * v[0] + u[1] * v[1])))
+        if theta < 1e-6 or math.pi - theta < 1e-6:
+            raise ValueError("fillet() needs a corner; these lines are in line.")
+        t, w = r / math.tan(theta / 2), _unit(u[0] + v[0], u[1] + v[1])
+        h = r / math.sin(theta / 2)
+        p1 = Point(self, corner.x + u[0] * t, corner.y + u[1] * t)
+        p2 = Point(self, corner.x + v[0] * t, corner.y + v[1] * t)
+        center = Point(self, corner.x + w[0] * h, corner.y + w[1] * h)
+        for ln, p in ((l1, p1), (l2, p2)):
+            if ln.end is corner:
+                ln.end = p
+            else:
+                ln.start = p
+        ccw = (p1.x - center.x) * (p2.y - center.y) - (p1.y - center.y) * (p2.x - center.x) > 0
+        arc = Arc(self, center, *((p1, p2) if ccw else (p2, p1)), l1.construction and l2.construction)
+        arc.corner = corner
+        self.on(corner, l1)
+        self.on(corner, l2)
+        for ln, p in ((l1, p1), (l2, p2)):  # tangent where they meet: the radius there is square to the line
+            spoke = Line(self, center, p, True)  # (tangent() plus a shared end is a double root PlaneGCS can't use)
+            spoke.hidden = True
+            self.perpendicular(ln, spoke)
+        self.radius(arc, r)
+        return arc
+
+    def mirror(self, about, *items):
+        """Copies of the items (lines, circles, arcs, points) mirrored about a line, kept symmetric to them;
+        returns the copies in the same order. The line's own ends aren't copied."""
+        about = _l(about)
+        d = _unit(about.end.x - about.start.x, about.end.y - about.start.y)
+
+        def copy(p):
+            if p is about.start or p is about.end:
+                return p
+            px, py = p.x - about.start.x, p.y - about.start.y
+            k = 2 * (px * d[0] + py * d[1])
+            q = Point(self, about.start.x + k * d[0] - px, about.start.y + k * d[1] - py, placed=p.placed)
+            self.symmetric(p, q, about)
+            return q
+        return self._copies(items, copy, flip=True)
+
+    def linear_pattern(self, items, count, dx, dy=0):
+        """`count` - 1 copies of the items (a list of lines, circles, arcs, points), each moved (dx, dy) from the one
+        before; the offsets are dimensions. Returns the copies, [copy][item]: `pat1[0][0]` is the first item's first copy."""
+        items, count = list(items), _count(count)
+        dx, dy = _number(dx, "dx"), _number(dy, "dy")
+        out = []
+        for k in range(1, count):
+            def copy(p, k=k):
+                q = Point(self, p.x + k * dx, p.y + k * dy, placed=p.placed)
+                self._difference(p, q, "x", k * dx)
+                self._difference(p, q, "y", k * dy)
+                return q
+            out.append(self._copies(items, copy))
+        return out
+
+    def circular_pattern(self, items, count, center, angle=360):
+        """`count` - 1 copies of the items (a list of lines, circles, arcs, points) turned about `center` (a point),
+        spread over `angle` degrees counter-clockwise (360: evenly all the way round). Returns [copy][item]."""
+        items, count, center = list(items), _count(count), self._point(center)
+        angle = _number(angle, "angle")
+        step = angle / count if abs(abs(angle) - 360) < 1e-9 else angle / max(count - 1, 1)
+        spokes = {}  # hidden construction lines from the centre, which the copies' spokes are equal and turned to
+
+        def spoke(p):
+            ln = Line(self, center, p, True)
+            ln.hidden = True
+            return ln
+        out = []
+        for k in range(1, count):
+            a = math.radians(k * step)
+
+            def copy(p, a=a):
+                if p is center:
+                    return center
+                px, py = p.x - center.x, p.y - center.y
+                q = Point(self, center.x + px * math.cos(a) - py * math.sin(a), center.y + px * math.sin(a) + py * math.cos(a),
+                          placed=p.placed)
+                if math.hypot(px, py) < TOLERANCE:
+                    self.coincident(p, q)
+                    return q
+                if id(p) not in spokes:
+                    spokes[id(p)] = spoke(p)
+                s = spoke(q)
+                self._add({"type": "equal_length", "l1_id": spokes[id(p)].id, "l2_id": s.id},
+                          {"type": "l2l_angle_ll", "l1_id": spokes[id(p)].id, "l2_id": s.id, "angle": a})
+                return q
+            out.append(self._copies(items, copy))
+        return out
 
     @property
     def origin(self):
@@ -419,6 +528,33 @@ class Constrained:
         self._add({"type": "difference", "param1": {"o_id": _p(a).id, "prop": prop},
                    "param2": {"o_id": _p(b).id, "prop": prop}, "difference": d})
 
+    def _copies(self, items, copy, flip=False):
+        """Copies of entities, with copy(point) making (or reusing) each point's copy once; `flip`: mirrored, so arcs
+        run the other way."""
+        made, first = {}, len(self._constraints)
+
+        def pt(p):
+            if id(p) not in made:
+                made[id(p)] = copy(p)
+            return made[id(p)]
+        out = []
+        for it in items:
+            if isinstance(it, Point):
+                out.append(pt(it))
+            elif isinstance(it, Line):
+                out.append(Line(self, pt(it.start), pt(it.end), it.construction))
+            elif isinstance(it, Circle):
+                c = Circle(self, pt(it.center), it.r, it.construction)
+                self.equal(it, c)
+                out.append(c)
+            elif isinstance(it, Arc):
+                ends = (pt(it.end), pt(it.start)) if flip else (pt(it.start), pt(it.end))
+                out.append(Arc(self, pt(it.center), *ends, it.construction))
+            else:
+                raise TypeError(f"Expected lines, circles, arcs or points to copy, not {it!r}.")
+        self._implied.update(c[0]["id"] for c in self._constraints[first:])
+        return out
+
     def _add(self, *primitives):
         line, text = _caller()
         for p in primitives:
@@ -426,7 +562,9 @@ class Constrained:
             self._constraints.append((p, line, text))
 
     def _primitives(self):
-        return [p for e in self._entities for p in e._primitives()] + [c[0] for c in self._constraints]
+        # points first: an operation (a fillet) can give an earlier line a later point, and PlaneGCS needs them defined first
+        ents = [e for e in self._entities if isinstance(e, Point)] + [e for e in self._entities if not isinstance(e, Point)]
+        return [p for e in ents for p in e._primitives()] + [c[0] for c in self._constraints]
 
     def _build(self, strict=True):
         """Solve and add the regions. CAAD's sketch editor builds with strict=False: problems are kept in
@@ -461,7 +599,7 @@ class Constrained:
                 return
             self._apply(result["primitives"])
             self.dof = info["dof"] = result["dof"]
-            redundant = [texts[i] for i in result["redundant"] if i in texts]
+            redundant = [texts[i] for i in result["redundant"] if i in texts and i not in self._implied]
             if redundant:
                 info["message"] = "Redundant constraints (already implied by others): " + _describe(redundant) + "."
         if not strict:
@@ -698,6 +836,18 @@ def _round_kind(item, what):
 
 def _round_key(item):
     return "c_id" if isinstance(item, Circle) else "a_id"
+
+
+def _count(n):
+    n = _number(n, "count")
+    if n != int(n) or n < 1:
+        raise ValueError(f"count must be a whole number of at least 1, not {n:g}.")
+    return int(n)
+
+
+def _unit(dx, dy):
+    n = math.hypot(dx, dy) or 1.0
+    return dx / n, dy / n
 
 
 def _xy(p):
