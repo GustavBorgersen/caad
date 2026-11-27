@@ -1,6 +1,6 @@
 // The feature model in caad_kernel.py (docs/05-feature-model.md): tiers, the sketch + extrude form,
 // read_feature values, surgical patch_feature edits, inserting and deleting features, holes, revolve,
-// mirror, shared project code and export.
+// mirror, plane features, revolve axes from sketches, shared project code and export.
 import { describe, test } from "node:test";
 import { call, check, example, py, read, tryCall } from "./env.mjs";
 
@@ -254,6 +254,60 @@ with BuildPart() as p:
     check(ins.src.endsWith("    mirror(about=Plane.YZ)\n") && features(ins.src)[1].label === "Mirror about YZ" && Math.abs(vol(ins.src) - 128) < 1e-6, "+ Mirror about YZ: mirror(about=Plane.YZ), twice the volume");
     out = patch(ins.src, 1, { about: "Plane.XZ" });
     check(out.endsWith("    mirror()\n") && features(out)[1].label === "Mirror about XZ", "XZ is the default: mirror()");
+  });
+
+  test("plane features: read, patched from their parts, inserted, sketched on, used by mirror", () => {
+    const src = `from build123d import *\n\nwith BuildPart() as p:\n    Box(10, 10, 10)\n    pl1 = Plane.XZ.offset(-5).rotated((0, 0, 15))\n    a = 3\n`;
+    let f = features(src);
+    check(f[1].kind === "plane" && f[1].tier === "type" && f[1].name === "pl1" && f[1].label === "Plane pl1 on XZ, offset -5 mm, 15° about its normal" && f[2].tier === "code",
+      "pl1 = Plane.XZ.offset(-5).rotated(…) is a plane feature (other assignments stay code)", f[1].label);
+    call("run", src, "part.py", 0);
+    const r = call("read_feature", src, 1);
+    check(r.fields.map((x) => `${x.name}=${x.expr ?? ""}`).join() === "base=Plane.XZ,offset=-5,rx=,ry=,rz=15" && field(r, "base").pick === "face"
+      && field(r, "base").value === "at (0, 0, 0), normal (0, -1, 0)", "fields: base (with face picking), offset and three angles; 0 reads as none", r.fields.map((x) => x.value));
+    let out = patch(src, 1, { rz: "0", rx: "30", base: "Plane(p.faces().sort_by(Axis.Z)[-1])" });
+    check(out.includes("    pl1 = Plane(p.faces().sort_by(Axis.Z)[-1]).offset(-5).rotated((30, 0, 0))\n"), "patched: the expression is rewritten from its parts", out);
+    out = patch(out, 1, { rx: null, offset: "0" });
+    check(out.includes("    pl1 = Plane(p.faces().sort_by(Axis.Z)[-1])\n") && features(out)[1].label === "Plane pl1 on a face", "no offset and no angles: just the base");
+    check(/its offset and rotation are fields/.test(tryCall("patch_feature", src, 1, "plane", { base: "Plane.XY.offset(2)" }).error) &&
+      /earlier plane/.test(tryCall("patch_feature", src, 1, "plane", { base: "a" }).error), "the base must be a plane, a face or an earlier plane");
+
+    const ins = call("insert_feature", src, 1, "plane", { base: "pl1", offset: "5", rx: "0" });
+    check(ins.name === "pl2" && ins.index === 2 && ins.src.includes("    pl1 = Plane.XZ.offset(-5).rotated((0, 0, 15))\n    pl2 = pl1.offset(5)\n") && features(ins.src)[2].refs.includes("pl1"),
+      "+ Plane on pl1: pl2 = pl1.offset(5), using pl1");
+    check(/used by 3\. Plane pl2/.test(tryCall("delete_feature", ins.src, 1).error), "a plane in use can't be deleted");
+    check(call("insert_feature", empty, null, "plane", {}).src.includes("    pl1 = Plane.XY\n"), "+ Plane without parameters: on XY");
+
+    // A sketch on a tilted plane, extruded along its normal; the plane is drawn until something uses it.
+    const tilted = `from build123d import *\n\nwith BuildPart() as p:\n    pl1 = Plane.XY.offset(20).rotated((90, 0, 0))\n    with BuildSketch(pl1, mode=Mode.PRIVATE) as sk1:\n        Rectangle(4, 6)\n    extrude(sk1.sketch, amount=2)\n`;
+    let run = call("run", tilted, "part.py", 0);
+    check(run.planes.length === 1 && run.planes[0].name === "pl1" && run.planes[0].corners.length === 12 && run.planes[0].corners.filter((v, i) => i % 3 === 1).every((y) => Math.abs(y) < 1e-9)
+      && Math.max(...run.planes[0].corners.filter((v, i) => i % 3 === 2)) > 20, "rolled back to the plane: a square in it (y = 0: it turns about its own x axis, up from z = 20)", run.planes[0]?.corners);
+    run = call("run", tilted, "part.py");
+    const [x0, y0, z0, x1, y1, z1] = run.summary.bbox;
+    check(run.planes.length === 0 && Math.abs(x1 - x0 - 4) < 1e-6 && Math.abs(y1 - y0 - 2) < 1e-6 && Math.abs(z1 - z0 - 6) < 1e-6 && Math.abs(z0 - 17) < 1e-6,
+      "the sketch on pl1 stands up (4 × 2 × 6, around z = 20); a used plane isn't drawn", run.summary.bbox);
+
+    const mirrored = `from build123d import *\n\nwith BuildPart() as p:\n    with Locations((10, 0, 0)):\n        Box(4, 4, 4)\n    pl1 = Plane.YZ.offset(5)\n    mirror(about=pl1)\n`;
+    call("run", mirrored, "part.py", 1);
+    check(call("read_feature", mirrored, 2).fields.find((x) => x.name === "about").options.at(-1).expr === "pl1" && features(mirrored)[2].label === "Mirror about pl1"
+      && call("run", mirrored, "part.py").summary.bbox[0] === -2, "mirror offers the planes before it; about x = 5 the copy is at x = -2…2", call("run", mirrored, "part.py").summary.bbox);
+  });
+
+  test("revolve about a line of a constrained sketch: axis(sk1, line1)", () => {
+    const src = `from build123d import *\nfrom caad import Constrained\n\nwith BuildPart() as p:\n    with BuildSketch(Plane.XZ, mode=Mode.PRIVATE) as sk1:\n        with Constrained() as c:\n            rect1 = c.rectangle((10, 0), (14, 4))\n            line1 = c.line((20, 0), (20, 10), construction=True)\n    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk2:\n        with Constrained() as c:\n            line2 = c.line((0, 0), (5, 0))\n    revolve(sk1.sketch)\n`;
+    call("run", src, "part.py", 1);
+    const r = call("read_feature", src, 2);
+    const opts = field(r, "axis").options.map((o) => `${o.expr}|${o.label}`);
+    check(opts.slice(3).join() === ["bottom", "right", "top", "left"].map((s) => `axis(sk1, rect1.${s})|sk1: rect1.${s}`).join() + ",axis(sk1, line1)|sk1: line1 (construction),axis(sk2, line2)|sk2: line2",
+      "axis options: Z, X, Y, then the lines of the sketches (the profile's first)", opts);
+    const out = patch(src, 2, { axis: "axis(sk1, line1)" });
+    check(out.includes("from caad import Constrained, axis\n") && out.endsWith("    revolve(sk1.sketch, axis=axis(sk1, line1))\n") && features(out)[2].label === "Revolve sk1, 360°, about line1",
+      "patched: axis=axis(sk1, line1), imported from caad", out);
+    check(Math.abs(vol(out) - Math.PI * (100 - 36) * 4) < 0.01, "a ring about x = 20: inner radius 6, outer 10, 4 high");
+    check(Math.abs(vol(patch(src, 2, { axis: "axis(sk2, line2)" })) - Math.PI * 16 * 4) < 0.01, "about a line of another sketch (on the X axis): a cylinder of radius 4, 4 long");
+    check(/a line of that sketch/.test(call("run", src.replace("revolve(sk1.sketch)", "revolve(sk1.sketch, axis=axis(sk2, line1))").replace("from caad import Constrained", "from caad import Constrained, axis"), "part.py").error?.message ?? ""),
+      "axis() refuses a line of another sketch");
   });
 
   test("shared code: the open part's project is importable (set_project, docs/07)", () => {

@@ -31,7 +31,8 @@ export type Feature = {
 export type FeatureField = {
   name: string; label: string;
   type: "number" | "choice" | "bool" | "sketch" | "edges" | "faces" | "plane" | "expr" | "flip";
-  of?: string; template?: string; // flip: the expression is template with {} = field `of`'s expression
+  of?: string; template?: string; // flip: the expression is template with {} = field `of`'s expression; pick: {} = the selection
+  pick?: "face"; // a choice that can also take the face selected in the view (through template)
   options?: { expr?: string; label: string }[];
   show_if?: Record<string, string | null>;
   extra?: boolean; // not one of the feature type's own fields
@@ -84,6 +85,8 @@ export type SketchAction =
   | { op: "delete"; entities: string[]; constraints: string[] };
 
 export type SketchOutline = { name: string; index: number; edges: { points: Float32Array }[]; points: number[] /* drawn points, x y z… */ };
+/** A plane feature as a square: 4 corners, x y z… */
+export type PlaneOutline = { name: string; index: number; corners: number[] };
 
 export type BuildResult = {
   ok: boolean;
@@ -93,6 +96,8 @@ export type BuildResult = {
   mesh: Mesh | null;
   /** Named sketches no feature uses yet (up to the rollback bar): drawn as outlines. */
   sketches: SketchOutline[];
+  /** Plane features no feature uses yet (up to the rollback bar). */
+  planes: PlaneOutline[];
   summary: { type: string; faces: number; edges: number; bbox: number[]; volume?: number } | null;
   times: { build: number; mesh: number };
   gen: number;

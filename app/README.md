@@ -19,10 +19,10 @@ The first start takes about a minute while the CAD kernel loads (see `../docs/02
 | `src/kernel.worker.ts` / `src/kernel.ts` | Pyodide + lean build123d in a worker; client that keeps only the latest request |
 | `kernel-lock.json`, `scripts/kernel-*.mjs` | The kernel's Python runtime, served from the site itself (`public/kernel/`, git-ignored), never from a CDN or PyPI: Pyodide's core from the `pyodide` npm package plus the wheels in the lock, checked by sha256. The Vite plugin fetches them before dev and build; `node scripts/kernel-lock.mjs` re-resolves the lock after a version change |
 | `public/caad_kernel.py` | Timeline from the code, rollback, errors per feature, per-face/edge mesh; reading and patching features |
-| `public/caad.py` / `src/gcs-solve.ts` | Constrained sketches (`from caad import Constrained`), solved by PlaneGCS (WebAssembly, called from Python) |
+| `public/caad.py` / `src/gcs-solve.ts` | Constrained sketches (`from caad import Constrained`), solved by PlaneGCS (WebAssembly, called from Python); `points(sk1)` and `axis(sk1, line1)` for holes and revolve axes |
 | `src/viewer.ts` | three.js view, Z up, face/edge picking and highlighting, outlines of unused sketches |
 | `src/editor.ts` | CodeMirror code panel with error and feature line marks |
-| `src/timeline.ts` | Timeline panel with rollback bar; double-click edits a feature, × deletes one, + Extrude / Revolve / Hole / Fillet / Chamfer / Mirror at the bar add one |
+| `src/timeline.ts` | Timeline panel with rollback bar; double-click edits a feature, × deletes one, + Plane / Extrude / Revolve / Hole / Fillet / Chamfer / Mirror at the bar add one |
 | `src/feature-dialog.ts` | Feature dialog: fields from the kernel, live preview, surgical patch on OK (`../docs/05-feature-model.md`) |
 | `src/selection.ts` | Selection panel: properties and verified build123d selectors |
 | `src/project.ts` | The workspace (a local folder via the File System Access API, or the bundled examples), its projects and their files by kind |

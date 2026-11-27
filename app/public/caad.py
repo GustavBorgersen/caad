@@ -22,7 +22,7 @@ import math
 import sys
 import warnings
 
-__all__ = ["Constrained", "points"]
+__all__ = ["Constrained", "axis", "points"]
 
 TOLERANCE = 1e-3  # stored geometry is rounded to 0.001 mm
 solves = []  # per solved sketch: {"line", "dof", "solver", "message"}; CAAD shows it in the timeline
@@ -457,6 +457,23 @@ def points(sketch, reverse=False, far=None):
         exit_ = max(ahead, key=lambda pt: (pt - plane.origin).dot(drill))
         out.append(Location(Plane(origin=exit_, x_dir=plane.x_dir, z_dir=drill)))  # drills back (its -Z) toward the sketch
     return out
+
+
+def axis(sketch, line):
+    """The 3D axis along a line of a constrained sketch, from its start to its end:
+    `revolve(sk1.sketch, axis=axis(sk1, line1))` turns the sketch about that line. Draw the line as a
+    construction line (it is then no edge of the profile); it may be in another sketch than the profile."""
+    from build123d import Axis, Location
+    c = getattr(sketch, "_caad_sketch", None)
+    if c is None:
+        raise TypeError(f"axis() takes a sketch with a Constrained block (`with BuildSketch(...) as sk1:`), not {sketch!r}.")
+    if not isinstance(line, Line) or not any(e is line for e in c._entities):
+        raise TypeError(f"axis() takes a line of that sketch (such as line1 or rect1.left), not {line!r}.")
+    pl = sketch.output_placements[0]
+    a, b = ((pl * Location((p.x, p.y))).position for p in (line.start, line.end))
+    if (b - a).length < TOLERANCE:
+        raise ValueError("The axis line has no length.")
+    return Axis(a, b - a)
 
 
 # --- Solving ------------------------------------------------------------------------------------

@@ -30,7 +30,7 @@ my-project/
 
 ### Running parts outside CAAD (advanced)
 
-Everything is plain build123d, so parts also run without the browser. From the project's folder, with Python and `build123d==0.13` installed: `python -m parts.lid`. Parts with constrained sketches (`from caad import Constrained`) also need the `caad` module: download [caad.py](https://caad.vercel.app/caad.py) (the one the page runs, also [app/public/caad.py](app/public/caad.py)) into the project's folder. Their sketches then build from the geometry CAAD last saved.
+Everything is plain build123d, so parts also run without the browser. From the project's folder, with Python and `build123d==0.13` installed: `python -m parts.lid`. Parts with constrained sketches (`from caad import Constrained`, or caad's `points`/`axis`) also need the `caad` module: download [caad.py](https://caad.vercel.app/caad.py) (the one the page runs, also [app/public/caad.py](app/public/caad.py)) into the project's folder. Their sketches then build from the geometry CAAD last saved.
 
 ## Hosting CAAD yourself
 

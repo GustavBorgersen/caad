@@ -58,6 +58,7 @@ async function rebuild(): Promise<BuildResult | null> {
   state.result = r;
   viewer.setMesh(r.mesh, state.fitNext && !!r.mesh);
   viewer.setSketches(r.sketches, state.fitNext && !r.mesh); // a part with only sketches: frame those
+  viewer.setPlanes(r.planes);
   if (r.mesh || r.sketches.length) state.fitNext = false;
   restoreSelection(r.gen);
   renderTimeline($("timeline"), r, {
@@ -299,6 +300,7 @@ const featureDialog = new FeatureDialog($("feature-panel"), {
     state.result = { ...r, preview: true }; // what the view shows, so picking edges for the dialog works
     viewer.setMesh(r.mesh, false);
     viewer.setSketches(r.sketches, false);
+    viewer.setPlanes(r.planes);
     return r.error?.message ?? null;
   },
   async apply(src) {
@@ -381,6 +383,10 @@ async function addFeature(kind: AddKind) {
     params = { kind: "Hole", locations: `*points(${sketch.name})`, radius: "2.5" };
   } else if (kind === "mirror") {
     params = { about: "Plane.YZ" };
+  } else if (kind === "plane") { // offset from the selected flat face, else from XY
+    const items = state.selection.flatMap((i) => i.items);
+    const face = items.length === 1 && items[0].type === "PLANE" ? selected("face") : null;
+    params = { base: face ? `Plane(${face})` : "Plane.XY", offset: "10" };
   } else {
     const edges = selected("edge");
     if (!edges) { status(`Select the edges to ${kind} in the view first (Shift+click for more).`); return; }
@@ -535,7 +541,18 @@ $("sketch-button").onclick = async () => {
   const items = state.selection.flatMap((i) => i.items);
   if (items.length === 1 && items[0].kind === "face" && items[0].type === "PLANE") {
     startSketch(state.selection[0].selectors[0].expr, "the selected face");
-  } else $("plane-choice").hidden = !$("plane-choice").hidden;
+  } else {
+    // The plane features before the rollback bar, after the standard planes.
+    const planes = (r.timeline.features ?? []).filter((f) => f.kind === "plane" && f.name && f.status === "ok");
+    $("plane-features").replaceChildren(...planes.map((f) => {
+      const b = document.createElement("button");
+      b.textContent = f.name!;
+      b.title = f.label;
+      b.onclick = () => { $("plane-choice").hidden = true; startSketch(f.name!, f.name!); };
+      return b;
+    }));
+    $("plane-choice").hidden = !$("plane-choice").hidden;
+  }
 };
 document.querySelectorAll<HTMLButtonElement>("#plane-choice [data-plane]").forEach((b) => {
   b.onclick = () => { $("plane-choice").hidden = true; startSketch(b.dataset.plane!, b.textContent!); };
