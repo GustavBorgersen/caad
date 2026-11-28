@@ -112,7 +112,10 @@ step("rename a part in the tree (F2): the file and the imports of it follow; Und
     "lid.py is cap.py now, and the import of it follows", after);
   check(/Renamed to cap\.py · 1 import updated/.test(await app.message()), "the message says so", await app.message());
   await page.evaluate(() => [...document.querySelectorAll("#messages button")].find((b) => b.textContent === "Undo").click());
-  await page.waitForFunction(() => window.caad.state.path === "fermenter/parts/lid.py", { timeout: 10_000 });
+  // Undo moves the open file back, redraws the tree twice and rebuilds: wait for all of it, or the next step's
+  // click can hit a tree row that is about to be replaced ("Node is detached from document", seen in CI on #13).
+  await page.waitForFunction(() => window.caad.state.path === "fermenter/parts/lid.py" && /Renamed back to lid\.py/.test(window.caad.lastMessage()), { timeout: 10_000 });
+  await app.built();
   check(await exists("fermenter/parts/lid.py") && (await page.evaluate(() => window.caad.state.workspace.read("fermenter/parts/assembly_check.py"))).includes("from parts.lid import lid"),
     "Undo: lid.py again, and its import");
 });

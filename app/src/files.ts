@@ -268,6 +268,7 @@ export class FilesPanel {
       if (fixed) await this.fixImports(to, path);
       await this.host.moved(to, path);
       await this.host.refresh();
+      message(`Renamed back to ${baseOf(path)}`); // also tells that the Undo is done: the tree is drawn for good
     } });
   }
 
