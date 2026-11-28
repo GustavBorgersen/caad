@@ -52,7 +52,7 @@ A serious iteration on how CAAD looks and works, before more features pile on. D
 | **Undo** | **Done 2026-11-28:** undo/redo for every change (dialogs, sketches, deletes, parameters, typing, the agent, edits from outside), as each file's history; the agent's changes marked in the timeline and the code until you change the file; deleting features and files happens at once, with Undo in the message | 09 |
 | **Themes and layout** | **Done 2026-11-28:** doc 10's tokens, light and dark (system or chosen in settings); the top bar with the mode's commands, the rail with Files \| Timeline, dialogs and the code docked on the right, the status line, the selection chip, the start page (remembering the last workspace), the Files tab's project and file management, editable parameters | 09, 10 |
 | **The view** | **Done 2026-11-28:** the view's gradient, colours from the tokens, preview colouring only what the dialog changes, the faded part while sketching, the view cube, standard views, fit, view normal, smooth camera moves | 10 |
-| **Start-up** | Build once at start-up ([#3](https://github.com/GustavBorgersen/caad/issues/3)) | — |
+| **Start-up** | **Done 2026-11-28:** the part is built once at start-up ([#3](https://github.com/GustavBorgersen/caad/issues/3)) | — |
 
 ### Phase 2 — Parts and mates
 

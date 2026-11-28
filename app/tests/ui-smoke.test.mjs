@@ -30,6 +30,8 @@ step("the first part builds, its files and features listed", async () => {
   check(parts.includes("bracket.py") && parts.includes("pump_body.py"), "the examples are listed", parts);
   const s = await statuses();
   check(s.length === 6 && s.every((x) => x === "ok"), "six features, all built", s);
+  const builds = await page.evaluate(() => window.caad.state.result.gen); // the worker counts its builds
+  check(builds === 1, "built once at start-up (#3)", builds);
   await app.shot("caad-1-built.png");
 });
 
