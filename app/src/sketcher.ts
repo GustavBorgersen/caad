@@ -842,9 +842,18 @@ export class Sketcher implements PointerTool {
     }
     const px = this.px();
     const conflicting = new Set(this.model.conflicting);
+    const toScreen = (a: XY) => this.viewer.toScreen(new THREE.Vector3(a[0], a[1], 0).applyMatrix4(this.group.matrix));
     const place = (a: XY, dy = 0) => {
-      const p = this.viewer.toScreen(new THREE.Vector3(a[0], a[1], 0).applyMatrix4(this.group.matrix));
+      const p = toScreen(a);
       return `translate(${p.x}px, ${p.y + dy}px) translate(-50%, -50%)`;
+    };
+    /** A dimension's label: centred on its point, or beside it (its near edge there) when the shape has a side. */
+    const placeDim = (shape: DimShape) => {
+      if (!shape.side) return place(shape.at);
+      const p = toScreen(shape.at), q = toScreen(along(shape.at, shape.side, 10 * px));
+      const l = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+      const [dx, dy] = [(q.x - p.x) / l, (q.y - p.y) / l];
+      return `translate(${p.x}px, ${p.y}px) translate(calc(-50% + ${(dx * 50).toFixed(1)}%), calc(-50% + ${(dy * 50).toFixed(1)}%))`;
     };
     const screen = (ids: string[], dy = 0) => {
       const a = this.anchor(ids);
@@ -864,7 +873,7 @@ export class Sketcher implements PointerTool {
         if (!shape) continue;
         const color = conflicting.has(c.id) ? COLOR.conflict : this.selected.has(c.id) ? COLOR.selected : COLOR.dimension;
         for (const o of dimObjects(shape, color, px)) this.dimGroup.add(o);
-        const at = place(shape.at);
+        const at = placeDim(shape);
         if (this.editing === c.id) {
           this.input.style.transform = at;
           if (!this.input.isConnected) this.labels.append(this.input);
@@ -894,12 +903,17 @@ export class Sketcher implements PointerTool {
       el.textContent = num(preview.value);
       if (shape.prefix) el.dataset.prefix = shape.prefix;
       if (shape.suffix) el.dataset.suffix = shape.suffix;
-      el.style.transform = place(shape.at);
+      el.style.transform = placeDim(shape);
       this.labels.append(el);
     }
     for (const group of glyphs.values()) {
       const c = group[0];
-      const at = screen(c.involves, 16);
+      // One line's own constraint (horizontal, vertical): on its inner side, opposite its length's dimension line.
+      const line = c.involves.length === 1 ? this.entity(c.involves[0]) : null;
+      const n = line?.kind === "line" ? this.outward(this.xy(line.p1), this.xy(line.p2), new Set([line.p1!, line.p2!])) : null;
+      const at = line?.kind === "line" && n
+        ? placeDim({ at: along(this.anchor(c.involves)!, n, -5 * px), segs: [], arrows: [], side: [-n[0], -n[1]] })
+        : screen(c.involves, 16);
       if (!at) continue;
       const ids = group.map((g) => g.id);
       const el = document.createElement("div");
@@ -918,10 +932,11 @@ export class Sketcher implements PointerTool {
   }
 
   /**
-   * How a dimension is drawn, Onshape-like (sketch coordinates; `px` is a pixel): a line's length is a label on
-   * it; other distances get a dimension line with arrows to what they measure and extension lines out to it
-   * (horizontal and vertical ones above or right of their points); radii and diameters a leader through the
-   * circle; angles the arc between the two lines, from where they meet.
+   * How a dimension is drawn, Onshape-like (sketch coordinates; `px` is a pixel). Labels sit beside the geometry,
+   * never on it, so lines stay clickable (#12): a line's length gets a dimension line beside the line, on the side
+   * away from the sketch's middle; other distances a dimension line with arrows to what they measure and extension
+   * lines out to it (horizontal and vertical ones above or right of their points); radii and diameters a leader
+   * through the circle, the label past its end; angles the arc between the two lines, the label outside it.
    */
   private dimShape(c: SketchConstraint, px: number): DimShape | null {
     const es = c.involves.map((id) => this.entity(id));
@@ -939,7 +954,15 @@ export class Sketcher implements PointerTool {
       dimLine(out, to(p), to(q), px);
     } else if (c.type === "p2p_distance" && a && b) {
       const ids = new Set([a.id, b.id]);
-      if (!this.model.entities.some((l) => l.kind === "line" && ids.has(l.p1!) && ids.has(l.p2!))) dimLine(out, pt(a), pt(b), px);
+      const [p, q] = [pt(a), pt(b)];
+      if (!this.model.entities.some((l) => l.kind === "line" && ids.has(l.p1!) && ids.has(l.p2!))) dimLine(out, p, q, px);
+      else { // a line's length: a dimension line beside it, with extension lines from its ends
+        const n = this.outward(p, q, ids);
+        if (!n) return out;
+        const [off, over] = [20 * px, 4 * px];
+        out.segs.push(p, along(p, n, off + over), q, along(q, n, off + over));
+        dimLine(out, along(p, n, off), along(q, n, off), px);
+      }
     } else if (c.type === "p2l_distance" && a && b) {
       const [p, l] = a.kind === "point" ? [a, b] : [b, a];
       const [P, A, B] = [pt(p), this.xy(l.p1), this.xy(l.p2)];
@@ -961,7 +984,8 @@ export class Sketcher implements PointerTool {
       out.segs.push(diameter ? back : C, polar(C, r + 12 * px, th));
       out.arrows.push([polar(C, r, th), u]);
       if (diameter) out.arrows.push([back, [-u[0], -u[1]]]);
-      out.at = polar(C, r + 30 * px, th);
+      out.at = polar(C, r + 14 * px, th);
+      out.side = u;
       out.prefix = diameter ? "Ø" : "R";
     } else if (c.method === "angle" && a?.kind === "line" && b?.kind === "line") {
       out.suffix = "°";
@@ -986,9 +1010,31 @@ export class Sketcher implements PointerTool {
         if (lo > 0) out.segs.push(O, along(O, r, Math.min(lo, top)));
         if (hi < top) out.segs.push(along(O, r, Math.max(hi, 0)), along(O, r, top));
       }
-      out.at = polar(O, R, t0 + span / 2);
+      const mid = t0 + span / 2;
+      out.at = polar(O, R + 3 * px, mid);
+      out.side = [Math.cos(mid), Math.sin(mid)];
     }
     return out;
+  }
+
+  /**
+   * The unit normal of line p–q (its end points `ends`) on its open side: away from the lines that share an end
+   * with it (outside a rectangle, away from a wedge's other side), else from the sketch's middle; above, or else
+   * left, when that is on the line.
+   */
+  private outward(p: XY, q: XY, ends: Set<string>): XY | null {
+    const len = dist(p, q);
+    if (len < 1e-12) return null;
+    let n: XY = [-(q[1] - p[1]) / len, (q[0] - p[0]) / len];
+    const far = this.model.entities.filter((l) => l.kind === "line" && this.drawn(l) && (ends.has(l.p1!) !== ends.has(l.p2!)))
+      .map((l): XY => this.xy(ends.has(l.p1!) ? l.p2 : l.p1));
+    const pts = far.length ? far : this.model.entities.filter((e) => e.kind === "point" && this.drawn(e)).map((e): XY => [e.x!, e.y!]);
+    const mid: XY = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+    const c: XY = pts.length ? [pts.reduce((s, x) => s + x[0], 0) / pts.length, pts.reduce((s, x) => s + x[1], 0) / pts.length] : mid;
+    const side = dot(sub(c, mid), n);
+    if (Math.abs(side) > 1e-9 * Math.max(1, len)) { if (side > 0) n = [-n[0], -n[1]]; }
+    else if (n[1] < -1e-12 || (Math.abs(n[1]) <= 1e-12 && n[0] > 0)) n = [-n[0], -n[1]];
+    return n;
   }
 
   private anchor(ids: string[]): XY | null {
@@ -1114,7 +1160,8 @@ export class Sketcher implements PointerTool {
 }
 
 /** A dimension as drawn: where its label goes, its lines (pairs of ends), its arrows (tip, the way it points). */
-type DimShape = { at: XY; segs: XY[]; arrows: [XY, XY][]; prefix?: string; suffix?: string };
+/** `side`: the label goes beside `at` in this direction (its near edge at `at`) instead of centred on it. */
+type DimShape = { at: XY; segs: XY[]; arrows: [XY, XY][]; prefix?: string; suffix?: string; side?: XY };
 
 /** A dimension line from p to q, its label in the middle: arrows out to both ends, or in from outside when short. */
 function dimLine(out: DimShape, p: XY, q: XY, px: number) {

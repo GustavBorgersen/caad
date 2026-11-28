@@ -354,7 +354,8 @@ body.editing-feature #timeline, body.editing-feature #code, body.editing-feature
 
 /* --- Sketch labels over the view ------------------------------------------------------------------------- */
 .sketch-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.sketch-labels .dim { position: absolute; left: 0; top: 0; padding: 0 3px; font: 600 var(--fs-s) system-ui, sans-serif; color: var(--dim); text-shadow: 0 0 3px var(--panel), 0 0 3px var(--panel), 0 0 2px var(--panel); pointer-events: auto; cursor: pointer; white-space: nowrap; border-radius: 4px; }
+/* Tight chips beside the geometry (sketcher.ts dimShape): the panel colour keeps them readable over the grid and breaks the dimension line under the text */
+.sketch-labels .dim { position: absolute; left: 0; top: 0; padding: 1px 3px; font: 600 var(--fs-s)/1.15 system-ui, sans-serif; font-variant-numeric: tabular-nums; color: var(--dim); background: var(--panel); pointer-events: auto; cursor: pointer; white-space: nowrap; border-radius: 3px; }
 .sketch-labels .dim.selected { color: var(--accent-text); background: var(--accent-soft); text-shadow: none; }
 .sketch-labels .dim.conflict { color: var(--err); }
 .sketch-labels .dim.preview { color: var(--pre-lo); pointer-events: none; }
