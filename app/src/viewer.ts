@@ -284,6 +284,8 @@ export class Viewer {
 
   private anim = 0;
   private animEnd = 0; // ends a move on time if animation frames stall (a busy or hidden page)
+  /** Is the camera moving (an animated `moveCamera`)? */
+  moving = false;
 
   /** Put the camera at `dist` from `center` along `dir` with `up`; animated (250 ms) unless reduce motion is on. */
   moveCamera(center: THREE.Vector3, dir: THREE.Vector3, up: THREE.Vector3, dist: number, animate = true) {
@@ -293,6 +295,7 @@ export class Viewer {
     const finish = () => {
       cancelAnimationFrame(this.anim);
       clearTimeout(this.animEnd);
+      this.moving = false;
       this.camera.position.copy(end.pos);
       this.camera.up.copy(end.up);
       this.camera.near = dist / 100;
@@ -306,6 +309,7 @@ export class Viewer {
     const endOff = end.pos.clone().sub(end.target);
     const [r0, r1] = [start.off.length(), endOff.length()];
     const q = new THREE.Quaternion().setFromUnitVectors(start.off.clone().normalize(), endOff.clone().normalize());
+    this.moving = true;
     const t0 = performance.now(), ms = 250;
     const step = (now: number) => {
       const t = Math.min(1, (now - t0) / ms), e = 1 - (1 - t) ** 3; // ease out
