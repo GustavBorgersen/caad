@@ -209,6 +209,8 @@ In the page's kernel (build123d 0.13 in Node, as the tests boot it):
 | **Mate types** | Fastened, Revolute, Slider, Cylindrical, Ball |
 | **Closed loops** | Not supported yet: an error at the mate that closes one |
 | **Kind of file** | A *design*, in the project's `designs/` folder (was `parts/`) |
+| **Old projects** | Not supported: CAAD is in early development. `parts/` folders aren't read as designs and nothing is migrated. The bundled examples are rewritten from scratch in the new conventions |
+| **Sub-assemblies** | Later: for now an imported part comes as drawn and is mated in the importing design; bringing a whole design in with its mates is a future item |
 | **Part names** | The block's name, the only name; asked for when a part is made; <kbd>F2</kbd> renames it everywhere, also in designs that import it |
 | **Export** | Right-click a part: that part, as drawn. Right-click a design: everything, STEP as one assembly, STL one per part |
 | **Import** | One *Insert part* command for parts of other designs (linked) and STEP files (copied into `imports/`); an imported part is a part like any other, used as is or built on |
@@ -218,18 +220,16 @@ In the page's kernel (build123d 0.13 in Node, as the tests boot it):
 
 | Question | Options |
 | :-- | :-- |
-| **Mate syntax** | Positional `revolute(box, <edge>, lid, <edge>, …)` as above, or keywords (`a=box, on_a=…`) for readability; settle while building 08c |
-| **Existing `parts/` folders** | Read `parts/` as `designs/` (simplest; new projects get `designs/`), or offer to rename the folder and fix the imports once |
-| **Imported part placed or as drawn** | As drawn (above, and mated here); maybe later an option to bring a whole sub-assembly in with its mates |
+| **Mate syntax** | Its own brainstorm before 08c: how a mate reads in the code, how it names the geometry on each part, and how its values look. The `revolute(box, <edge>, lid, <edge>, …)` lines in this doc are placeholders |
 | **Interference, exploded views, motion** | Phase 3 items; the mate tree and placements are what they need |
 
 ## Build order
 
 | Slice | Contents |
 | :-- | :-- |
-| **08a — Several parts** | `analyze`/`run` with several part blocks and `with <part>:`. Per-part meshes and colours, the parts list with visibility, part stripes in the timeline. *Part* field in Extrude/Revolve (*New part* with its name, add to a part). Rename. Selection knows its part. Export of a part and of a design. The `designs/` folder (examples, guide, CLAUDE.md, doc 07, `project.ts`, `files.ts`; the Files tab's *Assemblies* group and `assemblies/` go); parts under their design in the Files tree |
-| **08b — Import** | *Insert part*: parts of other designs and STEP files (`imports/`, copied in; STEP files in the kernel's file system); assembly STEP as one part or one per body |
-| **08c — Mates** | caad's `fastened`, `revolute`, `slider`, `cylindrical`, `ball`, `place`, `assembly()`, recorded per design. Placing after the run, loops and ranges as errors. The Fastened mate written when drawing on a part. The mate dialog (<kbd>M</kbd>) with preview and *Flip*. Placed parts, sketches and planes in the view; sketching on a moved part. Assembly STEP |
+| **08a — Several parts** | `analyze`/`run` with several part blocks and `with <part>:`. Per-part meshes and colours, the parts list with visibility, part stripes in the timeline. *Part* field in Extrude/Revolve (*New part* with its name, add to a part). Rename. Selection knows its part. Export of a part and of a design. The `designs/` folder (guide, CLAUDE.md, doc 07, `project.ts`, `files.ts`, tests; the Files tab's *Assemblies* group and `assemblies/` go); parts under their design in the Files tree. **The examples rewritten from scratch** in `designs/`: a design with several parts drawn on each other, besides single-part designs |
+| **08b — Import** | *Insert part*: parts of other designs and STEP files (`imports/`, copied in; STEP files in the kernel's file system); assembly STEP as one part or one per body. The examples get an `imports/` STEP file and a design that inserts it and a part of another design |
+| **08c — Mates** | caad's `fastened`, `revolute`, `slider`, `cylindrical`, `ball`, `place`, `assembly()`, recorded per design. Placing after the run, loops and ranges as errors. The Fastened mate written when drawing on a part. The mate dialog (<kbd>M</kbd>) with preview and *Flip*. Placed parts, sketches and planes in the view; sketching on a moved part. Assembly STEP. The examples' multi-part design gets its mates (a hinge, a slider) |
 | **08d — Dragging** | The mate tree to the view, dragging within the free directions, writing on release; fix and release |
 | **08e — Agent** | `get_timeline` with parts and mates, `export_part` per part, the guide |
 

@@ -116,4 +116,5 @@ Things to remember, not planned yet.
 - **Faster start-up** — Pyodide memory snapshots including the OpenCascade library.
 - **Watch mode for tests** — a kernel kept warm that re-runs the tests a change affects within seconds.
 - **Firefox and Safari** — need an alternative to the File System Access API.
+- **Sub-assemblies** — insert a whole design with its mates into another design, moving as one ([08](08-parts-and-mates.md)).
 - **Configurations and variable tables**, **2D drawings**, **sheet metal**, **bill of materials**.
