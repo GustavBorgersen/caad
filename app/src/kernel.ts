@@ -213,6 +213,11 @@ export class Kernel {
     return this.call("insert_feature", [src, after, kind, params]);
   }
 
+  /** Source with a feature's name and every later use of it changed; rejects (with the reason) when the name isn't free. */
+  async renameFeature(src: string, index: number, name: string, old: string): Promise<string> {
+    return (await this.call<{ value: string }>("rename_feature", [src, index, name, old])).value;
+  }
+
   /** Source without a feature; rejects (with the reason) while a later feature uses it. */
   async deleteFeature(src: string, index: number): Promise<string> {
     return (await this.call<{ value: string }>("delete_feature", [src, index])).value;

@@ -4,7 +4,7 @@ import { setupAgentDialog } from "./agent-dialog";
 import { command, currentMode, mountToolbar, refresh as refreshCommands, register, run, setMode, tooltip, type Command } from "./commands";
 import { Editor } from "./editor";
 import { FeatureDialog } from "./feature-dialog";
-import { FilesPanel } from "./files";
+import { FilesPanel, PY_NAME } from "./files";
 import { History } from "./history";
 import { icon } from "./icons";
 import { Kernel, type BuildResult, type Feature, type Kind, type SelectInfo } from "./kernel";
@@ -15,9 +15,9 @@ import { renderSelection } from "./selection";
 import { newPartSource } from "./sketch-code";
 import { Sketcher, TOOLS } from "./sketcher";
 import { setTheme, themeChoice, type ThemeChoice } from "./theme";
-import { renderTimeline, type AddKind } from "./timeline";
+import { focusedFeature, markCursor, renderTimeline, type AddKind } from "./timeline";
 import { makeTools } from "./tools";
-import { ask, esc, lastMessage, menu, message, mountMessages, popover, shortcutSheet, type MenuSection } from "./ui";
+import { ask, esc, inlineName, lastMessage, menu, message, mountMessages, popover, shortcutSheet, type MenuSection } from "./ui";
 import { ViewCube } from "./viewcube";
 import { Viewer, type Pick } from "./viewer";
 import * as THREE from "three";
@@ -50,6 +50,9 @@ const state = {
   failed: new Set<string>(), // parts whose last build this session failed
   agent: new Map<string, Set<string>>(), // per file: the text of the features the agent changed, until you change the file
   active: null as number | null, // the feature being edited (dialog or sketch)
+  cursorFeature: null as number | null, // the feature the cursor in the code is in
+  cursorLine: null as number | null, // the line it is on, while the code has the focus
+  timelineStale: false, // a build came in while a row's name was being typed: redraw the timeline after it
 };
 
 /** A hint, a result or an error: CAAD's own message at the bottom of the view (no popups). */
@@ -136,6 +139,9 @@ function featureText(src: string, f: Feature): string {
 
 /** The timeline, with the agent's marks and the feature being edited. */
 function showTimeline() {
+  // Not while a row's name is being typed: redrawing would take the field away. Renaming redraws when it ends.
+  if ($("timeline").querySelector("li.editing")) { state.timelineStale = true; return; }
+  state.timelineStale = false;
   const r = state.result;
   const feats = r?.timeline?.features ?? [];
   const marked = state.path ? state.agent.get(state.path) : undefined;
@@ -147,7 +153,7 @@ function showTimeline() {
     edit: (f) => editFeature(f),
     remove: (f) => removeFeature(f),
     menu: (f, at) => timelineMenu(f, at),
-  }, { agent, active: state.active });
+  }, { agent, active: state.active, cursor: (state.cursorFeature = featureAtLine(state.cursorLine)) }); // lines move as the code changes
 }
 
 /** The part's parameters at the foot of the timeline: edit a value, and that line of the code changes. */
@@ -689,12 +695,48 @@ async function removeFeature(f: Feature) {
   message(`${label} deleted`, { action: "Undo", run: () => undo() });
 }
 
+/** Rename a feature in its row: the name in the code and every later use of it (docs/09), with Undo in the message. */
+async function renameFeature(f: Feature) {
+  if (featureDialog.open || sketcher.active || !state.path || !f.name) return;
+  const li = $("timeline").querySelector<HTMLElement>(`li.feature[data-index="${f.index}"]`);
+  if (!li || li.classList.contains("editing")) return;
+  const others = new Set((state.result?.timeline?.features ?? []).filter((g) => g.index !== f.index && g.name).map((g) => g.name!));
+  const name = await inlineName(li, {
+    value: f.name,
+    check: (n) => !n ? "Type a name." : !PY_NAME.test(n) ? "Names are Python names: letters, digits and _, not starting with a digit." : others.has(n) ? `${n} is another feature's name.` : null,
+    hint: (n) => n === f.name ? "Enter keeps the name" : `Enter renames ${f.name} and its uses to ${n}`,
+  });
+  if (li.isConnected) li.focus({ preventScroll: true }); // back from the name field, so the keys work on the row again
+  if (state.timelineStale) showTimeline();
+  if (!name || name === f.name || !state.path) return;
+  let src;
+  try { src = await kernel.renameFeature(editor.text, f.index, name, f.name); }
+  catch (e) { say((e as Error).message.replace(/^\w*Error: /, ""), true); return; }
+  await applyCode(state.path, src, `Renamed ${f.name} to ${name}`);
+  message(`Renamed ${f.name} to ${name}`, { action: "Undo", run: () => undo() });
+}
+
+/** The feature the cursor in the code is in, marked in the timeline (docs/09: code and timeline map one to one). */
+function cursorAt(line: number | null) {
+  state.cursorLine = line;
+  const index = featureAtLine(line);
+  if (index === state.cursorFeature) return;
+  state.cursorFeature = index;
+  markCursor($("timeline"), index);
+}
+const featureAtLine = (line: number | null) => line == null ? null : (state.result?.timeline?.features ?? []).find((x) => x.line <= line && line <= x.end)?.index ?? null;
+
+/** The timeline row with the keyboard focus, and its feature when it has a name (F2). */
+const focusedRow = () => focusedFeature($("timeline"));
+const focusedNamed = () => { const i = focusedRow(); const f = i === null ? undefined : state.result?.timeline?.features[i]; return f?.name ? f : undefined; };
+
 function timelineMenu(f: Feature, at: { x: number; y: number }) {
   const last = (state.result?.timeline?.features.length ?? 0) - 1;
   menu(at, [{ header: f.name ? `${f.name} · ${f.kind}` : f.label, items: [
     f.tier === "code" ? { label: "Show code", icon: "code", run: () => editFeature(f) } : { label: "Edit", icon: "rename", key: "enter", run: () => editFeature(f) },
     { label: "Roll back to here", icon: "history", run: () => { state.upto = f.index === last ? null : f.index; rebuild(); } },
     { label: "Show code", icon: "code", run: () => { showCode(true); editor.markFeature([f.line, f.end], true); } },
+    { label: "Rename", icon: "rename", key: "f2", disabled: !f.name, run: () => renameFeature(f) },
     "-",
     { label: "Delete", icon: "trash", danger: true, run: () => removeFeature(f) },
   ] }]);
@@ -771,6 +813,7 @@ async function saveTyping() {
   rebuild();
 }
 function flushTyping() { if (saveTimer) { clearTimeout(saveTimer); saveTyping(); } }
+editor.onCursor = (line) => cursorAt(line);
 editor.onChange = () => {
   clearTimeout(saveTimer);
   saveTimer = window.setTimeout(saveTyping, SAVE_DELAY_MS);
@@ -938,8 +981,16 @@ register(
   { id: "code", label: "Show or hide the code", icon: "code", key: "ctrl+j", run: () => showCode(document.body.classList.contains("code-hidden")) },
   { id: "escape", label: "Back out: cancel the dialog, clear the selection", key: "escape", mode: "part",
     run: () => { if (featureDialog.open) featureDialog.cancel(); else if (!$("project-panel").hidden) { $("project-panel").hidden = true; } else clearSelection(); } },
-  { id: "rename", label: "Rename the file", key: "f2", mode: "part", enabled: () => !!files.focused(), run: () => { const r = files.focused(); if (r) files.rename(r); } },
-  { id: "delete", label: "Delete the file", key: "delete", mode: "part", enabled: () => !!files.focused(), run: () => {
+  { id: "rename", label: "Rename the file or feature", key: "f2", mode: "part", enabled: () => !!files.focused() || !!focusedNamed(), run: () => {
+    const f = focusedNamed();
+    if (f) { renameFeature(f); return; }
+    const r = files.focused();
+    if (r) files.rename(r);
+  } },
+  { id: "delete", label: "Delete the file or feature", key: "delete", mode: "part", enabled: () => !!files.focused() || focusedRow() !== null, run: () => {
+    const i = focusedRow();
+    const f = i === null ? undefined : state.result?.timeline?.features[i];
+    if (f) { removeFeature(f); return; }
     const r = files.focused();
     if (r?.dataset.path && r.dataset.kind !== "config") files.remove(r.dataset.path);
     else if (r?.dataset.project) files.remove(r.dataset.project);

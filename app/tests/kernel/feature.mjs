@@ -150,8 +150,10 @@ with BuildPart() as p:
     check(built.ok && Math.abs(built.summary.volume - (4000 - Math.PI * 9 * 5)) < 0.01, `cut through all from a face, into the part (volume ${built.summary?.volume?.toFixed(2)})`);
     inserted = ins.src;
     let ins2 = call("insert_feature", bracket, 2, "fillet", { objects: "bracket.edges().filter_by(Axis.Z)", radius: "1" });
-    check(ins2.index === 3 && features(ins2.src)[3].kind === "fillet" && ins2.src.split("\n")[15] === "    fillet(bracket.edges().filter_by(Axis.Z), radius=1)",
-      "insert after a feature (at the rollback bar)", ins2.src.split("\n")[15]);
+    check(ins2.index === 3 && features(ins2.src)[3].kind === "fillet" && ins2.src.split("\n")[18] === "    fillet(bracket.edges().filter_by(Axis.Z), radius=1)",
+      "insert after a feature (at the rollback bar)", ins2.src.split("\n")[18]);
+    check(ins2.src.split("\n").slice(17, 21).join("|") === "|    fillet(bracket.edges().filter_by(Axis.Z), radius=1)||    extrude(amount=-thickness)",
+      "its own paragraph: a blank line before it, and the one already there after it", ins2.src.split("\n").slice(16, 21));
     ins2 = call("insert_feature", bracket, -1, "chamfer", { objects: "bracket.edges()", length: "1" });
     check(ins2.index === 0 && features(ins2.src)[0].kind === "chamfer", "insert before the first feature");
     check(call("insert_feature", named, null, "sketch", { plane: "Plane.XZ", body: [] }).name === "sk2", "sketch names skip names already in the file");
@@ -172,6 +174,48 @@ with BuildPart() as p:
     run1 = call("run", named, "part.py", 1);
     check(JSON.stringify(run1.sketches.map((x) => x.name)) === '["sk1","loose"]', "rolled back before their extrudes, both are drawn again");
     check(call("run", bracket, "bracket.py").sketches.length === 0 && call("run", bracket, "bracket.py", 0).sketches[0]?.name === "base", "the bracket's base sketch shows when rolled back to it");
+  });
+
+  test("renaming features: the name and every later use of it, nothing else (docs/09)", () => {
+    const src = `from build123d import *
+
+with BuildPart() as p:
+    with BuildSketch(Plane.XY, mode=Mode.PRIVATE) as sk1:  # the base, sk1
+        Rectangle(40, 20)
+    extrude(sk1.sketch, amount=5)
+    pl1 = Plane(p.faces().sort_by(Axis.Z)[-1])
+    with BuildSketch(pl1, mode=Mode.PRIVATE) as sk2:
+        Circle(3)
+    extrude(sk2.sketch, amount=-3, mode=Mode.SUBTRACT)
+    sk1b = 1
+`;
+    let out = call("rename_feature", src, 0, "base");
+    check(out === src.replace("as sk1:", "as base:").replace("extrude(sk1.sketch", "extrude(base.sketch"), "sk1 → base: its definition and its use; the comment and sk1b stay", diff(src, out));
+    check(features(out)[0].name === "base" && features(out)[1].refs.includes("base") && call("run", out, "part.py").ok, "the timeline follows and the part builds");
+    out = call("rename_feature", src, 2, "top");
+    check(out.includes("    top = Plane(") && out.includes("BuildSketch(top, mode") && !/\bpl1\b/.test(out), "a plane: pl1 → top, and the sketch on it", out);
+    check(call("rename_feature", src, 0, "sk1") === src, "the same name: nothing changes");
+    for (const [name, why] of [["sk2", /already used/], ["sk1b", /already used/], ["p", /already used/], ["2nd", /isn't a Python name/], ["with", /isn't a Python name/],
+      ["Box", /build123d/], ["points", /caad/], ["len", /Python/]]) {
+      const r = tryCall("rename_feature", src, 0, name);
+      check(why.test(r.error ?? ""), `refused: ${name} (${r.error})`);
+    }
+    check(/no name/.test(tryCall("rename_feature", src, 1, "x").error ?? ""), "an extrude has no name to rename");
+    check(/file changed/.test(tryCall("rename_feature", src, 0, "base", "sk9").error ?? "") && call("rename_feature", src, 0, "base", "sk1").includes("as base:"),
+      "the name the caller saw: refused when the feature no longer has it");
+    const twice = src.replace("    sk1b = 1\n", "    sk1 = 2\n");
+    check(/assigned again on line 11/.test(tryCall("rename_feature", twice, 0, "base").error ?? ""), "refused when the name is assigned again later");
+  });
+
+  test("new features are their own paragraphs; existing code isn't reformatted (docs/09)", () => {
+    const src = "from build123d import *\n\nwith BuildPart() as p:\n    Box(1, 1, 1)\n    Box(2, 2, 2)\n\n    Box(3, 3, 3)\nshow = 1\n";
+    const box = (after) => call("insert_feature", src, after, "Cylinder", { radius: "1", height: "1" }).src;
+    const cyl = "    Cylinder(radius=1, height=1)\n";
+    check(box(0) === src.replace("    Box(1, 1, 1)\n", "    Box(1, 1, 1)\n\n" + cyl + "\n"), "between two features without a blank line: a blank line on both sides", box(0));
+    check(box(1) === src.replace("    Box(2, 2, 2)\n", "    Box(2, 2, 2)\n\n" + cyl), "before a blank line already there: only one before it", box(1));
+    check(box(null) === src.replace("    Box(3, 3, 3)\n", "    Box(3, 3, 3)\n\n" + cyl), "at the end of the block: a blank line before it, the code after the block stays", box(null));
+    check(box(-1) === src.replace("    Box(1, 1, 1)\n", cyl + "\n    Box(1, 1, 1)\n"), "first: a blank line after it", box(-1));
+    check(call("insert_feature", empty, null, "Cylinder", { radius: "1", height: "1" }).src === empty.replace("    pass\n", cyl), "replacing pass: no blank lines");
   });
 
   test("deleting features", () => {
@@ -273,7 +317,7 @@ with BuildPart() as p:
       /earlier plane/.test(tryCall("patch_feature", src, 1, "plane", { base: "a" }).error), "the base must be a plane, a face or an earlier plane");
 
     const ins = call("insert_feature", src, 1, "plane", { base: "pl1", offset: "5", rx: "0" });
-    check(ins.name === "pl2" && ins.index === 2 && ins.src.includes("    pl1 = Plane.XZ.offset(-5).rotated((0, 0, 15))\n    pl2 = pl1.offset(5)\n") && features(ins.src)[2].refs.includes("pl1"),
+    check(ins.name === "pl2" && ins.index === 2 && ins.src.includes("    pl1 = Plane.XZ.offset(-5).rotated((0, 0, 15))\n\n    pl2 = pl1.offset(5)\n\n    a = 3\n") && features(ins.src)[2].refs.includes("pl1"),
       "+ Plane on pl1: pl2 = pl1.offset(5), using pl1");
     check(/used by 3\. Plane pl2/.test(tryCall("delete_feature", ins.src, 1).error), "a plane in use can't be deleted");
     check(call("insert_feature", empty, null, "plane", {}).src.includes("    pl1 = Plane.XY\n"), "+ Plane without parameters: on XY");

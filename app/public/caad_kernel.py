@@ -985,15 +985,22 @@ def insert_feature(src, after, kind, params):
     text = "".join(indent + line + "\n" for line in lines)
     n = len(block.body)
     only_pass = n == 1 and isinstance(first, ast.Pass)
+    # Each new feature is its own paragraph: a blank line between it and the features around it (docs/09).
+    # Existing code is never reformatted, so a blank line already there is used rather than added.
+    blank = lambda i: i >= len(t.lines) or not t.lines[i].strip()  # 0-based line index; past the end counts as blank
     if only_pass:
         a, b, index = t.starts[first.lineno - 1], t.starts[first.end_lineno], 0
     elif after is not None and after < 0:
         a = b = t.starts[first.lineno - 1]
         index = 0
+        text += "\n"
     else:
         stmt = block.body[n - 1 if after is None else min(after, n - 1)]
         a = b = t.starts[stmt.end_lineno]
         index = (n - 1 if after is None else min(after, n - 1)) + 1
+        text = "\n" + text
+        if index < n and not blank(stmt.end_lineno):
+            text += "\n"
     if a == len(src) and src and not src.endswith("\n"):
         text = "\n" + text
     return {"src": _ensure_caad_imports(src[:a] + text + src[b:]), "index": index, "name": name}
@@ -1019,6 +1026,60 @@ def delete_feature(src, index):
     if len(block.body) == 1:
         return src[:a] + t.lines[stmt.lineno - 1][:stmt.col_offset] + "pass\n" + src[b:]
     return src[:a] + src[b:]
+
+
+def rename_feature(src, index, name, old=None):
+    """Source with feature `index`'s name (`as sk1`, `pl1 = ...`) changed to `name`, and every later use of it
+    (`sk1.sketch`, `points(sk1)`, `Plane(pl1)`, ...): only those names change, nothing else (docs/09).
+    Refused when the name isn't free: a Python keyword, used in the file, or a build123d, caad or Python name.
+    `old`, when given, is the name the caller saw: refused if the feature no longer has it (the file changed)."""
+    import builtins
+    import keyword
+    feats = analyze(src)["features"]
+    if not 0 <= index < len(feats):
+        raise ValueError(f"There is no feature {index}.")
+    seen, old, name = old, feats[index]["name"], (name or "").strip()
+    if not old:
+        raise ValueError("This feature has no name to rename.")
+    if isinstance(seen, str) and seen != old:
+        raise ValueError(f"The file changed: feature {index + 1} is {old} now, not {seen}. Try again.")
+    if name == old:
+        return src
+    if not name.isidentifier() or keyword.iskeyword(name) or keyword.issoftkeyword(name):
+        raise ValueError(f"{name!r} isn't a Python name: letters, digits and _, not starting with a digit.")
+    tree = ast.parse(src)
+    taken = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name):
+            taken.add(n.id)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            taken.add(n.name)
+        elif isinstance(n, ast.arg):
+            taken.add(n.arg)
+        elif isinstance(n, ast.alias):
+            taken.add((n.asname or n.name).split(".")[0])
+    if name in taken:
+        raise ValueError(f"{name} is already used in this file.")
+    import build123d
+    import caad
+    if hasattr(build123d, name) or hasattr(caad, name) or hasattr(builtins, name):
+        raise ValueError(f"{name} is a name of {'build123d' if hasattr(build123d, name) else 'caad' if hasattr(caad, name) else 'Python'}: choose another.")
+    block, _ = _find_part_block(tree)
+    stmt = block.body[index]
+    start = (stmt.lineno, stmt.col_offset)
+    inside = lambda n: start <= (n.lineno, n.col_offset) and (n.end_lineno, n.end_col_offset) <= (stmt.end_lineno, stmt.end_col_offset)
+    nodes = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == old and (n.lineno, n.col_offset) >= start]
+    again = [n for n in nodes if isinstance(n.ctx, (ast.Store, ast.Del)) and not inside(n)]
+    if again:
+        raise ValueError(f"{old} is assigned again on line {again[0].lineno}: rename it in the code.")
+    t = _Text(src)
+    out = src
+    for a, b in sorted({(t.start(n), t.end(n)) for n in nodes}, reverse=True):
+        out = out[:a] + name + out[b:]
+    after = analyze(out)["features"]
+    if len(after) != len(feats) or after[index]["name"] != name:
+        raise ValueError("Renaming would change the timeline: rename it in the code.")
+    return out
 
 
 # --- Sketch editor: constrained sketches read into a model and edited as code (docs/06-sketches.md) ---

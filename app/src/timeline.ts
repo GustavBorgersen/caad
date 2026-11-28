@@ -25,7 +25,24 @@ export type TimelineMarks = {
   agent: Set<number>;
   /** The feature being edited in a dialog or the sketch editor. */
   active: number | null;
+  /** The feature the cursor in the code is in. */
+  cursor?: number | null;
 };
+
+/** The index of the timeline row that has the keyboard focus (for F2 and Delete), or null. */
+export function focusedFeature(el: HTMLElement): number | null {
+  const a = document.activeElement as HTMLElement | null;
+  return a && el.contains(a) && a.matches("li.feature[data-index]") ? Number(a.dataset.index) : null;
+}
+
+/** Mark the row of the feature the cursor in the code is in (without redrawing the timeline). */
+export function markCursor(el: HTMLElement, index: number | null) {
+  for (const li of el.querySelectorAll<HTMLElement>("li.feature[data-index]")) {
+    const on = li.dataset.index === String(index);
+    if (on && !li.classList.contains("at-cursor")) li.scrollIntoView({ block: "nearest" });
+    li.classList.toggle("at-cursor", on);
+  }
+}
 
 /** "sk1 = Sketch: Rectangle" → name and what it is, apart; a label without a name stays as it is. */
 function split(f: Feature): { name: string | null; what: string } {
@@ -37,6 +54,7 @@ function split(f: Feature): { name: string | null; what: string } {
 }
 
 export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: TimelineHandlers, marks: TimelineMarks = { agent: new Set(), active: null }) {
+  const focused = focusedFeature(el); // keeps the keyboard focus on its row when the timeline is redrawn
   el.replaceChildren();
   const feats = result?.timeline?.features ?? [];
   const last = feats.length - 1;
@@ -48,12 +66,13 @@ export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: T
   if (rolledBack && result!.upto === -1) el.append(bar(() => h.rollback(null))); // before the first feature
   feats.forEach((f) => {
     const li = document.createElement("li");
-    li.className = `feature ${f.status}${f.sketch?.dof ? " under" : ""}${f.sketch?.message ? " warn" : ""}${marks.active === f.index ? " active" : ""}`;
+    li.className = `feature ${f.status}${f.sketch?.dof ? " under" : ""}${f.sketch?.message ? " warn" : ""}${marks.active === f.index ? " active" : ""}${marks.cursor === f.index ? " at-cursor" : ""}`;
     li.dataset.index = String(f.index);
-    li.title = `${f.label}${f.sketch ? ` — ${sketchStatus(f.sketch)}` : ""}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here · double-click to ${f.tier === "code" ? "show its code" : "edit"} · right-click for more` +
+    li.tabIndex = 0;
+    li.title = `${f.label}${f.sketch ? ` — ${sketchStatus(f.sketch)}` : ""}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here · double-click to ${f.tier === "code" ? "show its code" : "edit"} · right-click for more${f.name ? " · F2 renames it" : ""}` +
       (f.status === "error" && result?.error ? `\n${result.error.message}` : "");
     const { name, what } = split(f);
-    li.innerHTML = `<span class="icon">${icon(featureIcon(f.kind))}</span><span class="label">${name ? `<span class="n">${esc(name)}</span>` : ""}${esc(what)}</span>` +
+    li.innerHTML = `<span class="icon">${icon(featureIcon(f.kind))}</span><span class="label">${name ? `<span class="n tn">${esc(name)}</span>` : ""}${esc(what)}</span>` +
       `<span class="marks">${marks.agent.has(f.index) ? '<i class="mark-agent" title="Changed by the agent"></i>' : ""}${f.status === "error" ? '<i class="mark-err" title="This feature failed"></i>' : ""}` +
       `<button class="del" title="Delete this feature · Delete" aria-label="Delete">${icon("trash")}</button></span>`;
     li.querySelector<HTMLButtonElement>(".del")!.onclick = (e) => { e.stopPropagation(); h.remove(f); };
@@ -64,10 +83,11 @@ export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: T
       li.append(msg);
     }
     li.onclick = (e) => {
+      if (li.classList.contains("editing")) return; // typing its new name
       clearTimeout(clickTimer);
       if (e.detail === 1) clickTimer = window.setTimeout(() => h.rollback(f.index === last ? null : f.index), DOUBLE_CLICK_MS);
     };
-    li.ondblclick = () => { clearTimeout(clickTimer); h.edit(f); };
+    li.ondblclick = () => { if (li.classList.contains("editing")) return; clearTimeout(clickTimer); h.edit(f); };
     li.oncontextmenu = (e) => { e.preventDefault(); h.menu(f, { x: e.clientX, y: e.clientY }); };
     li.onmouseenter = () => h.hover(f);
     li.onmouseleave = () => h.hover(null);
@@ -75,6 +95,7 @@ export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: T
     if (rolledBack && f.index === result!.upto) el.append(bar(() => h.rollback(null)));
   });
   if (feats.length && !rolledBack) el.append(bar(null));
+  if (focused !== null) el.querySelector<HTMLElement>(`li.feature[data-index="${focused}"]`)?.focus({ preventScroll: true });
   if (result?.error && result.error.feature == null) {
     const li = document.createElement("li");
     li.className = "feature error";

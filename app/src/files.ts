@@ -38,7 +38,7 @@ const KINDS: [FileKind | "config", string, string][] = [
   ["export", "Exports", "exports/"], ["print", "Print", "print/"],
 ];
 const ICON: Record<string, IconName> = { part: "part", shared: "fileCode", assembly: "box", export: "fileDown", print: "fileDown", config: "fileCog" };
-const PY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const PY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const FOLDER_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 const dirOf = (path: string) => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
 const baseOf = (path: string) => path.split("/").pop()!;

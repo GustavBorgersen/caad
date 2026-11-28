@@ -11,7 +11,7 @@ describe("run", () => {
     const r = call("run", bracket, "bracket.py");
     check(r.ok && r.upto === 5 && statuses(r) === "ok,ok,ok,ok,ok,ok", "builds", JSON.stringify(r.error));
     check(r.timeline.features.map((f) => f.kind).join() === "sketch,extrude,sketch,extrude,hole,fillet", "feature kinds");
-    check(r.timeline.features[1].line === 12 && r.timeline.features[4].line === 17 && r.timeline.features[4].end === 18, "features know their lines");
+    check(r.timeline.features[1].line === 13 && r.timeline.features[4].line === 21 && r.timeline.features[4].end === 22, "features know their lines");
     check(r.mesh.faces.length === 11 && r.mesh.edges.length === 27 && r.mesh.indices.length > 0, `a mesh with every face and edge (${r.mesh.faces.length} faces, ${r.mesh.edges.length} edges)`);
   });
 
@@ -30,7 +30,7 @@ describe("run", () => {
 
   test("a failing feature: the error at it, the model before it shown", () => {
     const r = call("run", pump.replace("radius=1)", "radius=20)"), "pump_body.py");
-    check(!r.ok && r.error.feature === 5 && r.error.line === 18 && /Failed creating a fillet/.test(r.error.message), "the fillet fails", JSON.stringify(r.error));
+    check(!r.ok && r.error.feature === 5 && r.error.line === 23 && /Failed creating a fillet/.test(r.error.message), "the fillet fails", JSON.stringify(r.error));
     check(statuses(r) === "ok,ok,ok,ok,ok,error" && r.mesh.faces.length === 18, "earlier features built; the mesh is the part before the fillet");
   });
 

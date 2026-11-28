@@ -184,7 +184,7 @@ step("+ Fillet at the rollback bar: a new feature on the selected edges", async 
   await ok();
   src = await code();
   const added = src.slice(bracketBefore.length);
-  check(src.startsWith(bracketBefore) && /^    fillet\(bracket\.edges\(\)[^\n]*, radius=2\)\n$/.test(added), "OK adds the fillet at the end", added);
+  check(src.startsWith(bracketBefore) && /^\n    fillet\(bracket\.edges\(\)[^\n]*, radius=2\)\n$/.test(added), "OK adds the fillet at the end, as its own paragraph", added);
   check(await page.evaluate(() => window.caad.state.result.ok && window.caad.state.result.timeline.features.length === 7), "and it builds as feature 7");
 });
 
