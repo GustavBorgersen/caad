@@ -50,7 +50,7 @@ Select-first and command-first both work and end in the same dialog: selecting a
 
 ### Modes
 
-Part, sketch, and later assembly and slicing, are **modes of one layout**: the same places for the toolbar, the panels, the selection and the dialogs; only the commands in the toolbar change. Entering a mode never rearranges the screen.
+Part, sketch, and later slicing, are **modes of one layout** (parts and mates need no mode of their own: [08](08-parts-and-mates.md)): the same places for the toolbar, the panels, the selection and the dialogs; only the commands in the toolbar change. Entering a mode never rearranges the screen.
 
 ### Commands
 

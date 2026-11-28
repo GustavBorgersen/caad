@@ -1,6 +1,6 @@
 # CAAD — Roadmap
 
-**Date:** 2026-11-24, updated 2026-11-27
+**Date:** 2026-11-24, updated 2026-11-28
 **Replaces:** [03 — MVP plan](03-mvp-plan.md) (completed)
 
 ## Where we are
@@ -54,22 +54,24 @@ A serious iteration on how CAAD looks and works, before more features pile on. D
 | **The view** | **Done 2026-11-28:** the view's gradient, colours from the tokens, preview colouring only what the dialog changes, the faded part while sketching, the view cube, standard views, fit, view normal, smooth camera moves | 10 |
 | **Start-up** | Build once at start-up ([#3](https://github.com/GustavBorgersen/caad/issues/3)) | — |
 
-### Phase 2 — Part studio
+### Phase 2 — Parts and mates
+
+One kind of file with any number of parts and the mates between them: no separate part studios and assemblies, no switching views. Moving never changes a part's shape; a part drawn on another is attached to it; dragging writes the new position into the code ([08](08-parts-and-mates.md)).
 
 | Item | What |
 | :-- | :-- |
-| **Several parts in one space** | A part studio file can create several parts, shown together with their own colours and visibility (design doc 08 — Part studios and assemblies, to write) |
-| **New part or add to part** | Extrude and similar features choose: create a new part, add to / cut from an existing one |
-| **Cross-part references** | A feature of one part can use faces and edges of another (e.g. a lid sketched on a box's rim) |
+| **Several parts in one file** (08a) | One `with BuildPart()` block per part, `with <part>:` to add to it later; own colours and visibility; *New part* or add to a part in Extrude and Revolve |
+| **Mates** (08b) | Fastened, Revolute, Slider, Cylindrical, Ball as one-line `caad` helpers; placed after the run along the mate tree; a Fastened mate written when a part is drawn on another; the mate dialog (<kbd>M</kbd>); assembly STEP |
+| **Dragging** (08c) | Drag parts within their free directions, live in the view; the value written on release; fix and release parts |
+| **Agent** (08d) | Parts and mates in `get_timeline`, mates edited with `edit_feature`, the guide |
 | **Drawing for the agent** | A pen mode draws on the view (circle an area, sketch an arrow); a `get_annotation` tool gives the agent the picture *and* the faces/edges under the strokes with their selectors |
 
-### Phase 3 — Assemblies
+### Phase 3 — Reuse and motion
 
 | Item | What |
 | :-- | :-- |
-| **Assembly files** | Place parts from part studios as instances |
-| **Mates** | Fastened, revolute, slider, cylindrical… mapped onto build123d's joints |
-| **Motion and checks** | Move mates with sliders; interference check; exploded view |
+| **Insert parts from other files** | Bring a part from another file in (several instances), mated like any part |
+| **Motion and checks** | Interference check; exploded view; closed loops (four-bar linkages) with a solver |
 
 ### Phase 4 — Slicing
 
@@ -94,7 +96,7 @@ A print job is its own file in the project's `print/` folder, opened in a slice 
 | 05 | [Feature model and code round-trip](05-feature-model.md) | Built |
 | 06 | [Sketches and constraints](06-sketches.md) | 06a–06d built |
 | 07 | [Project structure](07-project-structure.md) | Built |
-| 08 | Part studios and assemblies | To write before phase 2 |
+| 08 | [Parts and mates](08-parts-and-mates.md) | Agreed; not built |
 | 09 | [Design goals, layout and workflow](09-design-and-workflow.md) | Agreed |
 | 10 | [Visual system](10-visual-system.md) | Agreed (direction A); built in 1.5e and 1.5f |
 | 11 | [Slicing](11-slicing.md) | Stub; details before phase 4 |
