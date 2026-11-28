@@ -22,6 +22,17 @@ const opened = () => page.waitForFunction(() => window.caad.sketcher.active && !
 const closed = () => page.waitForFunction(() => !window.caad.sketcher.active);
 const screen = (x, y) => page.evaluate(([a, b]) => window.caad.sketcher.screen([a, b]), [x, y]);
 const clickAt = async (x, y) => { const s = await screen(x, y); await page.mouse.move(s.x, s.y); await page.mouse.click(s.x, s.y); await idle(); };
+/** A point on the line from `a` to `b` that no label covers (labels' size depends on the fonts), away from its ends. */
+const onLine = async ([x0, y0], [x1, y1]) => {
+  const [a, b] = [await screen(x0, y0), await screen(x1, y1)];
+  for (const t of [0.5, 0.4, 0.6, 0.3, 0.7, 0.25, 0.75, 0.2, 0.8]) {
+    const [x, y] = [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t];
+    const s = await screen(x, y);
+    if (Math.min(Math.hypot(s.x - a.x, s.y - a.y), Math.hypot(s.x - b.x, s.y - b.y)) < 12) continue; // the ends snap within 10 px
+    if (await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.tagName === "CANVAS", [s.x, s.y])) return [x, y];
+  }
+  throw new Error("labels cover the whole line");
+};
 const shiftClickAt = async (x, y) => { await page.keyboard.down("Shift"); await clickAt(x, y); await page.keyboard.up("Shift"); };
 const dragFrom = async ([x0, y0], [x1, y1]) => {
   const a = await screen(x0, y0), b = await screen(x1, y1);
@@ -354,7 +365,7 @@ with BuildPart() as wedge:
   check((await model()).dof === 3 && (await labels()) === "30", `the angle shows as drawn: 30, not -30 (${await labels()}); 3 degrees of freedom`);
 
   await tool("dimension");
-  await clickAt(-4.33, 15); // line1
+  await clickAt(...(await onLine([-8.66, 15], [0, 15]))); // line1 (its 30° label may sit on its middle)
   const s = await screen(-4.33, 8);
   await page.mouse.move(s.x, s.y);
   check(await page.$$eval(".sketch-labels .dim.preview", (d) => d.map((x) => x.textContent).join()) === "8.66", "a line picked: its length previewed");
@@ -382,8 +393,10 @@ with BuildPart() as wedge:
 
   await tool("select");
   const x0 = (await model()).entities.find((e) => e.ref === "rect1.corners[2]").x;
-  const y1 = (await model()).entities.find((e) => e.ref === "line1.end").y;
-  await dragFrom([-9, y1], [-9, 12]); // (its length label is in the middle) // line1 down: its 30° wedge takes the rectangle's top with it
+  const m = await model();
+  const [p1, p2] = ["line1.start", "line1.end"].map((r) => { const e = m.entities.find((x) => x.ref === r); return [e.x, e.y]; });
+  const grab = await onLine(p1, p2); // not under its labels
+  await dragFrom(grab, [grab[0], 12]); // line1 down: its 30° wedge takes the rectangle's top with it
   const corner = (await model()).entities.find((e) => e.ref === "rect1.corners[2]");
   check(Math.abs(corner.x - x0) < 1e-3 && Math.abs(corner.y - (12 + 12 * Math.tan(Math.PI / 6))) < 0.2,
     "line1 drags (the implied perpendicular is left out while dragging); the rectangle's height follows", corner);
