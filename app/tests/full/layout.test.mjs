@@ -153,6 +153,60 @@ step("the code pane is closed at first; Ctrl+J opens it", async () => {
   await app.shot("layout-1.png");
 });
 
+step("code and timeline: F2 renames a feature and its uses; the cursor in the code marks its row; Delete on a row", async () => {
+  const row = (i) => `#timeline li.feature[data-index="${i}"]`;
+  const startRename = async () => {
+    await page.focus(row(0)); // the base sketch (a focused row, not a click: a click rolls back)
+    await page.keyboard.press("F2");
+    await page.waitForSelector(`${row(0)}.editing .edit input`, { timeout: 5000 });
+    await page.$eval(`${row(0)} .edit input`, (i) => i.select());
+  };
+  await startRename();
+  await page.keyboard.type("wall");
+  check(await page.$eval(`${row(0)} + .hint`, (h) => h.classList.contains("bad") && /another feature/.test(h.textContent)), "another feature's name is refused while typing");
+  const g0 = await gen();
+  await page.evaluate(() => { window.caad.rebuild(); });
+  await waitBuild(g0);
+  check(await page.$eval(`${row(0)} .edit input`, (i) => i === document.activeElement && i.value === "wall"), "a build coming in while the name is typed keeps the field and what was typed");
+  await page.keyboard.press("Escape");
+  check((await page.$$(`${row(0)}.editing`)).length === 0 && (await code()).includes("as base:"), "Esc cancels: nothing changes");
+  const before = await code();
+  let g = await gen();
+  await startRename();
+  await page.keyboard.type("plate");
+  await page.keyboard.press("Enter");
+  await waitBuild(g);
+  check((await code()).includes("with BuildSketch() as plate:") && !(await code()).includes("as base:"), "renamed in the code", (await code()).split("\n").find((l) => l.includes("BuildSketch()")));
+  check((await page.$eval(`${row(0)} .n`, (n) => n.textContent)) === "plate" && /Renamed base to plate/.test(await app.message()), "the timeline shows the new name; the message offers Undo", await app.message());
+  check(await page.evaluate((r) => document.activeElement === document.querySelector(r), row(0)), "the row keeps the keyboard focus through the rebuild");
+  g = await gen();
+  await page.evaluate(() => [...document.querySelectorAll("#messages button")].find((b) => b.textContent === "Undo").click());
+  await waitBuild(g);
+  check((await code()) === before, "Undo renames it back");
+
+  // The cursor in the code marks its feature's row; leaving the code clears the mark.
+  const fillet = await page.evaluate(() => window.caad.state.result.timeline.features.find((f) => f.kind === "fillet"));
+  const cursorTo = (line) => page.evaluate((l) => { const v = window.caad.editor.view; v.focus(); v.dispatch({ selection: { anchor: v.state.doc.line(l).from } }); }, line);
+  await cursorTo(fillet.line);
+  check(JSON.stringify(await page.$$eval("#timeline li.at-cursor", (l) => l.map((x) => x.dataset.index))) === JSON.stringify([String(fillet.index)]), "the cursor on the fillet's line marks the fillet's row");
+  await cursorTo(1);
+  check((await page.$$("#timeline li.at-cursor")).length === 0, "on a line that isn't a feature (the docstring): no row");
+  await cursorTo(fillet.line);
+  await page.focus(row(fillet.index));
+  const cleared = await page.waitForFunction(() => !document.querySelector("#timeline li.at-cursor"), { timeout: 5000 }).then(() => true, () => false); // CodeMirror reports the blur a moment later
+  check(cleared, "leaving the code clears the mark");
+
+  // Delete on a focused row deletes its feature, like the row's bin.
+  g = await gen();
+  await page.keyboard.press("Delete");
+  await waitBuild(g);
+  check(!(await code()).includes("fillet(") && /deleted/.test(await app.message()), "Delete on the fillet's row deletes it", await app.message());
+  g = await gen();
+  await page.evaluate(() => [...document.querySelectorAll("#messages button")].find((b) => b.textContent === "Undo").click());
+  await waitBuild(g);
+  check((await code()) === before, "and Undo brings it back");
+});
+
 step("no native popups anywhere", () => {
   check(app.nativeDialogs.length === 0, "no alert, confirm or prompt", app.nativeDialogs);
 });

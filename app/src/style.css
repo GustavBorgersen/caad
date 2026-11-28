@@ -163,6 +163,9 @@ body.rail-hidden #toggle-left { display: grid; }
 .feature .marks { display: flex; align-items: center; gap: 6px; }
 .feature:hover { background: var(--panel-2); }
 .feature.hovered { background: var(--panel-2); }
+.feature.at-cursor { background: var(--panel-2); box-shadow: inset 3px 0 var(--faint); } /* the cursor in the code is in it */
+.feature:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.feature .edit { display: inline-flex; width: 9em; margin-right: 5px; vertical-align: middle; font: 600 var(--fs-s) var(--mono); }
 .feature.active { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
 .feature.rolled-back, .feature.skipped { opacity: .4; }
 .feature.active { opacity: 1; }

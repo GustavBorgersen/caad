@@ -24,13 +24,16 @@ hole_d = 8
 
 with BuildPart() as plate:
     Box(length, width, thickness, align=(Align.CENTER, Align.CENTER, Align.MIN))
+
     with Locations((-25, 0, thickness), (25, 0, thickness)):
         Hole(hole_d / 2)
+
     fillet(plate.edges().filter_by(Axis.Z), radius=4)
 ```
 
 - Name the builder after the part (`plate`, `bracket`); selectors refer to it (`plate.edges()`).
 - Files live in **projects**: folders with a `pyproject.toml` (`[tool.caad]`). Parts go in `<project>/parts/`. Parameters shared by several parts go in a module of the project, e.g. `<project>/params.py` with `wall = 3`, and parts import them: `from params import wall` — the project's folder is the import root. `list_parts` shows the layout.
+- Separate features with a blank line, as CAAD does when it adds one: each feature is its own paragraph, like a row in the timeline.
 - Keep one feature per statement, directly inside the block: a sketch block, an extrude, a fillet, a `Locations` block with holes. A `with BuildSketch()` / `with Locations()` block counts as one feature together with what is inside it. Don't hide features in functions or loops unless the user asks.
 - Use parameters for dimensions the user may want to change. Units are millimetres.
 - Select geometry with selectors (`part.edges().filter_by(Axis.Z)`), never with fixed indices.
@@ -50,6 +53,7 @@ from build123d import *
 
 with BuildPart() as block:
     Box(40, 30, 20)
+
     Cylinder(radius=6, height=20, mode=Mode.SUBTRACT)   # a through-hole
 ```
 
@@ -65,9 +69,12 @@ with BuildPart() as part:
         Rectangle(60, 40)
         fillet(base.vertices(), radius=5)               # round the corners (before adding curves)
         Circle(8, mode=Mode.SUBTRACT)
+
     extrude(amount=10)
+
     with BuildSketch(part.faces().sort_by(Axis.Z)[-1]):  # sketch on the top face
         RegularPolygon(radius=12, side_count=6)
+
     extrude(amount=5)
 ```
 
@@ -98,6 +105,7 @@ with BuildPart() as plate:
             c.radius(h, hole_d / 2)
             c.vdistance(r.corners[0], h.center, depth / 2)
             c.hdistance(r.corners[0], h.center, 15)
+
     extrude(sk1.sketch, amount=5)
 ```
 
@@ -124,12 +132,17 @@ with BuildPart() as hub:
     with BuildSketch(Plane.XZ, mode=Mode.PRIVATE) as sk1:      # the profile, beside the Z axis
         with Locations((radius / 2, height / 2)):
             Rectangle(radius, height)
+
     revolve(sk1.sketch, axis=Axis.Z)                          # revolve: the sketch, axis, revolution_arc (degrees)
+
     with Locations((radius + 6, 0, 2)):                       # a lug on one side…
         Box(14, 10, 4)
+
     mirror(about=Plane.YZ)                                     # …mirrored to the other (adds the mirror image)
+
     with Locations((radius + 8, 0, 4), (-radius - 8, 0, 4)):  # hole: positions (or a face), then one hole
         CounterBoreHole(radius=bolt_r, counter_bore_radius=2 * bolt_r, counter_bore_depth=1.5)
+
     fillet(hub.edges().filter_by(GeomType.CIRCLE).sort_by(Axis.Z)[-1:], radius=1)
 ```
 
@@ -151,11 +164,15 @@ with BuildPart() as ring:
             c.coincident(line1.start, c.origin)
             c.vertical(line1)
             c.hdistance(line1.start, r.corners[0], 10)
+
     revolve(sk1.sketch, axis=axis(sk1, line1))                # a ring about that line
+
     pl1 = Plane.XY.offset(4)                                   # a plane on the ring's top
+
     with BuildSketch(pl1, mode=Mode.PRIVATE) as sk2:
         with Locations((12, 0)):
             Circle(1.5)
+
     extrude(sk2.sketch, amount=3)                              # a peg on it
 ```
 
@@ -169,6 +186,7 @@ with BuildPart() as handle:
         with BuildLine() as outline:
             Polyline((0, 0), (30, 0), (30, 5), (5, 5), (5, 20), (0, 20), close=True)
         make_face()
+
     revolve(axis=Axis.Z)                                 # revolve the profile around Z
 ```
 
@@ -187,8 +205,11 @@ from build123d import *
 
 with BuildPart() as cup:
     Cylinder(radius=30, height=40, align=(Align.CENTER, Align.CENTER, Align.MIN))
+
     offset(amount=-2, openings=cup.faces().sort_by(Axis.Z)[-1])   # shell: 2 mm wall, open top
+
     fillet(cup.edges().group_by(Axis.Z)[0], radius=1)             # round the bottom outside edge
+
     chamfer(cup.edges().group_by(Axis.Z)[-1], length=0.5)         # break the top rim
 ```
 
@@ -206,14 +227,22 @@ from build123d import *
 
 with BuildPart() as p:
     Box(40, 30, 10)
+
     top = p.faces().sort_by(Axis.Z)[-1]                    # highest face
+
     bottom_edges = p.edges().group_by(Axis.Z)[0]           # all edges at the lowest Z
+
     vertical = p.edges().filter_by(Axis.Z)                 # edges parallel to Z
+
     side_faces = p.faces().filter_by(Axis.X)               # planar faces facing ±X
+
     with Locations(top):
         Hole(4)
+
     round_edges = p.edges().filter_by(GeomType.CIRCLE)     # the hole's circular edges
+
     biggest = p.faces().sort_by(SortBy.AREA)[-1]
+
     new_edges = p.edges(Select.LAST)                       # edges made by the last operation
 ```
 
@@ -230,10 +259,13 @@ from build123d import *
 
 with BuildPart() as plate:
     Box(100, 60, 5)
+
     with GridLocations(80, 40, 2, 2):                      # 4 holes in a 80 x 40 grid
         Hole(3)
+
     with PolarLocations(radius=15, count=6):               # 6 holes on a circle
         Hole(1.5)
+
     with Locations((0, 0, 2.5)):
         Cylinder(radius=8, height=10, align=(Align.CENTER, Align.CENTER, Align.MIN))
 ```

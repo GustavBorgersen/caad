@@ -1,7 +1,7 @@
 # CAAD — Design goals, layout and workflow
 
 **Date:** 2026-11-27
-**Status:** Agreed; 1.5a, 1.5b, 1.5d, 1.5e and 1.5f built (2026-11-28), 1.5c partly (names in the timeline); see the build order
+**Status:** Agreed; built (2026-11-28): 1.5a–1.5g; see the build order
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1.5 ("Layout, visuals and workflow"); replaces the roadmap's "Contrast fixes" item and the "Visual design" brainstorm
 
 ## Problem
@@ -122,7 +122,7 @@ Constraints that hold for every direction: no UI framework (plain TypeScript and
 | :-- | :-- |
 | **1.5a — Mock-ups** (done) | The style directions above; pick one; write doc 10 |
 | **1.5b — Commands and keys** (done) | The command registry; the toolbar, shortcuts, tooltips and <kbd>?</kbd> sheet built from it; the context menus; in-app dialogs and messages instead of `prompt`/`confirm`/`alert` |
-| **1.5c — Code ↔ timeline** (partly) | Names in the timeline (done), rename, a blank line between new features (kernel writer, examples, guide), cross-highlighting (row → code done; code → row to do) |
+| **1.5c — Code ↔ timeline** (done) | Names in the timeline, rename (`rename_feature` in the kernel: the name and its later uses, refused when the name isn't free), a blank line between new features (kernel writer, examples, guide), cross-highlighting (row → code, code → row) |
 | **1.5d — Undo** (done) | The per-file history, undo/redo everywhere, agent edits marked |
 | **1.5e — Themes and layout** (done) | The tokens of doc 10, light and dark, the new layout |
 | **1.5f — The view** (done) | Shading, edges, selection colours, view cube and standard views, smooth camera moves |

@@ -123,7 +123,7 @@ with BuildPart() as part:
     const volumeOf = (src) => call("run", src, "part.py").summary?.volume;
     let conv = call("sketch_convert", bracket, 0);
     check(conv.includes("from build123d import *\nfrom caad import Constrained\n") &&
-      conv.includes("    with BuildSketch() as base:\n        with Constrained() as c:\n            rect1 = c.rectangle((-30, -20), (30, 20))\n            c.length(rect1.bottom, width)\n            c.length(rect1.left, depth)\n            c.coincident(rect1.center, c.origin)\n    extrude(amount=thickness)"),
+      conv.includes("    with BuildSketch() as base:\n        with Constrained() as c:\n            rect1 = c.rectangle((-30, -20), (30, 20))\n            c.length(rect1.bottom, width)\n            c.length(rect1.left, depth)\n            c.coincident(rect1.center, c.origin)\n\n    extrude(amount=thickness)"),
       "the bracket's base: Rectangle(width, depth) -> a rectangle with lengths width and depth, centred on the origin", conv.split("\n").slice(9, 17).join(" | "));
     check(Math.abs(volumeOf(conv) - volumeOf(bracket)) < 1e-6, "the part is the same (the extrude still takes the pending sketch)");
     check(call("sketch_open", conv, 0).dof === 0 && call("run", conv, "part.py").timeline.features[0].constrained, "and it opens in the editor, fully constrained");

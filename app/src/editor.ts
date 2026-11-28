@@ -46,6 +46,8 @@ export class Editor {
   private silent = false;
   private marks: Marks = { error: null, feature: null, agent: [] };
   onChange: (text: string) => void = () => {};
+  /** The line the cursor is on while the code has the focus (null when it loses it). */
+  onCursor: (line: number | null) => void = () => {};
 
   constructor(el: HTMLElement) {
     this.view = new EditorView({
@@ -57,7 +59,10 @@ export class Editor {
           python(),
           syntaxHighlighting(highlight),
           marksField,
-          EditorView.updateListener.of((u) => { if (u.docChanged && !this.silent) this.onChange(u.state.doc.toString()); }),
+          EditorView.updateListener.of((u) => {
+            if (u.docChanged && !this.silent) this.onChange(u.state.doc.toString());
+            if (u.selectionSet || u.focusChanged || u.docChanged) this.onCursor(u.view.hasFocus ? u.state.doc.lineAt(u.state.selection.main.head).number : null);
+          }),
         ],
       }),
     });
