@@ -17,14 +17,14 @@ try {
   });
   await page.waitForFunction(() => window.caad.state.selection.length > 0);
   await page.screenshot({ path: join(OUT, "ui-1-selected.png") });
-  await page.click("#sketch-button");
+  await page.click('#commands [data-command="sketch"]'); // on the selected face
   await page.waitForFunction(() => window.caad.sketcher.active, { timeout: 60_000 });
   await page.evaluate(() => window.caad.sketcher.act([{ op: "add", kind: "rectangle", args: [[-15, -1], [15, 11]] }]));
   await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.6);
   await page.screenshot({ path: join(OUT, "ui-2-sketch.png") });
   await page.click("#sketch-panel button[title^='Leave']");
   await page.click("#toggle-code");
-  await page.click("#toggle-left");
+  await page.click("#collapse-left");
   await new Promise((r) => setTimeout(r, 300));
   await page.screenshot({ path: join(OUT, "ui-3-compact.png") });
   console.log("screenshots written");

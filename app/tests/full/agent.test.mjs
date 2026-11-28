@@ -86,7 +86,7 @@ async function run() {
 
   step("the user clicks a face; the agent asks what it is", async () => {
     const box = await (await page.$("#view canvas")).boundingBox();
-    await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.62);
+    await page.mouse.click(box.x + box.width * 0.33, box.y + box.height * 0.72); // the base plate, clear of the hole
     await page.waitForFunction(() => window.caad.state.selection.length > 0, { timeout: 10_000 });
     const r = await call("get_selection");
     check(r.text.includes("bracket.faces()"), "get_selection", r.text);

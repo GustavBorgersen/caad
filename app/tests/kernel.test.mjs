@@ -7,3 +7,4 @@ import "./kernel/feature.mjs";
 import "./kernel/constrained.mjs";
 import "./kernel/sketch-edit.mjs";
 import "./kernel/guide.mjs";
+import "./kernel/params.mjs";

@@ -24,7 +24,7 @@ const freePort = () => new Promise((resolve, reject) => {
  * Start the dev server and the browser, open the app and wait for its first build.
  * The page connects to no caad-mcp bridge (a developer's own, or another test's) except `bridgePort`.
  */
-export async function openApp(name, { bridgePort = 0, viewport = { width: 1400, height: 850 }, wait = true } = {}) {
+export async function openApp(name, { bridgePort = 0, viewport = { width: 1400, height: 850 }, wait = true, start = "examples", theme = "light", code = true } = {}) {
   const server = await createServer({
     root: APP,
     configFile: join(APP, "vite.config.ts"),
@@ -43,21 +43,29 @@ export async function openApp(name, { bridgePort = 0, viewport = { width: 1400, 
   const page = await browser.newPage();
   const app = {
     name, page, browser, server, url,
-    /** What the next prompt() is answered with; confirm() and alert() are accepted. */
-    answer: "",
-    /** The last dialog's message. */
-    lastDialog: "",
+    /** Native popups (alert, confirm, prompt) the page opened: CAAD must have none (docs/09). */
+    nativeDialogs: [],
+    /** CAAD's current message (bottom of the view). */
+    message: () => page.evaluate(() => window.caad.lastMessage()),
     async shot(file) { if (SHOTS) await page.screenshot({ path: join(SHOTS, file) }).catch(() => {}); },
     async close() { await browser.close().catch(() => {}); await server.close(); },
     /**
      * Wait for the first build (it boots the kernel: tens of seconds) and the app to settle: the open part's build
      * is sent before the kernel is ready, and the kernel's ready message sends another, so wait for both.
      */
-    built: () => page.waitForFunction(() => /^(Built|Failed)/.test(document.getElementById("status").textContent) && !window.caad.kernel.buildInflight, { timeout: 300_000 }),
+    built: () => page.waitForFunction(() => /^(built|failed)$/.test(document.getElementById("status").dataset.state ?? "") && !window.caad.kernel.buildInflight, { timeout: 300_000 }),
   };
   page.on("pageerror", (e) => console.log(`[${name}] page exception: ${e.message}`));
   page.on("console", (m) => m.type() === "error" && !m.text().includes("WebSocket") && console.log(`[${name}] console error: ${m.text()}`));
-  page.on("dialog", (d) => { app.lastDialog = d.message(); d.accept(app.answer); });
+  page.on("dialog", (d) => { app.nativeDialogs.push(`${d.type()}: ${d.message()}`); d.dismiss(); });
+  // Where the app starts ("examples": the bundled examples, "page": the start page), the theme, the code pane shown.
+  await page.evaluateOnNewDocument(([start, theme, code]) => {
+    try {
+      if (start === "examples") localStorage.setItem("caad.last", "examples");
+      localStorage.setItem("caad.theme", theme);
+      localStorage.setItem("caad.code", code ? "1" : "0");
+    } catch { /* ignore */ }
+  }, [start, theme, code]);
   // A bridge talks to the newest page that connected: keep this page off the others' bridges.
   await page.evaluateOnNewDocument(([first, last, allowed]) => {
     const Native = window.WebSocket;
@@ -69,7 +77,7 @@ export async function openApp(name, { bridgePort = 0, viewport = { width: 1400, 
     };
   }, [...BRIDGE_PORTS, bridgePort]);
   await page.goto(url);
-  if (wait) await app.built();
+  if (wait && start === "examples") await app.built();
   return app;
 }
 

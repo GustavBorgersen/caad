@@ -15,7 +15,20 @@ export interface Workspace {
   writeBytes(path: string, data: Uint8Array): Promise<void>;
   /** Last-modified time, used to notice edits from outside (the agent, another editor). */
   modified(path: string): Promise<number>;
+  /** Whether a file or folder exists. */
+  exists(path: string): Promise<boolean>;
+  /** Delete a file or a folder with everything in it; returns what it held, so Undo can put it back. */
+  remove(path: string): Promise<Snapshot>;
+  /** Every file under a path (or the file itself) with its bytes, nothing changed: for copies. */
+  snapshot(path: string): Promise<Snapshot>;
+  /** Put deleted files back. */
+  restore(snapshot: Snapshot): Promise<void>;
+  /** Rename or move a file or a folder (with everything in it). */
+  rename(from: string, to: string): Promise<void>;
 }
+
+/** Deleted files, kept in memory until the page closes: every file under the deleted path, with its bytes. */
+export type Snapshot = { path: string; files: { path: string; data: Uint8Array }[] };
 
 export type ScannedFile = { path: string; text?: string };
 export type FileKind = "part" | "shared" | "assembly" | "export" | "print";
@@ -117,6 +130,61 @@ class FolderWorkspace implements Workspace {
     await w.write(data as Uint8Array<ArrayBuffer>);
     await w.close();
   }
+
+  /** The folder holding `path`, and `path`'s own name in it. */
+  private async parent(path: string, create = false): Promise<[FileSystemDirectoryHandle, string]> {
+    const parts = path.split("/");
+    let dir = this.root;
+    for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create });
+    return [dir, parts[parts.length - 1]];
+  }
+
+  private async handle(path: string): Promise<FileSystemHandle | null> {
+    try {
+      const [dir, name] = await this.parent(path);
+      try { return await dir.getFileHandle(name); } catch { return await dir.getDirectoryHandle(name); }
+    } catch { return null; }
+  }
+
+  async exists(path: string) { return !!(await this.handle(path)); }
+
+  /** Every file under `path` (or the file itself), with its bytes. */
+  private async collect(path: string): Promise<Snapshot["files"]> {
+    const h = await this.handle(path);
+    if (!h) return [];
+    const out: Snapshot["files"] = [];
+    const walk = async (handle: FileSystemHandle, at: string) => {
+      if (handle.kind === "file") out.push({ path: at, data: new Uint8Array(await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()) });
+      else for await (const [name, child] of (handle as FileSystemDirectoryHandle).entries()) await walk(child, `${at}/${name}`);
+    };
+    await walk(h, path);
+    return out;
+  }
+
+  async snapshot(path: string) { return { path, files: await this.collect(path) }; }
+
+  async remove(path: string) {
+    const files = await this.collect(path);
+    const [dir, name] = await this.parent(path);
+    await dir.removeEntry(name, { recursive: true });
+    return { path, files };
+  }
+
+  async restore(s: Snapshot) {
+    for (const f of s.files) await this.writeBytes(f.path, f.data);
+    if (!s.files.length) await this.parent(`${s.path}/x`, true); // an empty folder
+  }
+
+  async rename(from: string, to: string) {
+    if (await this.exists(to)) throw new Error(`${to} already exists.`);
+    const files = await this.collect(from);
+    for (const f of files) {
+      await this.writeBytes(to + f.path.slice(from.length), f.data);
+      if (this.crlf.has(f.path)) this.crlf.add(to + f.path.slice(from.length));
+    }
+    const [dir, name] = await this.parent(from);
+    await dir.removeEntry(name, { recursive: true });
+  }
 }
 
 class ExamplesWorkspace implements Workspace {
@@ -139,6 +207,40 @@ class ExamplesWorkspace implements Workspace {
   async modified(path: string) { return this.files.get(path)?.t ?? this.binaries.get(path)?.t ?? 0; }
   async write(path: string, text: string) { this.files.set(path, { text, t: Date.now() }); }
   async writeBytes(path: string, data: Uint8Array) { this.binaries.set(path, { data, t: Date.now() }); }
+
+  private under(path: string): string[] {
+    return [...this.files.keys(), ...this.binaries.keys(), ...this.folders].filter((p) => p === path || p.startsWith(path + "/"));
+  }
+  private folders = new Set<string>(); // empty folders made by restoring one
+  async exists(path: string) { return this.under(path).length > 0; }
+  async snapshot(path: string) {
+    const enc = new TextEncoder();
+    return { path, files: this.under(path).filter((p) => !this.folders.has(p))
+      .map((p) => ({ path: p, data: this.binaries.get(p)?.data ?? enc.encode(this.files.get(p)!.text) })) };
+  }
+  async remove(path: string) {
+    const { files } = await this.snapshot(path);
+    for (const p of this.under(path)) { this.files.delete(p); this.binaries.delete(p); this.folders.delete(p); }
+    return { path, files };
+  }
+  async restore(s: Snapshot) {
+    const dec = new TextDecoder();
+    for (const f of s.files) {
+      if (/\.(py|toml|txt|md)$/.test(f.path)) this.files.set(f.path, { text: dec.decode(f.data), t: Date.now() });
+      else this.binaries.set(f.path, { data: f.data, t: Date.now() });
+    }
+    if (!s.files.length) this.folders.add(s.path);
+  }
+  async rename(from: string, to: string) {
+    if (await this.exists(to)) throw new Error(`${to} already exists.`);
+    for (const p of this.under(from)) {
+      const q = to + p.slice(from.length);
+      const f = this.files.get(p), b = this.binaries.get(p);
+      if (f) { this.files.set(q, { ...f, t: Date.now() }); this.files.delete(p); }
+      if (b) { this.binaries.set(q, { ...b, t: Date.now() }); this.binaries.delete(p); }
+      if (this.folders.delete(p)) this.folders.add(q);
+    }
+  }
 }
 
 export function examples(): Workspace {
@@ -164,19 +266,46 @@ function idb<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<
 
 export const canOpenFolders = () => "showDirectoryPicker" in window;
 
-export async function openFolder(): Promise<Workspace> {
+/** A workspace opened before: the browser keeps its handle, and asks for permission again after a restart. */
+export type Recent = { handle: FileSystemDirectoryHandle; name: string; projects: number; t: number };
+const RECENT = "recent", MAX_RECENT = 6;
+
+export async function recentFolders(): Promise<Recent[]> {
+  try {
+    const list = (await idb<Recent[] | undefined>("readonly", (s) => s.get(RECENT))) ?? [];
+    const old = await idb<FileSystemDirectoryHandle | undefined>("readonly", (s) => s.get(KEY)); // before the list existed
+    if (old && !list.some((r) => r.name === old.name)) list.push({ handle: old, name: old.name, projects: 0, t: 0 });
+    return list.sort((a, b) => b.t - a.t);
+  } catch { return []; }
+}
+
+/** Remember a folder as the most recent workspace (with its number of projects, shown in the lists). */
+export async function rememberFolder(handle: FileSystemDirectoryHandle, projects: number) {
+  const list = (await recentFolders()).filter((r) => r.handle !== handle && r.name !== handle.name);
+  list.unshift({ handle, name: handle.name, projects, t: Date.now() });
+  await idb("readwrite", (s) => s.put(list.slice(0, MAX_RECENT), RECENT)).catch(() => {});
+  await idb("readwrite", (s) => s.delete(KEY)).catch(() => {});
+}
+
+/** Forget a folder (the lists only: nothing on disk changes). */
+export async function forgetFolder(name: string) {
+  const list = (await recentFolders()).filter((r) => r.name !== name);
+  await idb("readwrite", (s) => s.put(list, RECENT)).catch(() => {});
+  await idb("readwrite", (s) => s.delete(KEY)).catch(() => {});
+}
+
+export async function openFolder(): Promise<{ workspace: Workspace; handle: FileSystemDirectoryHandle }> {
   const root = await window.showDirectoryPicker({ mode: "readwrite", id: "caad-project" });
-  await idb("readwrite", (s) => s.put(root, KEY)).catch(() => {});
-  return new FolderWorkspace(root);
+  return { workspace: new FolderWorkspace(root), handle: root };
 }
 
-export async function lastFolder(): Promise<FileSystemDirectoryHandle | null> {
-  try { return (await idb<FileSystemDirectoryHandle | undefined>("readonly", (s) => s.get(KEY))) ?? null; }
-  catch { return null; }
+/** Whether a remembered folder can be opened without asking (the browser kept the permission). */
+export async function canReopen(handle: FileSystemDirectoryHandle): Promise<boolean> {
+  try { return (await handle.queryPermission({ mode: "readwrite" })) === "granted"; } catch { return false; }
 }
 
-/** Reopen the remembered folder; must be called from a click (the browser asks for permission). */
+/** Reopen a remembered folder; from a click, unless canReopen (the browser may ask for permission). */
 export async function reopen(handle: FileSystemDirectoryHandle): Promise<Workspace | null> {
-  const ok = (await handle.requestPermission({ mode: "readwrite" })) === "granted";
+  const ok = (await canReopen(handle)) || (await handle.requestPermission({ mode: "readwrite" })) === "granted";
   return ok ? new FolderWorkspace(handle) : null;
 }

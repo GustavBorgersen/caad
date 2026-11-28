@@ -14,7 +14,7 @@ await app.built();
 
 const step = steps(app);
 const statuses = () => page.$$eval("#timeline li.feature", (lis) => lis.map((li) => li.className.replace("feature ", "")));
-const status = () => page.$eval("#status", (e) => e.textContent);
+const status = () => page.$eval("#status", (e) => `${e.dataset.state}: ${e.textContent}`);
 /** Wait for a build (not a dialog's preview) whose result passes `pred` (a function source, run in the page on `r`). */
 const waitResult = (pred) => page.waitForFunction(`(() => { const r = window.caad.state.result; return !!r && !r.preview && (${pred})(r); })()`, { timeout: 60_000 });
 const edit = (from, to) => page.evaluate(([f, t]) => {
@@ -25,7 +25,7 @@ const panel = () => page.$eval("#selection", (e) => e.hidden ? "(hidden)" : e.in
 const canvasAt = async (fx, fy) => { const b = await (await page.$("#view canvas")).boundingBox(); return [b.x + b.width * fx, b.y + b.height * fy]; };
 
 step("the first part builds, its files and features listed", async () => {
-  check(/^Built/.test(await status()), `status: ${await status()}`);
+  check(/^built:/.test(await status()), `status: ${await status()}`);
   const parts = await page.$$eval("#parts li", (lis) => lis.map((l) => l.textContent));
   check(parts.includes("bracket.py") && parts.includes("pump_body.py"), "the examples are listed", parts);
   const s = await statuses();
@@ -57,7 +57,7 @@ step("a failing fillet shows in the timeline and the error panel", async () => {
 step("clicking a face shows it and its selectors", async () => {
   await edit("radius=50)", "radius=5)");
   await waitResult("(r) => r.ok && r.upto === r.timeline.features.length - 1");
-  const [x, y] = await canvasAt(0.45, 0.62);
+  const [x, y] = await canvasAt(0.33, 0.72);
   await page.mouse.move(x, y);
   await page.mouse.click(x, y);
   await page.waitForFunction(() => !document.getElementById("selection").hidden, { timeout: 10_000 });
@@ -76,7 +76,7 @@ step("shift-click adds a second face", async () => {
 });
 
 step("the selection survives a rebuild", async () => {
-  const [x, y] = await canvasAt(0.45, 0.62);
+  const [x, y] = await canvasAt(0.33, 0.72);
   await page.mouse.click(x, y); // back to one face
   await page.waitForFunction(() => window.caad.viewer.selection.length === 1, { timeout: 10_000 });
   await sleep(1500);
@@ -91,6 +91,17 @@ step("the selection survives a rebuild", async () => {
   await app.shot("caad-5-kept.png");
 });
 
-step("no requests to other origins", () => {
+step("the dark theme recolours the page and the view", async () => {
+  const before = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await page.click("#settings");
+  await page.click('[data-theme-choice="dark"]');
+  await page.keyboard.press("Escape");
+  const after = await page.evaluate(() => [document.documentElement.dataset.theme, getComputedStyle(document.body).backgroundColor]);
+  check(after[0] === "dark" && after[1] !== before, "the theme changes the page's colours", { before, after });
+  await app.shot("caad-6-dark.png");
+});
+
+step("no requests to other origins, no native popups", () => {
   check(foreign.size === 0, "everything came from the page's origin", [...foreign]);
+  check(app.nativeDialogs.length === 0, "no alert, confirm or prompt", app.nativeDialogs);
 });

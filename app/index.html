@@ -5,48 +5,69 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CAAD</title>
   <link rel="icon" href="data:,">
+  <script>
+    // The theme before the first paint (src/theme.ts keeps it up to date): no flash of the wrong one.
+    try {
+      const c = localStorage.getItem("caad.theme") ?? "system";
+      document.documentElement.dataset.theme = c === "dark" || (c === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+    } catch { /* private window */ }
+  </script>
 </head>
-<body>
-  <header>
-    <strong class="brand">CAAD</strong>
-    <button id="open-folder" title="Open a local folder of build123d parts (Chrome/Edge)">Open folder…</button>
-    <button id="reopen" hidden></button>
-    <button id="examples">Examples</button>
-    <span id="project-name" class="muted"></span>
+<body class="no-workspace">
+  <header id="topbar">
+    <span class="brand">CAAD</span>
+    <button id="crumb" class="crumb" title="The open project and part: click to show the files"></button>
+    <nav id="commands" class="commands" aria-label="Commands"></nav>
     <span class="spacer"></span>
-    <span id="status" class="muted"></span>
-    <button id="agent-button"><span class="dot"></span>Agent</button>
+    <button id="undo" class="icon-btn" disabled></button>
+    <button id="redo" class="icon-btn" disabled></button>
+    <button id="agent-button" class="agent-pill" title="Connect an agent (Claude Code)"><span class="dot"></span><span class="name">Agent</span></button>
+    <button id="toggle-code" class="icon-btn"></button>
+    <button id="settings" class="icon-btn" title="Settings: theme, keyboard shortcuts"></button>
   </header>
   <main>
-    <aside id="left">
-      <button id="toggle-left" class="panel-toggle" title="Compact timeline">«</button>
-      <section id="parts-section">
-        <h2>Projects <span class="actions"><button id="new-project" class="small" title="A new project: a folder with a pyproject.toml and parts/">New project</button><button id="new-part" class="small" title="A new part in the open project's parts/">+ Part</button></span></h2>
-        <ul id="parts" class="list"></ul>
+    <aside id="rail" aria-label="Files and timeline">
+      <div class="rail-head">
+        <div class="rtabs" role="tablist">
+          <button role="tab" id="tab-files" data-tab="files" aria-selected="false"></button>
+          <button role="tab" id="tab-timeline" data-tab="timeline" aria-selected="true"></button>
+        </div>
+        <button id="collapse-left" class="icon-btn" title="Hide this panel"></button>
+      </div>
+      <section id="files-tab" class="rail-tab" role="tabpanel" hidden>
+        <button id="workspace" class="ws" title="Switch workspace"></button>
+        <div class="section-label">Projects <button id="new-menu" class="btn small" title="New part, shared code or project"></button></div>
+        <div class="rail-scroll"><ul id="parts" class="tree"></ul></div>
+        <div id="files-foot" class="rail-foot"></div>
       </section>
-      <section class="grow">
-        <h2>Timeline</h2>
-        <ol id="timeline" class="list"></ol>
+      <section id="timeline-tab" class="rail-tab" role="tabpanel">
+        <div class="rail-scroll"><ol id="timeline"></ol></div>
+        <div id="params"></div>
       </section>
     </aside>
+    <button id="toggle-left" class="icon-btn" title="Show the files and timeline"></button>
     <div id="view">
-      <div id="view-tools">
-        <button id="sketch-button" title="Sketch on a plane, or on the selected flat face">✎ Sketch</button>
-        <span id="plane-choice" hidden>on <button data-plane="Plane.XY">Top (XY)</button><button data-plane="Plane.XZ">Front (XZ)</button><button data-plane="Plane.YZ">Right (YZ)</button><span id="plane-features"></span><span class="muted">or select a flat face first</span></span>
-        <button id="export-button" title="Export the part as STEP or STL into the project's exports/">⇩ Export</button>
-        <span id="export-choice" hidden>as <button data-format="step" title="STEP: exact geometry, for other CAD programs">STEP</button><button data-format="stl" title="STL: a mesh, for slicers and 3D printing">STL</button></span>
-      </div>
-      <div id="sketch-panel" hidden></div>
-      <div id="feature-panel" hidden></div>
-      <div id="overlay">Loading CAD kernel…</div>
+      <div id="viewcube" title="Click a face, edge or corner to look from there"></div>
+      <div id="sketch-status" hidden></div>
+      <div id="overlay">Loading the CAD kernel…</div>
+      <div id="start" hidden></div>
       <div id="selection" hidden></div>
+      <div id="status"></div>
       <div id="agent-note" hidden></div>
+      <div id="messages" aria-live="polite"></div>
     </div>
-    <div id="right">
-      <div class="panel-head"><span id="file-name" class="muted"></span><button id="toggle-code" class="panel-toggle" title="Hide the code">»</button></div>
-      <div id="editor"></div>
-      <div id="error" hidden></div>
-    </div>
+    <aside id="dock">
+      <div id="feature-panel" class="dock-panel" hidden></div>
+      <div id="sketch-panel" class="dock-panel" hidden></div>
+      <div id="ask-panel" class="dock-panel" hidden></div>
+      <div id="project-panel" class="dock-panel" hidden></div>
+      <section id="code">
+        <div class="resize" title="Drag to resize"></div>
+        <div class="panel-head"><span id="code-icon"></span><span id="file-name"></span><span id="code-lines" class="lines"></span><button id="close-code" class="icon-btn" title="Hide the code"></button></div>
+        <div id="editor"></div>
+        <div id="error" hidden></div>
+      </section>
+    </aside>
   </main>
   <dialog id="agent-dialog"></dialog>
   <script type="module" src="/src/main.ts"></script>

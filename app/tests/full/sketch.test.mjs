@@ -7,7 +7,6 @@ import { openApp, sleep, steps } from "../ui/env.mjs";
 
 const app = await openApp("sketch");
 after(() => app.close());
-app.answer = "widget"; // the new part's name
 const { page } = app;
 const step = steps(app);
 
@@ -32,7 +31,7 @@ const dragFrom = async ([x0, y0], [x1, y1]) => {
   await page.mouse.up();
   await idle();
 };
-const tool = (t) => page.click(`#sketch-panel [data-tool="${t}"]`);
+const tool = (t) => page.click(`#commands [data-tool="${t}"]`);
 const option = (kind) => page.click(`#sketch-panel button.option[data-option="${kind}"]`);
 const state = () => page.$eval("#sketch-panel .state", (s) => s.textContent);
 const labels = () => page.$$eval(".sketch-labels .dim", (d) => d.map((x) => x.textContent).sort().join(" | "));
@@ -46,10 +45,14 @@ const typeDim = async (text) => {
 };
 const done = async () => { const g = await gen(); await page.click("#sketch-panel .primary"); await waitBuild(g); };
 const leave = async () => { await page.click("#sketch-panel button[title^='Leave']"); await closed(); };
-const newSketchOnTop = async () => { await page.click("#sketch-button"); await page.click('#plane-choice [data-plane="Plane.XY"]'); await opened(); };
+const newSketchOnTop = async () => {
+  await page.click('#commands [data-command="sketch"]');
+  await page.evaluate(() => [...document.querySelectorAll(".plane-menu button.it")].find((b) => b.querySelector(".l").textContent === "Top (XY)").click());
+  await opened();
+};
 const startOn = async (selector, name) => { await page.evaluate((s, n) => window.caad.startSketch(s, n), selector, name); await opened(); };
 const extrude = async ({ end, result } = {}) => {
-  await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Extrude").click());
+  await page.click(`#commands [data-command="extrude"]`);
   await page.waitForSelector("#feature-panel:not([hidden]) .row", { timeout: 30_000 });
   if (end) await page.select('#feature-panel [data-field="until"] select', end);
   if (result) await page.select('#feature-panel [data-field="mode"] select', result);
@@ -64,19 +67,33 @@ const dblclickFeature = async (index) => {
     catch (e) { if (i > 5 || !/detached|not clickable/.test(e.message)) throw e; await sleep(200); }
   }
 };
+/** A new part, named in the Files tree (New › New part, type its name, Enter). */
+const newPart = async (name) => {
+  await page.click("#tab-files");
+  await page.click("#new-menu");
+  await page.evaluate(() => [...document.querySelectorAll(".new-menu button.it")].find((b) => b.querySelector(".l").textContent === "New part").click());
+  await page.waitForSelector("#parts .edit input", { timeout: 10_000 });
+  await page.keyboard.type(name);
+  await page.keyboard.press("Enter");
+};
 const v0 = await volume();
 const saved0 = await code();
 let savedConverted, v1, v2;
 
 step("a plain build123d sketch converts on double-click; Cancel keeps it plain, Done saves it", async () => {
   await dblclickFeature(0);
+  await page.waitForSelector("#ask-panel:not([hidden]) .primary", { timeout: 30_000 }); // CAAD's own question, docked
+  check(/plain build123d sketch/.test(await page.$eval("#ask-panel", (a) => a.textContent)), "asked whether to convert it");
+  await page.click("#ask-panel .primary");
   await opened();
-  check((await labels()) === "depth = 40 | width = 60" && /Fully constrained/.test(await state()) && /Converted/.test(await page.$eval("#status", (x) => x.textContent)),
+  check((await labels()) === "depth = 40 | width = 60" && /Fully constrained/.test(await state()) && /Converted/.test(await app.message()),
     "converted: its sizes are dimensions with their expressions", await labels());
   check((await sketchSrc()).includes("c.length(rect1.bottom, width)") && (await code()) === saved0, "the converted sketch isn't saved yet");
   await leave();
   check((await code()) === saved0, "Cancel leaves the plain sketch as it was");
   await dblclickFeature(0);
+  await page.waitForSelector("#ask-panel:not([hidden]) .primary", { timeout: 30_000 });
+  await page.keyboard.press("Enter"); // Enter answers the question
   await opened();
   await done();
   check((await code()).includes("    with BuildSketch() as base:\n        with Constrained() as c:\n            rect1 = c.rectangle((-30, -20), (30, 20))") && Math.abs((await volume()) - v0) < 1e-6,
@@ -86,7 +103,7 @@ step("a plain build123d sketch converts on double-click; Cancel keeps it plain, 
 
 step("a new sketch on Top: two clicks draw a rectangle; nothing is saved before Done", async () => {
   await newSketchOnTop();
-  check(await page.$eval('#sketch-panel [data-tool="rect"]', (b) => b.classList.contains("on")), "an empty sketch opens with the rectangle tool");
+  check(await page.$eval('#commands [data-tool="rect"]', (b) => b.classList.contains("on")), "an empty sketch opens with the rectangle tool");
   await clickAt(-10, -6);
   await clickAt(4, 6);
   const m = await model();
@@ -218,7 +235,7 @@ step("a circle on the top face, snapped to the origin, extruded", async () => {
 
 step("a new part: dragging a corner of a rectangle with one freedom left changes only its height", async () => {
   const g = await gen();
-  await page.click("#new-part");
+  await newPart("widget");
   await waitBuild(g);
   await newSketchOnTop();
   await clickAt(-50, 22);

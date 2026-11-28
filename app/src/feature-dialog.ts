@@ -1,5 +1,6 @@
 // Feature dialog: edit a feature's arguments as expressions, with a live preview (docs/05-feature-model.md).
 // The kernel reads the feature and patches only the changed arguments; this panel just shows fields.
+import { featureIcon, icon } from "./icons";
 import type { FeatureDetail, FeatureField, Kernel, SketchRegions } from "./kernel";
 
 const PREVIEW_DELAY_MS = 250;
@@ -73,13 +74,14 @@ export class FeatureDialog {
     const name = d.tier === "type" ? d.kind[0].toUpperCase() + d.kind.slice(1) : `${d.call}()`;
     const title = this.created ? `New ${d.tier === "type" ? d.kind : name}` : name;
     this.el.innerHTML = `
-      <div class="head"><b>${esc(title)}</b><span class="muted">feature ${d.index + 1}</span></div>
+      <div class="head">${icon(featureIcon(d.kind))}<b>${esc(title)}</b><span class="muted">feature ${d.index + 1}</span></div>
       <div class="fields">${fields.filter((f) => this.visible(f)).map((f) => this.row(f)).join("")}</div>
       ${hidden.length ? `<label class="add">Add argument <select><option value=""></option>${hidden.map((f) =>
         `<option value="${esc(f.name)}">${esc(f.label)}</option>`).join("")}</select></label>` : ""}
       ${fields.some((f) => f.type === "sketch" && this.visible(f) && isSketch(this.exprs.get(f.name) ?? null)) ? `<div class="note">Click regions of the sketch in the view to choose which to use, or select faces of the part and press Use selection.</div>` : ""}
       <div class="message" hidden></div>
-      <div class="actions"><button class="cancel">Cancel</button><button class="primary">OK</button></div>`;
+      <div class="spacer"></div>
+      <div class="actions"><button class="cancel">Cancel <kbd>Esc</kbd></button><button class="primary">OK <kbd>↵</kbd></button></div>`;
 
     this.el.querySelectorAll<HTMLElement>("[data-field]").forEach((row) => {
       const name = row.dataset.field!;

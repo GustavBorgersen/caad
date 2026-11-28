@@ -47,11 +47,11 @@ A serious iteration on how CAAD looks and works, before more features pile on. D
 | :-- | :-- | :-- |
 | **Design goals and workflow** | **Done 2026-11-27:** the goals, one loop (select → command → dialog with preview → confirm) in every mode, commands, context menus, first shortcuts, undo, code ↔ timeline | [09](09-design-and-workflow.md) |
 | **Mock-ups and visual system** | **Done 2026-11-27:** three style directions as static pages in both themes (`design/mockups/`); direction A ("Studio") chosen, with a Files \| Timeline switch in the left rail and project and file management mocked up; doc 10 written (tokens checked for WCAG AA, type, icons, states, layout, 3D look) | 09, [10](10-visual-system.md) |
-| **Commands and keys** | A command registry behind the toolbar, shortcuts, tooltips and context menus; CAAD's own dialogs and messages instead of `prompt`/`confirm`/`alert` | 09 |
-| **Code ↔ timeline** | Names in the timeline (`sk1 · Sketch: Rectangle`), rename, a blank line between new features, cross-highlighting (replaces "contrast fixes") | 09 |
-| **Undo** | Undo/redo for every change, as a history of the code; agent edits marked | 09 |
-| **Themes and layout** | Light and dark; the view fills the window, panels slide in or float | 09, 10 |
-| **The view** | Shading, edges, selection colours, view cube and standard views, smooth camera moves | 10 |
+| **Commands and keys** | **Done 2026-11-28:** a command registry behind the toolbar, the shortcuts, the tooltips, the <kbd>?</kbd> sheet and the context menus (faces, edges, the empty view, timeline rows, sketch geometry, files); CAAD's own messages, menus and docked questions instead of `prompt`/`confirm`/`alert` (the UI tests fail on any native popup) | 09 |
+| **Code ↔ timeline** | **Partly done 2026-11-28:** names in the timeline (`sk1 · Sketch: Rectangle`), hovering a row marks its code. Still to do: rename (F2) with its references, a blank line between new features, the cursor in the code marking its row | 09 |
+| **Undo** | **Done 2026-11-28:** undo/redo for every change (dialogs, sketches, deletes, parameters, typing, the agent, edits from outside), as each file's history; the agent's changes marked in the timeline and the code until you change the file; deleting features and files happens at once, with Undo in the message | 09 |
+| **Themes and layout** | **Done 2026-11-28:** doc 10's tokens, light and dark (system or chosen in settings); the top bar with the mode's commands, the rail with Files \| Timeline, dialogs and the code docked on the right, the status line, the selection chip, the start page (remembering the last workspace), the Files tab's project and file management, editable parameters | 09, 10 |
+| **The view** | **Done 2026-11-28:** the view's gradient, colours from the tokens, preview colouring only what the dialog changes, the faded part while sketching, the view cube, standard views, fit, view normal, smooth camera moves | 10 |
 | **Start-up** | Build once at start-up ([#3](https://github.com/GustavBorgersen/caad/issues/3)) | — |
 
 ### Phase 2 — Part studio

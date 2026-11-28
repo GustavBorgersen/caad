@@ -13,10 +13,17 @@ export function renderSelection(el: HTMLElement, infos: SelectInfo[]) {
   if (!items.length) return;
   el.replaceChildren();
 
+  // A chip: what is selected and its best selector; its size, position and the other selectors behind "details".
+  const head = document.createElement("div");
+  head.className = "head";
   const title = document.createElement("div");
   title.className = "title";
-  title.textContent = items.length === 1 ? `${cap(items[0].kind)} · ${items[0].type}` : summary(items);
-  el.append(title);
+  title.textContent = items.length === 1 ? `${cap(items[0].kind)} · ${items[0].type.toLowerCase()}` : summary(items);
+  head.append(title);
+  el.append(head);
+  const alts = document.createElement("div");
+  alts.className = "alts";
+  alts.hidden = true;
 
   if (items.length === 1) {
     const props = document.createElement("div");
@@ -27,12 +34,9 @@ export function renderSelection(el: HTMLElement, infos: SelectInfo[]) {
       pair.append(Object.assign(span(label), { className: "k" }), Object.assign(span(fmt(items[0][key]) + (unit ? ` ${unit}` : "")), { className: "v" }));
       props.append(pair);
     }
-    el.append(props);
+    alts.append(props);
   }
 
-  const alts = document.createElement("div");
-  alts.className = "alts";
-  alts.hidden = true;
   let altCount = 0;
   for (const info of infos) {
     for (const [i, s] of info.selectors.entries()) {
@@ -48,13 +52,14 @@ export function renderSelection(el: HTMLElement, infos: SelectInfo[]) {
       if (s.fragile) row.append(tag("position-based"));
       else if (i === 0) row.append(tag("best"));
       row.append(copy);
-      if (i === 0) el.append(row);
+      if (i === 0 && !head.querySelector(".sel")) head.append(row);
       else { alts.append(row); altCount++; }
     }
   }
-  if (altCount) {
-    const more = Object.assign(document.createElement("button"), { className: "more", textContent: `${altCount} more selector${altCount > 1 ? "s" : ""}` });
-    more.onclick = () => { alts.hidden = !alts.hidden; more.textContent = alts.hidden ? `${altCount} more selector${altCount > 1 ? "s" : ""}` : "fewer"; };
+  if (alts.childElementCount) {
+    const label = `details${altCount ? ` · ${altCount} more selector${altCount > 1 ? "s" : ""}` : ""}`;
+    const more = Object.assign(document.createElement("button"), { className: "more", textContent: label });
+    more.onclick = () => { alts.hidden = !alts.hidden; more.textContent = alts.hidden ? label : "less"; };
     el.append(more, alts);
   }
 }

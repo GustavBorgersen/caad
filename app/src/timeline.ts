@@ -1,48 +1,62 @@
-// Timeline panel: one row per feature statement, with a rollback bar like Onshape's.
+// Timeline panel: one row per feature statement, with a rollback bar like Onshape's. A row shows the name the code
+// uses (sk1, pl1) and what the feature is (docs/09: code and timeline map one to one).
+import { featureIcon, icon } from "./icons";
 import type { BuildResult, Feature } from "./kernel";
 import { sketchStatus } from "./tools";
-
-const ICONS: Record<string, string> = {
-  sketch: "✎", extrude: "⬆", revolve: "↻", fillet: "◜", chamfer: "◸", hole: "◉", group: "⌗", code: "{}",
-  box: "▣", cylinder: "◎", sphere: "●", mirror: "⇋", loft: "⋈", sweep: "∿", plane: "▱",
-};
+import { esc } from "./ui";
 
 // A click rolls back, a double-click edits: wait this long so a double-click doesn't roll back first.
 const DOUBLE_CLICK_MS = 200;
 let clickTimer = 0;
 
 export type AddKind = "plane" | "extrude" | "revolve" | "hole" | "fillet" | "chamfer" | "mirror";
-const ADD_TITLES: Record<AddKind, string> = {
-  plane: "A plane to sketch or mirror on: offset from the selected flat face (else from XY), here",
-  extrude: "Extrude or cut the faces selected in the view, else the latest sketch, here", revolve: "Revolve the latest sketch, here",
-  hole: "Holes at the points of the latest sketch with points, here", fillet: "A fillet on the edges selected in the view, here",
-  chamfer: "A chamfer on the edges selected in the view, here", mirror: "Mirror the part so far, here",
-};
 
 export type TimelineHandlers = {
   rollback: (upto: number | null) => void;
   hover: (feature: Feature | null) => void;
   edit: (feature: Feature) => void;
   remove: (feature: Feature) => void;
-  add: (kind: AddKind) => void; // a new feature at the rollback bar
+  /** Right-click on a row. */
+  menu: (feature: Feature, at: { x: number; y: number }) => void;
 };
 
-export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: TimelineHandlers) {
+export type TimelineMarks = {
+  /** Indexes of the features the agent changed (shown with a violet dot until you change the file). */
+  agent: Set<number>;
+  /** The feature being edited in a dialog or the sketch editor. */
+  active: number | null;
+};
+
+/** "sk1 = Sketch: Rectangle" → name and what it is, apart; a label without a name stays as it is. */
+function split(f: Feature): { name: string | null; what: string } {
+  const label = f.label.replace(/^\w+\s*=\s*/, "");
+  if (!f.name) return { name: null, what: label };
+  // The name is shown first, so the description doesn't repeat it ("Plane pl1 on a face" → "pl1 · Plane on a face").
+  const what = label.replace(new RegExp(`(^|\\s)${f.name}(\\s*[·:=]\\s*|\\s+|$)`), "$1").trim();
+  return { name: f.name, what: what || f.kind };
+}
+
+export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: TimelineHandlers, marks: TimelineMarks = { agent: new Set(), active: null }) {
   el.replaceChildren();
   const feats = result?.timeline?.features ?? [];
   const last = feats.length - 1;
   const rolledBack = result?.upto != null && result.upto < last;
 
-  if (rolledBack && result!.upto === -1) el.append(bar(() => h.rollback(null), h)); // before the first feature
+  if (!feats.length && !result?.error) {
+    el.append(Object.assign(document.createElement("li"), { className: "timeline-empty", textContent: result ? "No features yet: start with Sketch (S)." : "Open a part to see its timeline." }));
+  }
+  if (rolledBack && result!.upto === -1) el.append(bar(() => h.rollback(null))); // before the first feature
   feats.forEach((f) => {
     const li = document.createElement("li");
-    li.className = `feature ${f.status}${f.sketch?.dof ? " under" : ""}${f.sketch?.message ? " warn" : ""}`;
-    li.title = `${f.label}${f.sketch ? ` — ${sketchStatus(f.sketch)}` : ""}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here · double-click to ${f.tier === "code" ? "show its code" : "edit"}` +
+    li.className = `feature ${f.status}${f.sketch?.dof ? " under" : ""}${f.sketch?.message ? " warn" : ""}${marks.active === f.index ? " active" : ""}`;
+    li.dataset.index = String(f.index);
+    li.title = `${f.label}${f.sketch ? ` — ${sketchStatus(f.sketch)}` : ""}\nLine ${f.line}${f.end > f.line ? `–${f.end}` : ""} · click to roll back to here · double-click to ${f.tier === "code" ? "show its code" : "edit"} · right-click for more` +
       (f.status === "error" && result?.error ? `\n${result.error.message}` : "");
-    li.innerHTML = `<span class="icon"></span><span class="label"></span><button class="del" title="Delete this feature">×</button>`;
+    const { name, what } = split(f);
+    li.innerHTML = `<span class="icon">${icon(featureIcon(f.kind))}</span><span class="label">${name ? `<span class="n">${esc(name)}</span>` : ""}${esc(what)}</span>` +
+      `<span class="marks">${marks.agent.has(f.index) ? '<i class="mark-agent" title="Changed by the agent"></i>' : ""}${f.status === "error" ? '<i class="mark-err" title="This feature failed"></i>' : ""}` +
+      `<button class="del" title="Delete this feature · Delete" aria-label="Delete">${icon("trash")}</button></span>`;
     li.querySelector<HTMLButtonElement>(".del")!.onclick = (e) => { e.stopPropagation(); h.remove(f); };
-    li.querySelector(".icon")!.textContent = ICONS[f.kind] ?? "•";
-    li.querySelector(".label")!.textContent = f.label;
     if (f.status === "error" && result?.error) {
       const msg = document.createElement("div");
       msg.className = "message";
@@ -54,35 +68,29 @@ export function renderTimeline(el: HTMLElement, result: BuildResult | null, h: T
       if (e.detail === 1) clickTimer = window.setTimeout(() => h.rollback(f.index === last ? null : f.index), DOUBLE_CLICK_MS);
     };
     li.ondblclick = () => { clearTimeout(clickTimer); h.edit(f); };
+    li.oncontextmenu = (e) => { e.preventDefault(); h.menu(f, { x: e.clientX, y: e.clientY }); };
     li.onmouseenter = () => h.hover(f);
     li.onmouseleave = () => h.hover(null);
     el.append(li);
-    if (rolledBack && f.index === result!.upto) el.append(bar(() => h.rollback(null), h));
+    if (rolledBack && f.index === result!.upto) el.append(bar(() => h.rollback(null)));
   });
-  if (feats.length && !rolledBack) el.append(bar(null, h));
+  if (feats.length && !rolledBack) el.append(bar(null));
   if (result?.error && result.error.feature == null) {
     const li = document.createElement("li");
     li.className = "feature error";
-    li.textContent = `Line ${result.error.line ?? "?"}: ${result.error.message}`;
+    li.innerHTML = `<span class="icon">${icon("alert")}</span><span class="label"></span>`;
+    li.querySelector(".label")!.textContent = `Line ${result.error.line ?? "?"}: ${result.error.message}`;
+    li.title = li.textContent ?? "";
     el.append(li);
   }
 }
 
-function bar(toEnd: (() => void) | null, h: TimelineHandlers) {
+/** The rollback bar: new features go here. Rolled back, a click on it shows the whole part again. */
+function bar(toEnd: (() => void) | null) {
   const li = document.createElement("li");
-  li.className = "rollback-bar";
-  const text = document.createElement("span");
-  text.textContent = toEnd ? "Rolled back — click to show all" : "End of part";
-  if (toEnd) text.onclick = toEnd;
-  const add = document.createElement("span");
-  add.className = "add";
-  for (const kind of Object.keys(ADD_TITLES) as AddKind[]) {
-    const b = document.createElement("button");
-    b.textContent = `+ ${kind[0].toUpperCase()}${kind.slice(1)}`;
-    b.title = ADD_TITLES[kind];
-    b.onclick = () => h.add(kind);
-    add.append(b);
-  }
-  li.append(text, add);
+  li.className = `rollback-bar${toEnd ? " back" : ""}`;
+  li.title = toEnd ? "Rolled back: new features go here. Click to show the whole part" : "End of the part: new features go here";
+  li.innerHTML = toEnd ? "<span>Show all</span>" : "";
+  if (toEnd) li.onclick = toEnd;
   return li;
 }

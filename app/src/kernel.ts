@@ -113,6 +113,8 @@ export type BuildResult = {
   /** Plane features no feature uses yet (up to the rollback bar). */
   planes: PlaneOutline[];
   summary: { type: string; faces: number; edges: number; bbox: number[]; volume?: number } | null;
+  /** The part's number parameters (top-level assignments before its block): the parameters panel. */
+  params?: { name: string; expr: string; value: number; line: number }[];
   times: { build: number; mesh: number };
   gen: number;
   preview?: boolean; // set by the page: built from unsaved source for the feature dialog
@@ -217,6 +219,11 @@ export class Kernel {
   }
 
   /** Start editing a constrained sketch (feature `index`): its model, plane and name. Rejects if it can't be edited. */
+  /** Set a parameter's expression: only that expression changes in the source. */
+  async patchParam(src: string, name: string, expr: string): Promise<string> {
+    return (await this.call<{ value: string }>("patch_param", [src, name, expr])).value;
+  }
+
   sketchOpen(src: string, index: number): Promise<SketchModel> {
     return this.call("sketch_open", [src, index]);
   }

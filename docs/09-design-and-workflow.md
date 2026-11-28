@@ -1,7 +1,7 @@
 # CAAD — Design goals, layout and workflow
 
 **Date:** 2026-11-27
-**Status:** Goals and interaction model agreed in a brainstorm; mock-ups done and the visual system written ([10](10-visual-system.md), direction A); nothing built yet
+**Status:** Agreed; 1.5a, 1.5b, 1.5d, 1.5e and 1.5f built (2026-11-28), 1.5c partly (names in the timeline); see the build order
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1.5 ("Layout, visuals and workflow"); replaces the roadmap's "Contrast fixes" item and the "Visual design" brainstorm
 
 ## Problem
@@ -120,12 +120,12 @@ Constraints that hold for every direction: no UI framework (plain TypeScript and
 
 | Slice | Contents |
 | :-- | :-- |
-| **1.5a — Mock-ups** | The style directions above; pick one; write doc 10 |
-| **1.5b — Commands and keys** | The command registry; the toolbar, shortcuts, tooltips and <kbd>?</kbd> sheet built from it; the context menus; in-app dialogs and messages instead of `prompt`/`confirm`/`alert` |
-| **1.5c — Code ↔ timeline** | Names in the timeline, rename, a blank line between new features (kernel writer, examples, guide), cross-highlighting |
-| **1.5d — Undo** | The per-file history, undo/redo everywhere, agent edits marked |
-| **1.5e — Themes and layout** | The tokens of doc 10, light and dark, the new layout |
-| **1.5f — The view** | Shading, edges, selection colours, view cube and standard views, smooth camera moves |
+| **1.5a — Mock-ups** (done) | The style directions above; pick one; write doc 10 |
+| **1.5b — Commands and keys** (done) | The command registry; the toolbar, shortcuts, tooltips and <kbd>?</kbd> sheet built from it; the context menus; in-app dialogs and messages instead of `prompt`/`confirm`/`alert` |
+| **1.5c — Code ↔ timeline** (partly) | Names in the timeline (done), rename, a blank line between new features (kernel writer, examples, guide), cross-highlighting (row → code done; code → row to do) |
+| **1.5d — Undo** (done) | The per-file history, undo/redo everywhere, agent edits marked |
+| **1.5e — Themes and layout** (done) | The tokens of doc 10, light and dark, the new layout |
+| **1.5f — The view** (done) | Shading, edges, selection colours, view cube and standard views, smooth camera moves |
 | **1.5g — Start-up** | Build once at start-up ([#3](https://github.com/GustavBorgersen/caad/issues/3)) |
 
 1.5b, 1.5c and 1.5d don't depend on the style and can start while the mock-ups are discussed. Each slice comes with tests, like every feature (headless UI suites check keys, menus and that no native popup opens).

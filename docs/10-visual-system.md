@@ -1,7 +1,7 @@
 # CAAD — Visual system
 
 **Date:** 2026-11-27
-**Status:** Agreed: direction A ("Studio") chosen from the mock-ups; to be built in phase 1.5e (themes and layout) and 1.5f (the view)
+**Status:** Built 2026-11-28 (phase 1.5e and 1.5f, with 1.5b and 1.5d); `src/style.css` holds the tokens, `tests/theme.test.mjs` checks their contrast. Differences from this doc are listed at the end
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1.5; follows [09 — Design goals, layout and workflow](09-design-and-workflow.md), whose goals every rule here serves
 
 ## The choice
@@ -248,3 +248,14 @@ Each exists once and is reused (goal 7). The mock-ups show them all:
 | Icons | **Lucide**, plus CAAD's CAD icons drawn to Lucide's rules |
 | Faint colour | **Never for text**; text uses `--text` or `--muted` (AA in both themes) |
 | Floor shadow, glass panels, pie menu | **Not taken** (B and C); can be revisited one at a time |
+
+## As built (2026-11-28)
+
+What the first build does differently, or doesn't do yet:
+
+- **The agent's flash in the view** isn't built: the agent's changes are marked in the timeline (the violet dot) and in the code (violet lines) until you change the file, and its edits are labelled in the undo history.
+- **Preview colouring** marks the faces a dialog's preview adds or changes: flat faces are matched by their plane, so a face that only grew or shrank next to a new fillet keeps the part's colour.
+- **Feature names in the code** use CodeMirror's highlighting of definitions (`sk1 = …`, `as sk1`), in `--accent-text`; names used later in the code keep the text colour.
+- **The agent's connection dialog** stays a centred dialog (CAAD's own `<dialog>`, styled with the tokens): it's onboarding with long instructions, not a feature dialog.
+- **Undo inside the code** is CodeMirror's own while you type; Ctrl+Z outside the code steps through the file's history.
+- **The code pane** is closed by default and remembered, as doc 09 says; <kbd>Ctrl</kbd>+<kbd>J</kbd> toggles it.
