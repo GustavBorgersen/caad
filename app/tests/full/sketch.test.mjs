@@ -22,17 +22,8 @@ const opened = () => page.waitForFunction(() => window.caad.sketcher.active && !
 const closed = () => page.waitForFunction(() => !window.caad.sketcher.active);
 const screen = (x, y) => page.evaluate(([a, b]) => window.caad.sketcher.screen([a, b]), [x, y]);
 const clickAt = async (x, y) => { const s = await screen(x, y); await page.mouse.move(s.x, s.y); await page.mouse.click(s.x, s.y); await idle(); };
-/** A point on the line from `a` to `b` that no label covers (labels' size depends on the fonts), away from its ends. */
-const onLine = async ([x0, y0], [x1, y1]) => {
-  const [a, b] = [await screen(x0, y0), await screen(x1, y1)];
-  for (const t of [0.5, 0.4, 0.6, 0.3, 0.7, 0.25, 0.75, 0.2, 0.8]) {
-    const [x, y] = [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t];
-    const s = await screen(x, y);
-    if (Math.min(Math.hypot(s.x - a.x, s.y - a.y), Math.hypot(s.x - b.x, s.y - b.y)) < 12) continue; // the ends snap within 10 px
-    if (await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.tagName === "CANVAS", [s.x, s.y])) return [x, y];
-  }
-  throw new Error("labels cover the whole line");
-};
+/** Is the view itself under this sketch point, not a label? Labels sit beside the geometry (#12). */
+const uncovered = async (x, y) => { const s = await screen(x, y); return page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.tagName === "CANVAS", [s.x, s.y]); };
 const shiftClickAt = async (x, y) => { await page.keyboard.down("Shift"); await clickAt(x, y); await page.keyboard.up("Shift"); };
 const dragFrom = async ([x0, y0], [x1, y1]) => {
   const a = await screen(x0, y0), b = await screen(x1, y1);
@@ -143,14 +134,15 @@ step("dimensions: lengths and distances from the origin, a conflict, Done and a 
   await shiftClickAt(-5, 0);
   await option("vdistance");
   await typeDim("0");
-  check((await drawing()).arrows === 2 && (await page.$$eval(".sketch-labels .axis-label", (a) => a.map((x) => x.textContent).join())) === "X,Y",
-    "the horizontal distance has a dimension line with two arrows (lengths sit on their lines; the vertical one is 0); the sketch's X and Y are labelled", await drawing());
+  check((await drawing()).arrows === 6 && (await page.$$eval(".sketch-labels .axis-label", (a) => a.map((x) => x.textContent).join())) === "X,Y",
+    "the two lengths and the horizontal distance have dimension lines with two arrows each (the vertical one is 0); the sketch's X and Y are labelled", await drawing());
   let src = await sketchSrc();
   check(["c.length(rect2.bottom, width / 4)", "c.length(rect2.left, 12)", "c.hdistance(c.origin, rect2.center, -5)", "c.vdistance(c.origin, rect2.center, 0)"].every((l) => src.includes(l)),
     "dimensions written: width / 4, 12, and the centre from the origin", src.split("\n").filter((l) => /c\.(length|hdistance|vdistance)/.test(l)).join(" | "));
   check(/Fully constrained/.test(await state()) && (await page.$$eval(".sketch-labels .dim", (d) => d.map((x) => x.textContent))).includes("width / 4 = 15"), `fully constrained; labels show "width / 4 = 15"`);
   const corner0 = (await model()).entities.find((e) => e.ref === "rect2.corners[0]");
   check(Math.abs(corner0.x + 12.5) < 1e-6 && Math.abs(corner0.y + 6) < 1e-6, "solved: 15 x 12 centred at (-5, 0)", corner0);
+  check((await uncovered(-5, -6)) && (await uncovered(-12.5, 0)), "the length labels sit beside their lines: the bottom and left sides' middles are free (#12)");
   // A conflicting dimension shows red; select its label and delete it.
   await clickAt(-5, 6);
   await option("length");
@@ -365,7 +357,8 @@ with BuildPart() as wedge:
   check((await model()).dof === 3 && (await labels()) === "30", `the angle shows as drawn: 30, not -30 (${await labels()}); 3 degrees of freedom`);
 
   await tool("dimension");
-  await clickAt(...(await onLine([-8.66, 15], [0, 15]))); // line1 (its 30° label may sit on its middle)
+  check(await uncovered(-4.33, 15), "the 30° label sits outside its arc: line1's middle is free (#12)");
+  await clickAt(-4.33, 15); // line1
   const s = await screen(-4.33, 8);
   await page.mouse.move(s.x, s.y);
   check(await page.$$eval(".sketch-labels .dim.preview", (d) => d.map((x) => x.textContent).join()) === "8.66", "a line picked: its length previewed");
@@ -377,6 +370,7 @@ with BuildPart() as wedge:
   await page.keyboard.press("Enter");
   await idle();
   check((await sketchSrc()).includes("c.length(line1, 12)"), "the length typed: c.length(line1, 12)");
+  check(await uncovered(-6, 15), "line1's length label sits beside it too (#12)");
   await clickAt(30, 0); // the bottom corners, right then left
   await clickAt(0, 0);
   const below = await screen(15, -5);
@@ -395,7 +389,7 @@ with BuildPart() as wedge:
   const x0 = (await model()).entities.find((e) => e.ref === "rect1.corners[2]").x;
   const m = await model();
   const [p1, p2] = ["line1.start", "line1.end"].map((r) => { const e = m.entities.find((x) => x.ref === r); return [e.x, e.y]; });
-  const grab = await onLine(p1, p2); // not under its labels
+  const grab = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2]; // its middle: no label covers it (#12)
   await dragFrom(grab, [grab[0], 12]); // line1 down: its 30° wedge takes the rectangle's top with it
   const corner = (await model()).entities.find((e) => e.ref === "rect1.corners[2]");
   check(Math.abs(corner.x - x0) < 1e-3 && Math.abs(corner.y - (12 + 12 * Math.tan(Math.PI / 6))) < 0.2,
