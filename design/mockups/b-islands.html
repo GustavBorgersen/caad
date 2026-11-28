@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAAD mock-up B — Islands</title>
+<link rel="stylesheet" href="assets/page.css">
+<style>
+/* ===== Direction B: Islands — the view is the whole window; everything else floats on glass ===== */
+.app {
+  --bg: radial-gradient(120% 90% at 50% 35%, #fbfbfd 0%, #eceef3 55%, #dde1e8 100%);
+  --glass: rgba(255,255,255,.72); --glass-line: rgba(255,255,255,.75); --glass-edge: rgba(20,24,40,.08);
+  --solid: #ffffff; --soft: rgba(20,24,40,.05); --text: #171a21; --muted: #626a78; --faint: #9aa1ad;
+  --accent: #5b5bd6; --accent-soft: rgba(91,91,214,.12); --on-accent: #fff;
+  --sel-hi: #c4c6ff; --sel-lo: #4646b8; --hov-hi: #e2e3ff; --hov-lo: #6c6cd8; --pre-hi: #ffd88a; --pre-lo: #b4610b;
+  --agent: #c2298a; --agent-soft: rgba(214,64,159,.12); --ok: #18a058;
+  --part-hi: #eef0f4; --part-lo: #5f6775; --edge: rgba(23,26,33,.75); --floor: rgba(30,35,55,.16);
+  --sk: #252a33; --dim: #3a3f4a; --cons: #9aa1ad;
+  --shadow: 0 12px 40px rgba(25,30,50,.14), 0 2px 6px rgba(25,30,50,.06);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
+}
+:root[data-theme="dark"] .app {
+  --bg: radial-gradient(120% 90% at 50% 35%, #2a2e36 0%, #1a1d23 55%, #111317 100%);
+  --glass: rgba(30,33,40,.7); --glass-line: rgba(255,255,255,.07); --glass-edge: rgba(0,0,0,.4);
+  --solid: #23262d; --soft: rgba(255,255,255,.06); --text: #eceef2; --muted: #9aa1ad; --faint: #6b7280;
+  --accent: #9b9cff; --accent-soft: rgba(155,156,255,.16); --on-accent: #12122e;
+  --sel-hi: #b3b4ff; --sel-lo: #3c3ca8; --hov-hi: #6e70c8; --hov-lo: #2c2d66; --pre-hi: #ffcf70; --pre-lo: #8a4a06;
+  --agent: #f472c6; --agent-soft: rgba(244,114,198,.16);
+  --part-hi: #c4cad3; --part-lo: #3a404b; --edge: rgba(5,6,8,.85); --floor: rgba(0,0,0,.45);
+  --sk: #e8eaee; --dim: #d0d4db; --cons: #6b7280;
+  --shadow: 0 14px 44px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.3);
+}
+.app { position: absolute; inset: 0; background: var(--bg); }
+.i { width: 18px; height: 18px; flex: none; }
+button { font: inherit; color: inherit; }
+kbd { font: 600 10.5px ui-monospace, monospace; padding: 1px 5px; border-radius: 5px; background: var(--soft); color: var(--muted); }
+.glass { position: absolute; background: var(--glass); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  border: 1px solid var(--glass-line); box-shadow: var(--shadow), 0 0 0 1px var(--glass-edge); border-radius: 16px; }
+
+/* islands along the top */
+.isl-file { top: 14px; left: 14px; display: flex; align-items: center; gap: 10px; padding: 7px 12px 7px 9px; }
+.mark { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--text); color: var(--solid); font-weight: 800; font-size: 12px; }
+.isl-file b { font-weight: 650; } .isl-file span { color: var(--muted); }
+.isl-file .i { width: 14px; height: 14px; color: var(--faint); }
+.isl-tools { top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 5px; }
+.mode { padding: 6px 12px 6px 10px; margin-right: 4px; border-radius: 11px; background: var(--soft); font-weight: 650; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+.mode em { font: 600 12px ui-monospace, monospace; color: var(--accent); font-style: normal; }
+.tb { position: relative; display: grid; place-items: center; width: 38px; height: 36px; border: 0; border-radius: 11px; background: none; color: var(--text); }
+.tb:hover, .tb.hov { background: var(--soft); }
+.tb.on { background: var(--accent); color: var(--on-accent); }
+.tb .i { width: 20px; height: 20px; }
+.sep { width: 1px; height: 22px; background: var(--glass-edge); margin: 0 4px; }
+.finish { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px 0 10px; border: 0; border-radius: 11px; background: var(--accent); color: var(--on-accent); font-weight: 650; margin-left: 4px; }
+.tip { position: absolute; top: 46px; left: 50%; transform: translateX(-50%); white-space: nowrap; display: flex; gap: 8px; align-items: center; padding: 5px 8px 5px 10px; border-radius: 9px; background: var(--text); color: var(--solid); font-size: 12px; font-weight: 600; box-shadow: var(--shadow); }
+.tip kbd { background: rgba(127,127,127,.3); color: inherit; }
+.isl-right { top: 14px; right: 14px; display: flex; align-items: center; gap: 2px; padding: 5px; }
+.ib { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 10px; background: none; color: var(--muted); }
+.ib.on { background: var(--accent-soft); color: var(--accent); }
+.agent { display: flex; align-items: center; gap: 7px; padding: 0 12px 0 8px; height: 34px; border-radius: 10px; color: var(--agent); background: var(--agent-soft); font-weight: 650; font-size: 12px; }
+.agent .i { width: 16px; height: 16px; }
+
+/* timeline island */
+.isl-tl { top: 74px; left: 14px; width: 248px; padding: 6px; }
+.tabs { display: flex; gap: 2px; padding: 3px; margin-bottom: 4px; border-radius: 11px; background: var(--soft); }
+.tabs span { flex: 1; text-align: center; padding: 4px 0; border-radius: 8px; color: var(--muted); font-weight: 600; font-size: 12px; }
+.tabs span.on { background: var(--solid); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.row { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 10px; position: relative; }
+.row .i { width: 16px; height: 16px; color: var(--muted); }
+.row .n { font: 650 11.5px ui-monospace, monospace; color: var(--accent); }
+.row .lbl { color: var(--muted); }
+.row b { font-weight: 550; }
+.row.hover { background: var(--accent-soft); }
+.row.active { background: var(--accent); color: var(--on-accent); }
+.row.active .i, .row.active .n, .row.active .lbl { color: var(--on-accent); }
+.row.off { opacity: .38; }
+.row .ag { margin-left: auto; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 6px; color: var(--agent); background: var(--agent-soft); }
+.row .ag .i { width: 12px; height: 12px; color: var(--agent); }
+.bar { height: 0; margin: 3px 10px; border-top: 2px solid var(--accent); position: relative; }
+.bar::after { content: ""; position: absolute; right: -4px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--glass); }
+.collapse { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px 2px; color: var(--faint); font-size: 11px; }
+
+/* the view */
+.stage { position: absolute; inset: 0; }
+.stage [data-view] { position: absolute; }
+.floor { position: absolute; border-radius: 50%; background: radial-gradient(closest-side, var(--floor), transparent); }
+svg.part { width: 100%; height: 100%; overflow: visible; }
+.status { bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; padding: 7px 14px; border-radius: 999px; font-size: 12px; color: var(--muted); }
+.status b { color: var(--text); font-weight: 600; }
+.status .ok { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 6px; }
+.cube { bottom: 14px; right: 14px; width: 60px; height: 60px; display: grid; place-items: center; color: var(--muted); border-radius: 16px; }
+.cube .i { width: 32px; height: 32px; }
+
+.part .t { fill: color-mix(in oklab, var(--part-hi) calc(var(--l) * 100%), var(--part-lo)); stroke: color-mix(in oklab, var(--part-hi) calc(var(--l) * 100%), var(--part-lo)); stroke-width: .25; }
+.part .e { fill: none; stroke: var(--edge); stroke-width: .9; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+.part.sel-top .t[data-g="top"] { fill: color-mix(in oklab, var(--sel-hi) calc(var(--l) * 100%), var(--sel-lo)); stroke: color-mix(in oklab, var(--sel-hi) calc(var(--l) * 100%), var(--sel-lo)); }
+.part.hov-hole .t[data-g="hole"] { fill: color-mix(in oklab, var(--hov-hi) calc(var(--l) * 100%), var(--hov-lo)); stroke: color-mix(in oklab, var(--hov-hi) calc(var(--l) * 100%), var(--hov-lo)); }
+.part.pre-hole .t[data-g="hole"] { fill: color-mix(in oklab, var(--pre-hi) calc(var(--l) * 100%), var(--pre-lo)); stroke: color-mix(in oklab, var(--pre-hi) calc(var(--l) * 100%), var(--pre-lo)); }
+.part.faded { --part-hi: color-mix(in oklab, var(--solid) 80%, #b8bfca); --part-lo: color-mix(in oklab, var(--solid) 62%, #7c8594); }
+.part.faded .e { stroke: var(--cons); }
+
+/* code sheet and dialog card float on the right */
+.sheet { top: 74px; right: 14px; bottom: 14px; width: 400px; display: flex; flex-direction: column; overflow: hidden; }
+.sheet header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; }
+.sheet header span { color: var(--muted); }
+.sheet header .x { margin-left: auto; color: var(--faint); }
+.sheet pre { margin: 0 6px 6px; padding: 8px 0; border-radius: 11px; background: var(--soft); font: 12px/1.7 ui-monospace, monospace; overflow: hidden; flex: 1; }
+.ln { position: relative; padding: 0 10px 0 44px; white-space: pre; }
+.ln::before { content: attr(data-n); position: absolute; left: 0; width: 30px; text-align: right; color: var(--faint); }
+.ln.hl { background: var(--accent-soft); }
+.ln.hl::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.gap { height: 9px; }
+.k { color: #9d3fd8; } .num { color: #0e7a6e; } .nm { color: var(--accent); font-weight: 650; }
+:root[data-theme="dark"] .app .k { color: #d8a8ff; } :root[data-theme="dark"] .app .num { color: #6ee0cf; }
+
+.card { top: 74px; right: 14px; width: 300px; padding: 6px 6px 8px; }
+.card header { display: flex; align-items: center; gap: 10px; padding: 8px 10px 10px; }
+.card header .ic { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.card header b { font-size: 14px; display: block; }
+.card header small { color: var(--muted); font: 11.5px ui-monospace, monospace; }
+.grp { margin: 0 4px 6px; padding: 8px 10px; border-radius: 12px; background: var(--soft); display: grid; gap: 8px; }
+.f.wide { grid-template-columns: 1fr; }
+.f { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 8px; font-size: 12px; }
+.f > span { color: var(--muted); }
+.val { display: flex; align-items: center; justify-content: space-between; padding: 5px 9px; border-radius: 8px; background: var(--solid); font: 12px ui-monospace, monospace; box-shadow: 0 0 0 1px var(--glass-edge); }
+.val small { color: var(--faint); }
+.val.focus { box-shadow: 0 0 0 2px var(--accent); }
+.pills { display: flex; gap: 4px; flex-wrap: wrap; }
+.pills span { padding: 4px 10px; border-radius: 999px; background: var(--solid); box-shadow: 0 0 0 1px var(--glass-edge); font-size: 12px; color: var(--muted); }
+.pills span.on { background: var(--accent); color: var(--on-accent); box-shadow: none; font-weight: 600; }
+.tog { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+.sw { width: 30px; height: 18px; border-radius: 999px; background: var(--glass-edge); position: relative; }
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--solid); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.sw.on { background: var(--accent); } .sw.on::after { left: 14px; }
+.acts { display: flex; gap: 6px; padding: 6px 4px 0; }
+.act { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; height: 36px; border: 0; border-radius: 11px; background: var(--soft); font-weight: 650; }
+.act.primary { background: var(--accent); color: var(--on-accent); }
+.act.primary kbd { background: rgba(255,255,255,.22); color: inherit; }
+
+/* context menu, selection chip, message */
+.menu { width: 230px; padding: 5px; border-radius: 14px; }
+.menu .h { display: flex; align-items: center; gap: 8px; padding: 6px 9px 7px; color: var(--muted); font-size: 11.5px; }
+.menu .h i { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
+.it { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: 9px; }
+.it .i { width: 16px; height: 16px; color: var(--muted); }
+.it kbd { margin-left: auto; }
+.it.hot { background: var(--accent); color: var(--on-accent); }
+.it.hot .i { color: var(--on-accent); } .it.hot kbd { background: rgba(255,255,255,.22); color: inherit; }
+.menu hr { border: 0; border-top: 1px solid var(--glass-edge); margin: 4px 6px; }
+.chip { bottom: 14px; left: 14px; display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; border-radius: 999px; font-size: 12px; }
+.chip b { color: var(--accent); }
+.chip code { font: 11px ui-monospace, monospace; color: var(--muted); padding: 3px 8px; border-radius: 999px; background: var(--soft); }
+.toast { bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; border-radius: 999px; font-size: 12px; }
+.toast button { border: 0; border-radius: 999px; padding: 4px 12px; background: var(--accent); color: var(--on-accent); font-weight: 650; }
+
+/* sketch overlay */
+.overlay .sk { fill: none; stroke: var(--sk); stroke-width: 1.8; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.overlay .sel { stroke: var(--accent); stroke-width: 3.2; }
+.overlay .cons { fill: none; stroke: var(--cons); stroke-width: 1.2; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; }
+.overlay .ref { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 1.5 3.5; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.overlay .ring { fill: var(--solid); stroke: var(--sk); stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.overlay .dot { fill: var(--sk); }
+.overlay .dl { fill: none; stroke: var(--dim); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.overlay .dt { fill: var(--dim); font: 650 1.2px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--solid); stroke-width: .35px; stroke-linejoin: round; }
+.overlay .ax-x { stroke: #e5484d; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.overlay .ax-y { stroke: #30a46c; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.overlay .gl rect { fill: var(--accent-soft); stroke: none; }
+.overlay .gl text { fill: var(--accent); font: 700 1.0px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
+.dof { color: var(--accent); font-weight: 650; }
+</style>
+</head>
+<body>
+<header class="mock-head">
+  <h1>B — Islands</h1>
+  <span class="note">The view is the whole window. Commands, timeline and dialogs float on frosted glass islands that can be tucked away; icon-only toolbar with named tooltips.</span>
+  <nav><button data-theme-choice="system">System</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button><a href="index.html" style="margin-left:10px">All directions</a></nav>
+</header>
+<main id="scenes"></main>
+
+<script src="assets/views.js"></script>
+<script src="assets/common.js"></script>
+<script>
+const fileIsland = '<div class="glass isl-file"><span class="mark">C</span><b>minibrewery</b><span>/</span><span style="color:var(--text)">hub.py</span><span data-icon="down"></span></div>';
+const rightIsland = (codeOn) => `<div class="glass isl-right"><button class="ib" data-icon="undo"></button><button class="ib" data-icon="redo"></button><span class="sep"></span>
+  <span class="agent" data-icon="agent">Claude</span><button class="ib ${codeOn ? "on" : ""}" data-icon="code"></button><button class="ib" data-icon="gear"></button></div>`;
+const PART_TOOLS = [["sketch", "Sketch", "S"], ["extrude", "Extrude", "E"], ["revolve", "Revolve", "R"], ["hole", "Hole", "H"], ["fillet", "Fillet", ""], ["chamfer", "Chamfer", ""], ["mirror", "Mirror", ""], ["plane", "Plane", "P"]];
+const SKETCH_TOOLS = [["line", "Line", "L"], ["rect", "Rectangle", "R"], ["circle", "Circle", "C"], ["arc", "Arc", "A"], ["point", "Point", "P"], ["dimension", "Dimension", "D"], ["trim", "Trim", "T"], ["construction", "Construction", "Q"]];
+const toolIsland = ({ on = "", tip = "", sketch = false } = {}) => `<div class="glass isl-tools">
+  <span class="mode">${sketch ? 'Sketch <em>sk3</em>' : "Part"}</span>
+  ${(sketch ? SKETCH_TOOLS : PART_TOOLS).map(([ic, l, k], i) => `${i === 4 && !sketch ? '<span class="sep"></span>' : ""}<button class="tb ${l === on ? "on" : ""} ${l === tip ? "hov" : ""}" data-icon="${ic}" aria-label="${l}">${l === tip ? `<span class="tip">${l}${k ? `<kbd>${k}</kbd>` : ""}</span>` : ""}</button>`).join("")}
+  ${sketch ? '<button class="finish" data-icon="check">Finish</button>' : ""}</div>`;
+const timeline = ({ hover = -1, active = -1, upto = 8, agent = -1, sketch = false } = {}) => `<div class="glass isl-tl">
+  <div class="tabs"><span class="on">Timeline</span><span>Parameters</span><span>Parts</span></div>
+  ${FEATURES.map(([ic, n, label], i) => `<div class="row ${i === hover ? "hover" : ""} ${i === active ? "active" : ""} ${i > upto ? "off" : ""}" data-icon="${ic}">
+    ${n ? `<span class="n">${n}</span>` : ""}<b>${label.split(" · ")[0]}</b><span class="lbl">${label.split(" · ").slice(1).join(" · ")}</span>
+    ${i === agent ? '<span class="ag" data-icon="agent" title="Changed by the agent"></span>' : ""}</div>${i === upto ? '<div class="bar"></div>' : ""}`).join("")}
+  ${sketch ? '<div class="row active" data-icon="sketch"><span class="n">sk3</span><b>Sketch</b><span class="lbl">top face</span></div><div class="bar"></div>' : ""}
+  <div class="collapse"><span>9 features</span><span data-icon="chevron" style="transform:rotate(180deg)"></span></div></div>`;
+const part = (view, mods, box, x, y, w, h, overlay = "") => `<div class="floor" style="left:${x + w * .12}px;top:${y + h * .66}px;width:${w * .76}px;height:${h * .2}px"></div>
+  <div data-view="${view}" data-mods="${mods}" ${overlay ? `data-overlay="${overlay}"` : ""} ${box ? `data-box="${box}"` : ""} style="left:${x}px;top:${y}px;width:${w}px;height:${h}px"></div>`;
+const code = () => { let n = 0; return `<section class="glass sheet"><header><span data-icon="code"></span><b>hub.py</b><span>31 lines</span><span class="x" data-icon="x"></span></header>
+  <pre>${CODE.map(([h, c]) => h === "gap" ? '<div class="gap"></div>' : `<div class="ln ${c ?? ""}" data-n="${++n}">${h || " "}</div>`).join("")}</pre></section>`; };
+
+const SCENES = [
+  { title: "1 · A part, its timeline and code", text: "Nothing is docked: the part sits on a soft floor in a full-window view. The timeline island has tabs for parameters and the project's parts, so there is one island on the left, not three. Hovering a row highlights the result in the view and the lines in the code; a pink sparkle marks the agent's change. The toolbar is icons only; the tooltip names the command and its key.",
+    html: () => `<div class="app"><div class="stage">${part("iso", "hov-hole", "", 270, 120, 560, 520)}</div>
+      ${fileIsland}${toolIsland({ tip: "Extrude" })}${rightIsland(true)}${timeline({ hover: 6, agent: 7 })}${code()}
+      <div class="glass status"><span><span class="ok"></span><b>Built</b></span><span>21 395 mm³</span><span>82 × 44 × 14 mm</span></div></div>` },
+  { title: "2 · Editing a feature: the dialog card floats on the right", text: "The dialog is one more island, in the same place as the code sheet; the part re-centres in the free space. Options are pills and switches; values show next to expressions. Preview is amber, so it can never be confused with selection (iris) or the agent (pink).",
+    html: () => `<div class="app"><div class="stage">${part("iso", "pre-hole", "", 280, 130, 640, 560)}</div>
+      ${fileIsland}${toolIsland({ on: "Hole" })}${rightIsland(false)}${timeline({ active: 6, upto: 6 })}
+      <section class="glass card"><header><span class="ic" data-icon="hole"></span><div><b>Counterbore holes</b><small>edit · feature 7</small></div></header>
+        <div class="grp"><div class="f wide"><span>Type</span><div class="pills"><span>Simple</span><span class="on">Counterbore</span><span>Countersink</span></div></div>
+          <div class="f"><span>At</span><div class="val">sk2 · 2 points<small data-icon="down"></small></div></div></div>
+        <div class="grp"><div class="f"><span>Radius</span><div class="val focus">bolt_r<small>2.5</small></div></div>
+          <div class="f"><span>Counterbore Ø</span><div class="val">10</div></div><div class="f"><span>Counterbore ↧</span><div class="val">2</div></div>
+          <div class="f"><span>Depth</span><div class="val"><small>through all</small></div></div></div>
+        <div class="grp"><div class="tog">Drill the other way<span class="sw"></span></div><div class="tog">Start at the far side<span class="sw on"></span></div></div>
+        <div class="acts"><button class="act">Cancel</button><button class="act primary">OK <kbd>↵</kbd></button></div></section>
+      <div class="glass status"><span>Previewing <b>Counterbore holes</b></span></div></div>` },
+  { title: "3 · The sketch editor", text: "The same toolbar island switches to the sketch tools, with the mode and the sketch's name on the left and Finish on the right. Dimensions are floating labels; constraint glyphs are small tinted badges; the part fades back to paper.",
+    html: () => `<div class="app"><div class="stage"><div data-view="top" data-mods="faded" data-overlay="sketch" data-box="-40 -26 80 52" style="left:290px;top:80px;width:960px;height:660px"></div></div>
+      ${fileIsland}${toolIsland({ on: "Dimension", sketch: true, tip: "Dimension" })}${rightIsland(false)}${timeline({ sketch: true })}
+      <div class="glass status"><span><b>sk3</b> on the top face</span><span class="dof">2 degrees of freedom</span><span>click a line, then place the dimension</span></div></div>` },
+  { title: "4 · Right-click: the context menu", text: "A glass menu with the commands that fit a face, the same icons and keys as the toolbar. The selection chip appears only while something is selected; deleting is immediate, with Undo in a pill.",
+    html: () => `<div class="app"><div class="stage">${part("iso", "sel-top", "", 270, 120, 560, 520)}</div>
+      ${fileIsland}${toolIsland()}${rightIsland(false)}${timeline()}
+      <div class="glass menu" style="left:700px;top:236px"><div class="h"><i></i>Face · plane · 1 180 mm²</div>
+        <div class="it hot" data-icon="sketch">Sketch on face<kbd>S</kbd></div><div class="it" data-icon="extrude">Extrude face<kbd>E</kbd></div><div class="it" data-icon="hole">Hole<kbd>H</kbd></div>
+        <div class="it" data-icon="plane">Plane from face<kbd>P</kbd></div><hr><div class="it" data-icon="target">View normal to<kbd>N</kbd></div><div class="it" data-icon="copy">Copy selector</div></div>
+      <div class="glass chip"><span><b>1 face</b></span><code>hub.faces().sort_by(Axis.Z)[-1]</code><span data-icon="x" style="color:var(--faint)"></span></div>
+      <div class="glass toast">Fillet r 4 deleted<button>Undo</button></div><div class="glass cube" data-icon="cube"></div></div>` },
+];
+document.getElementById("scenes").innerHTML = SCENES.map((s) => `<section class="scene"><h2>${s.title}</h2><p>${s.text}</p><div class="screen">${s.html()}</div></section>`).join("");
+</script>
+</body>
+</html>

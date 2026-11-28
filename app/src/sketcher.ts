@@ -6,13 +6,20 @@ import gcsWasm from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
 import { loadSolver } from "./gcs-solve";
 import type { Kernel, SketchAction, SketchConstraint, SketchEntity, SketchModel, SketchStatement } from "./kernel";
 import { num } from "./sketch-code";
+import type { IconName } from "./icons";
+import { onThemeChange, token } from "./theme";
+import { esc, type MenuSection } from "./ui";
 import type { PointerTool, SketchPlane, Viewer } from "./viewer";
 
-type Tool = "select" | "line" | "rect" | "circle" | "arc" | "point" | "dimension" | "trim" | "use";
-const TOOLS: [Tool, string, string][] = [
-  ["select", "↖", "Select and drag"], ["line", "╱", "Line"], ["rect", "▭", "Rectangle"],
-  ["circle", "◯", "Circle"], ["arc", "◠", "Arc"], ["point", "•", "Point"], ["dimension", "⟷", "Dimension"], ["trim", "✂", "Trim"],
-  ["use", "⤓", "Use part edges: bring them into the sketch to constrain to"],
+export type Tool = "select" | "line" | "rect" | "circle" | "arc" | "point" | "dimension" | "trim" | "use";
+/** The sketch tools, for the top bar: [tool, label, icon, key, description]. */
+export const TOOLS: [Tool, string, IconName, string | undefined, string][] = [
+  ["select", "Select", "select", undefined, "Select and drag (Esc ends any tool)"], ["line", "Line", "line", "l", "Lines that join up"],
+  ["rect", "Rectangle", "rect", "r", "A rectangle from two corners"], ["circle", "Circle", "circle", "c", "A circle from its centre"],
+  ["arc", "Arc", "arc", "a", "An arc from its centre, start and end"], ["point", "Point", "point", "p", "A point (holes go at points)"],
+  ["dimension", "Dimension", "dimension", "d", "A length, distance, angle, radius or diameter"],
+  ["trim", "Trim", "trim", "t", "Cut a curve back to where it crosses others"],
+  ["use", "Use edges", "useEdges", undefined, "Bring edges of the part into the sketch to constrain to"],
 ];
 const HINTS: Record<Tool, string> = {
   select: "Click to select (Shift: more), drag to move, Delete to remove.",
@@ -27,11 +34,13 @@ const HINTS: Record<Tool, string> = {
   trim: "Click the piece of a line, circle or arc to cut away: it goes up to the nearest crossings (with none, the whole curve).",
   use: "Click an edge of the part: it comes into the sketch as fixed guide geometry to constrain to (construction=False in the code makes it part of the regions).",
 };
-const COLOR = {
-  free: 0x1f6feb, constrained: 0x1d2228, construction: 0x8a96a3, selected: 0xe06000, hover: 0xf0a040,
-  conflict: 0xc62828, preview: 0xe67e22, grid: 0xdfe4ea, axis: 0xb0bac5, reference: 0x8a63d2,
-  dimension: 0x5b6773, xAxis: 0xd03a3a, yAxis: 0x2f9e44,
-};
+// Colours from the theme's tokens (docs/10-visual-system.md: the same states as the 3D view and the panels).
+const colors = () => ({
+  free: token("--sk-free"), constrained: token("--sk"), construction: token("--cons"), selected: token("--accent"), hover: token("--hov-lo"),
+  conflict: token("--err"), preview: token("--pre-lo"), grid: token("--grid"), axis: token("--faint"), reference: token("--muted"),
+  dimension: token("--dim"), xAxis: token("--axis-x"), yAxis: token("--axis-y"),
+});
+let COLOR = colors();
 // Points made on their own (the point tool, and their mirrored or patterned copies) are drawn as rings, unlike
 // line ends, centres and reference points (the origin, a rectangle's centre).
 const OWN_POINTS = new Set(["point", "mirror", "linear_pattern", "circular_pattern"]);
@@ -57,9 +66,11 @@ type Measure = { kind: string; refs: SketchEntity[]; value: number; shape: Pick<
 type Option = { icon: string; title: string; action: SketchAction; dim: boolean; op?: boolean };
 export type SketchHost = {
   kernel: Kernel;
-  done: (src: string) => void; // Done: the part's source with the edited sketch
+  done: (src: string) => void; // Finish: the part's source with the edited sketch
   cancel: () => void;
   status: (text: string) => void;
+  /** The tool, the selection or the sketch changed: the top bar and the sketch status follow. */
+  changed: () => void;
 };
 
 export class Sketcher implements PointerTool {
@@ -71,7 +82,8 @@ export class Sketcher implements PointerTool {
   private label = "";
   private session!: SketchSession;
   private tool: Tool = "select";
-  private construction = false;
+  /** New geometry is construction (guides only, no part of the sketch's regions). */
+  construction = false;
   private pending: Snap[] = []; // clicks of the shape being drawn
   private chain: string | null = null; // line tool: where the next line starts (the last line's end)
   private cursor: Snap | null = null;
@@ -99,10 +111,45 @@ export class Sketcher implements PointerTool {
       e.stopPropagation();
     };
     window.addEventListener("keydown", (e) => {
-      if (!this.active || (e.target as HTMLElement).tagName === "INPUT") return;
+      if (!this.active || /^(INPUT|SELECT|TEXTAREA)$/.test((e.target as HTMLElement).tagName) || (e.target as HTMLElement).closest?.(".cm-editor, .menu")) return;
       if (e.key === "Escape") this.escape();
+      else if (e.key === "Enter" && !(e.target as HTMLElement).closest?.("button")) { e.preventDefault(); this.finish(); }
       else if ((e.key === "Delete" || e.key === "Backspace") && this.selected.size) { e.preventDefault(); this.deleteSelected(); }
     });
+    onThemeChange(() => { COLOR = colors(); if (this.active) { this.updateGrid(); this.redraw(); } });
+  }
+
+  /** The current tool (the top bar shows it on). */
+  get currentTool(): Tool { return this.tool; }
+
+  /** Finish: close the editor and hand back the edited source (only with something drawn). */
+  get canFinish(): boolean { return this.active && this.model.entities.some((e) => this.drawn(e)); }
+  finish() { if (!this.canFinish) return; const src = this.session.src; this.stop(); this.host.done(src); }
+  cancel() { if (!this.active) return; this.stop(); this.host.cancel(); }
+
+  /** Construction on or off: for the selected geometry if any (the code's construction=…), else for what you draw next. */
+  async toggleConstruction() {
+    const sel = this.model.entities.filter((e) => this.selected.has(e.id) && e.stmt !== undefined && this.drawn(e) && !e.reference);
+    if (!sel.length) { this.construction = !this.construction; this.renderPanel(); return; }
+    const on = !sel.every((e) => e.construction);
+    await this.act([...new Set(sel.map((e) => e.stmt!))].map((stmt) => ({ op: "arg" as const, stmt, arg: "construction", expr: on ? "True" : "False" })));
+  }
+
+  /** Right-click in the sketch: what fits the geometry under the pointer (selected first, if it wasn't). */
+  menuSections(ev: MouseEvent): MenuSection[] {
+    const at = this.local(ev as PointerEvent);
+    const id = at && this.pick(at);
+    if (id && !this.selected.has(id)) { this.selected.clear(); this.selected.add(id); this.renderPanel(); this.redraw(); }
+    if (!this.selected.size) return [];
+    const options = this.options();
+    const n = this.selected.size;
+    return [
+      { header: `${n} selected`, items: options.map((o) => ({ label: o.title.split(":")[0], meta: o.icon, run: () => this.apply(o) })) },
+      { items: [
+        { label: "Construction on/off", icon: "construction", key: "q", run: () => this.toggleConstruction() },
+        { label: `Delete ${n}`, icon: "trash", key: "delete", danger: true, run: () => this.deleteSelected() },
+      ] },
+    ];
   }
 
   get model(): SketchModel { return this.session.model; }
@@ -148,7 +195,7 @@ export class Sketcher implements PointerTool {
     this.viewer.tool = this;
     this.viewer.onCameraChange = () => { this.updateGrid(); this.placeLabels(); };
     this.viewer.add(this.group);
-    this.panel.parentElement!.append(this.labels);
+    this.viewer.canvas.parentElement!.append(this.labels);
     this.updateGrid();
     this.renderPanel();
     this.redraw();
@@ -164,6 +211,7 @@ export class Sketcher implements PointerTool {
     this.viewer.resetUp();
     this.panel.hidden = true;
     this.labels.remove();
+    this.host.changed();
   }
 
   /** Run editor actions as code edits in the kernel; the names adds made. For tests too. */
@@ -171,7 +219,8 @@ export class Sketcher implements PointerTool {
     this.busy = true;
     try {
       const r = await this.host.kernel.sketchAction(this.session.src, this.session.index, actions);
-      this.session = { ...this.session, src: r.src, model: r.model };
+      const { name, plane, params } = this.session.model; // only sketch_open says these
+      this.session = { ...this.session, src: r.src, model: { name, plane, params, ...r.model } };
       const ids = new Set([...r.model.entities.map((e) => e.id), ...r.model.constraints.map((c) => c.id)]);
       for (const id of [...this.selected]) if (!ids.has(id)) this.selected.delete(id);
       return r.made;
@@ -562,7 +611,7 @@ export class Sketcher implements PointerTool {
     else if (this.selected.size) { this.selected.clear(); this.renderPanel(); this.redraw(); }
   }
 
-  private setTool(t: Tool) {
+  setTool(t: Tool) {
     if (this.tool === "use") this.viewer.hoverPick(null);
     this.tool = t;
     this.pending = [];
@@ -766,7 +815,7 @@ export class Sketcher implements PointerTool {
     if (points.length) this.group.add(pointCloud(points, colors, 7));
     if (rings.length) this.group.add(pointCloud(rings, ringColors, 11, ringTexture()));
     const pos = this.panel.querySelector(".cursor");
-    if (pos) pos.textContent = s ? `(${num(s.at[0])}, ${num(s.at[1])})` : "";
+    if (pos) pos.textContent = s ? `x ${num(s.at[0])}   y ${num(s.at[1])}` : "";
     this.placeLabels();
     this.viewer.render();
   }
@@ -982,49 +1031,40 @@ export class Sketcher implements PointerTool {
 
   // --- Panel ----------------------------------------------------------------------------------------
 
+  /** The sketch's state for the view's status: its name, where it is, how constrained. */
+  get status(): { name: string; where: string; state: string; tone: "free" | "ok" | "bad" } {
+    const m = this.model;
+    const state = m.error ? `Line ${m.error.line ?? "?"}: ${m.error.message}` : m.problem ? m.problem
+      : m.dof === undefined ? "" : m.dof === 0 ? "Fully constrained" : `${m.dof} degree${m.dof === 1 ? "" : "s"} of freedom`;
+    const where = this.label === m.name || this.label === "the sketch" ? (m.plane ?? "its plane").replace(/^Plane\.(XY|XZ|YZ)$/, (_, p) => `${{ XY: "Top", XZ: "Front", YZ: "Right" }[p as "XY"]} (${p})`) : this.label;
+    return { name: m.name ?? "sketch", where, state, tone: m.problem || m.error ? "bad" : m.dof === 0 ? "ok" : "free" };
+  }
+
+  /** The docked panel: the state, what the selection allows (or the tool's hint), pattern numbers, Cancel and Finish. */
   private renderPanel() {
     if (!this.active) return;
     const p = this.panel;
     p.hidden = false;
     const el = <T extends HTMLElement = HTMLElement>(tag: string, props: Record<string, unknown> = {}) => Object.assign(document.createElement(tag), props) as T;
-    const row = el("div", { className: "row" });
-    const tools = el("span", { className: "group tools" });
-    tools.append(el("b", { textContent: `Sketch${this.model.name ? ` ${this.model.name}` : ""}`, title: `Sketching on ${this.label}` }));
-    for (const [t, icon, name] of TOOLS) {
-      const b = el("button", { textContent: icon, title: name });
-      b.dataset.tool = t;
-      b.classList.toggle("on", this.tool === t);
-      b.onclick = () => this.setTool(t);
-      tools.append(b);
-    }
-    const cons = el("label", { title: "New geometry only guides: it is no part of the sketch's regions" });
-    const box = el<HTMLInputElement>("input", { type: "checkbox", checked: this.construction });
-    box.onchange = () => { this.construction = box.checked; };
-    cons.append(box, " construction");
-    tools.append(el("span", { className: "sep" }), cons);
-    row.append(tools);
-    const m = this.model;
-    const state = el("span", { className: `state${m.problem || m.error ? " bad" : m.dof === 0 ? " ok" : ""}` });
-    state.textContent = m.error ? `Line ${m.error.line ?? "?"}: ${m.error.message}` : m.problem ? m.problem
-      : m.dof === undefined ? "" : m.dof === 0 ? "Fully constrained" : `${m.dof} degree${m.dof === 1 ? "" : "s"} of freedom`;
-    row.append(state);
-    const actions = el("span", { className: "group actions" });
-    const done = el<HTMLButtonElement>("button", { textContent: "Done", className: "primary", title: "Close the sketch and save it" });
-    done.disabled = !m.entities.some((e) => this.drawn(e)); // points alone are a sketch too (holes go there)
-    done.onclick = () => { const src = this.session.src; this.stop(); this.host.done(src); };
-    const cancel = el("button", { textContent: "Cancel", title: "Leave the sketch without saving" });
-    cancel.onclick = () => { this.stop(); this.host.cancel(); };
-    actions.append(done, cancel);
-    row.append(actions);
-    const sub = el("div", { className: "sub" });
+    const st = this.status;
+    const head = el("header", { className: "dlg-head" });
+    head.innerHTML = `<b>Sketch${this.model.name ? ` ${esc(this.model.name)}` : ""}</b><span class="sub" title="Sketching on ${esc(st.where)}">on ${esc(st.where)}</span>`;
+    const state = el("div", { className: `state${st.tone === "bad" ? " bad" : st.tone === "ok" ? " ok" : ""}`, textContent: st.state });
+    const parts: HTMLElement[] = [head, state];
     const options = this.options();
-    sub.append(el("span", { className: "hint muted", textContent: this.selected.size ? (options.length ? "Constrain or dimension:" : "") : HINTS[this.tool] }));
-    for (const o of options) {
-      if (o.op && o === options.find((x) => x.op)) sub.append(el("span", { className: "sep" }));
-      const b = el<HTMLButtonElement>("button", { textContent: o.icon, title: o.title, className: `option${o.dim ? " dim" : ""}${o.op ? " op" : ""}` });
-      b.dataset.option = o.action.op === "constrain" || o.action.op === "add" ? o.action.kind : "";
-      b.onclick = () => this.apply(o);
-      sub.append(b);
+    if (this.selected.size) {
+      parts.push(el("div", { className: "section-label", textContent: options.length ? `Selection · ${this.selected.size}` : `${this.selected.size} selected` }));
+      const grid = el("div", { className: "options" });
+      for (const o of options) {
+        const b = el<HTMLButtonElement>("button", { title: o.title, className: `option${o.dim ? " dim" : ""}${o.op ? " op" : ""}` });
+        b.dataset.option = o.action.op === "constrain" || o.action.op === "add" ? o.action.kind : "";
+        b.innerHTML = `<span class="g">${esc(o.icon)}</span><span>${esc(o.title.split(":")[0])}</span>`;
+        b.onclick = () => this.apply(o);
+        grid.append(b);
+      }
+      if (options.length) parts.push(grid);
+    } else {
+      parts.push(el("div", { className: "section-label", textContent: TOOLS.find((t) => t[0] === this.tool)![1] }), el("div", { className: "hint-text", textContent: HINTS[this.tool] }));
     }
     const pattern = this.pattern();
     if (pattern) {
@@ -1035,25 +1075,41 @@ export class Sketcher implements PointerTool {
         fields.push(["dx", "Step in x", 2, call.args[2]]);
         fields.push(["dy", "Step in y", call.args.length > 3 ? 3 : "dy", call.args[3] ?? call.kwargs.dy ?? "0"]);
       } else fields.push(["angle", "Angle covered (360: all round, else from the first copy to the last)", call.args.length > 3 ? 3 : "angle", call.args[3] ?? call.kwargs.angle ?? "360"]);
-      sub.append(el("span", { className: "muted", textContent: linear ? "Pattern:" : "Circular pattern:" }));
+      parts.push(el("div", { className: "section-label", textContent: linear ? "Pattern" : "Circular pattern" }));
+      const box = el("div", { className: "fields" });
       for (const [name, title, arg, value] of fields) {
-        const label = el("label", { className: "field", title });
-        const input = el<HTMLInputElement>("input", { value, spellcheck: false, size: Math.max(3, value.length) });
+        const input = el<HTMLInputElement>("input", { value, spellcheck: false, title });
         input.dataset.arg = name;
         const commit = () => { const v = input.value.trim(); if (v && v !== value) this.act([{ op: "arg", stmt, arg, expr: v }]); };
         input.onkeydown = (e) => { if (e.key === "Enter") commit(); e.stopPropagation(); };
         input.onchange = commit;
-        label.append(`${name} `, input);
-        sub.append(label);
+        box.append(el("label", { textContent: name, title }), input);
       }
+      parts.push(box);
     }
+    const row = el("div", { className: "row-actions" });
+    const cons = el<HTMLButtonElement>("button", { className: `btn small${this.construction ? " primary" : ""}`, title: "New geometry only guides: no part of the sketch's regions · Q" });
+    cons.textContent = this.construction ? "Construction: on" : "Construction: off";
+    cons.onclick = () => this.toggleConstruction();
+    row.append(cons);
     if (this.selected.size) {
-      const del = el("button", { textContent: `Delete ${this.selected.size}`, title: "Delete the selection and what depends on it (Delete)" });
+      const del = el<HTMLButtonElement>("button", { className: "btn small", textContent: `Delete ${this.selected.size}`, title: "Delete the selection and what depends on it · Delete" });
       del.onclick = () => this.deleteSelected();
-      sub.append(del);
+      row.append(del);
     }
-    sub.append(el("span", { className: "spacer" }), el("span", { className: "muted cursor" }));
-    p.replaceChildren(row, sub);
+    parts.push(row, el("div", { className: "cursor" }));
+    const foot = el("footer", { className: "dlg-foot" });
+    const cancel = el<HTMLButtonElement>("button", { className: "btn cancel", title: "Leave the sketch without saving" });
+    cancel.innerHTML = "Cancel";
+    cancel.onclick = () => this.cancel();
+    const done = el<HTMLButtonElement>("button", { className: "btn primary", title: "Close the sketch and save it" });
+    done.innerHTML = 'Finish <kbd>↵</kbd>';
+    done.disabled = !this.canFinish; // points alone are a sketch too (holes go there)
+    done.onclick = () => this.finish();
+    foot.append(cancel, done);
+    parts.push(el("div", { className: "spacer" }), foot);
+    p.replaceChildren(...parts);
+    this.host.changed();
   }
 }
 

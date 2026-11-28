@@ -7,7 +7,6 @@ import { openApp, sleep, steps } from "../ui/env.mjs";
 
 const app = await openApp("sketch");
 after(() => app.close());
-app.answer = "widget"; // the new part's name
 const { page } = app;
 const step = steps(app);
 
@@ -23,6 +22,17 @@ const opened = () => page.waitForFunction(() => window.caad.sketcher.active && !
 const closed = () => page.waitForFunction(() => !window.caad.sketcher.active);
 const screen = (x, y) => page.evaluate(([a, b]) => window.caad.sketcher.screen([a, b]), [x, y]);
 const clickAt = async (x, y) => { const s = await screen(x, y); await page.mouse.move(s.x, s.y); await page.mouse.click(s.x, s.y); await idle(); };
+/** A point on the line from `a` to `b` that no label covers (labels' size depends on the fonts), away from its ends. */
+const onLine = async ([x0, y0], [x1, y1]) => {
+  const [a, b] = [await screen(x0, y0), await screen(x1, y1)];
+  for (const t of [0.5, 0.4, 0.6, 0.3, 0.7, 0.25, 0.75, 0.2, 0.8]) {
+    const [x, y] = [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t];
+    const s = await screen(x, y);
+    if (Math.min(Math.hypot(s.x - a.x, s.y - a.y), Math.hypot(s.x - b.x, s.y - b.y)) < 12) continue; // the ends snap within 10 px
+    if (await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.tagName === "CANVAS", [s.x, s.y])) return [x, y];
+  }
+  throw new Error("labels cover the whole line");
+};
 const shiftClickAt = async (x, y) => { await page.keyboard.down("Shift"); await clickAt(x, y); await page.keyboard.up("Shift"); };
 const dragFrom = async ([x0, y0], [x1, y1]) => {
   const a = await screen(x0, y0), b = await screen(x1, y1);
@@ -32,7 +42,7 @@ const dragFrom = async ([x0, y0], [x1, y1]) => {
   await page.mouse.up();
   await idle();
 };
-const tool = (t) => page.click(`#sketch-panel [data-tool="${t}"]`);
+const tool = (t) => page.click(`#commands [data-tool="${t}"]`);
 const option = (kind) => page.click(`#sketch-panel button.option[data-option="${kind}"]`);
 const state = () => page.$eval("#sketch-panel .state", (s) => s.textContent);
 const labels = () => page.$$eval(".sketch-labels .dim", (d) => d.map((x) => x.textContent).sort().join(" | "));
@@ -46,10 +56,14 @@ const typeDim = async (text) => {
 };
 const done = async () => { const g = await gen(); await page.click("#sketch-panel .primary"); await waitBuild(g); };
 const leave = async () => { await page.click("#sketch-panel button[title^='Leave']"); await closed(); };
-const newSketchOnTop = async () => { await page.click("#sketch-button"); await page.click('#plane-choice [data-plane="Plane.XY"]'); await opened(); };
+const newSketchOnTop = async () => {
+  await page.click('#commands [data-command="sketch"]');
+  await page.evaluate(() => [...document.querySelectorAll(".plane-menu button.it")].find((b) => b.querySelector(".l").textContent === "Top (XY)").click());
+  await opened();
+};
 const startOn = async (selector, name) => { await page.evaluate((s, n) => window.caad.startSketch(s, n), selector, name); await opened(); };
 const extrude = async ({ end, result } = {}) => {
-  await page.evaluate(() => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === "+ Extrude").click());
+  await page.click(`#commands [data-command="extrude"]`);
   await page.waitForSelector("#feature-panel:not([hidden]) .row", { timeout: 30_000 });
   if (end) await page.select('#feature-panel [data-field="until"] select', end);
   if (result) await page.select('#feature-panel [data-field="mode"] select', result);
@@ -64,19 +78,33 @@ const dblclickFeature = async (index) => {
     catch (e) { if (i > 5 || !/detached|not clickable/.test(e.message)) throw e; await sleep(200); }
   }
 };
+/** A new part, named in the Files tree (New › New part, type its name, Enter). */
+const newPart = async (name) => {
+  await page.click("#tab-files");
+  await page.click("#new-menu");
+  await page.evaluate(() => [...document.querySelectorAll(".new-menu button.it")].find((b) => b.querySelector(".l").textContent === "New part").click());
+  await page.waitForSelector("#parts .edit input", { timeout: 10_000 });
+  await page.keyboard.type(name);
+  await page.keyboard.press("Enter");
+};
 const v0 = await volume();
 const saved0 = await code();
 let savedConverted, v1, v2;
 
 step("a plain build123d sketch converts on double-click; Cancel keeps it plain, Done saves it", async () => {
   await dblclickFeature(0);
+  await page.waitForSelector("#ask-panel:not([hidden]) .primary", { timeout: 30_000 }); // CAAD's own question, docked
+  check(/plain build123d sketch/.test(await page.$eval("#ask-panel", (a) => a.textContent)), "asked whether to convert it");
+  await page.click("#ask-panel .primary");
   await opened();
-  check((await labels()) === "depth = 40 | width = 60" && /Fully constrained/.test(await state()) && /Converted/.test(await page.$eval("#status", (x) => x.textContent)),
+  check((await labels()) === "depth = 40 | width = 60" && /Fully constrained/.test(await state()) && /Converted/.test(await app.message()),
     "converted: its sizes are dimensions with their expressions", await labels());
   check((await sketchSrc()).includes("c.length(rect1.bottom, width)") && (await code()) === saved0, "the converted sketch isn't saved yet");
   await leave();
   check((await code()) === saved0, "Cancel leaves the plain sketch as it was");
   await dblclickFeature(0);
+  await page.waitForSelector("#ask-panel:not([hidden]) .primary", { timeout: 30_000 });
+  await page.keyboard.press("Enter"); // Enter answers the question
   await opened();
   await done();
   check((await code()).includes("    with BuildSketch() as base:\n        with Constrained() as c:\n            rect1 = c.rectangle((-30, -20), (30, 20))") && Math.abs((await volume()) - v0) < 1e-6,
@@ -86,7 +114,7 @@ step("a plain build123d sketch converts on double-click; Cancel keeps it plain, 
 
 step("a new sketch on Top: two clicks draw a rectangle; nothing is saved before Done", async () => {
   await newSketchOnTop();
-  check(await page.$eval('#sketch-panel [data-tool="rect"]', (b) => b.classList.contains("on")), "an empty sketch opens with the rectangle tool");
+  check(await page.$eval('#commands [data-tool="rect"]', (b) => b.classList.contains("on")), "an empty sketch opens with the rectangle tool");
   await clickAt(-10, -6);
   await clickAt(4, 6);
   const m = await model();
@@ -218,7 +246,7 @@ step("a circle on the top face, snapped to the origin, extruded", async () => {
 
 step("a new part: dragging a corner of a rectangle with one freedom left changes only its height", async () => {
   const g = await gen();
-  await page.click("#new-part");
+  await newPart("widget");
   await waitBuild(g);
   await newSketchOnTop();
   await clickAt(-50, 22);
@@ -337,7 +365,7 @@ with BuildPart() as wedge:
   check((await model()).dof === 3 && (await labels()) === "30", `the angle shows as drawn: 30, not -30 (${await labels()}); 3 degrees of freedom`);
 
   await tool("dimension");
-  await clickAt(-4.33, 15); // line1
+  await clickAt(...(await onLine([-8.66, 15], [0, 15]))); // line1 (its 30° label may sit on its middle)
   const s = await screen(-4.33, 8);
   await page.mouse.move(s.x, s.y);
   check(await page.$$eval(".sketch-labels .dim.preview", (d) => d.map((x) => x.textContent).join()) === "8.66", "a line picked: its length previewed");
@@ -365,8 +393,10 @@ with BuildPart() as wedge:
 
   await tool("select");
   const x0 = (await model()).entities.find((e) => e.ref === "rect1.corners[2]").x;
-  const y1 = (await model()).entities.find((e) => e.ref === "line1.end").y;
-  await dragFrom([-9, y1], [-9, 12]); // (its length label is in the middle) // line1 down: its 30° wedge takes the rectangle's top with it
+  const m = await model();
+  const [p1, p2] = ["line1.start", "line1.end"].map((r) => { const e = m.entities.find((x) => x.ref === r); return [e.x, e.y]; });
+  const grab = await onLine(p1, p2); // not under its labels
+  await dragFrom(grab, [grab[0], 12]); // line1 down: its 30° wedge takes the rectangle's top with it
   const corner = (await model()).entities.find((e) => e.ref === "rect1.corners[2]");
   check(Math.abs(corner.x - x0) < 1e-3 && Math.abs(corner.y - (12 + 12 * Math.tan(Math.PI / 6))) < 0.2,
     "line1 drags (the implied perpendicular is left out while dragging); the rectangle's height follows", corner);

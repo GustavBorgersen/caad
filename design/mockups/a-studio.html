@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAAD mock-up A — Studio</title>
+<link rel="stylesheet" href="assets/page.css">
+<link rel="stylesheet" href="assets/studio.css">
+</head>
+<body>
+<header class="mock-head">
+  <h1>A — Studio</h1>
+  <span class="note">Calm and technical: a cleaned-up Onshape. Commands in a slim top bar; the timeline and parameters on the left; dialogs and code dock on the right.</span>
+  <nav><button data-theme-choice="system">System</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button><a href="index.html" style="margin-left:10px">All directions</a></nav>
+</header>
+<main id="scenes"></main>
+
+<script src="assets/views.js"></script>
+<script src="assets/common.js"></script>
+<script src="assets/studio.js"></script>
+<script>
+const SCENES = [
+  { title: "1 · A part, its timeline and code", text: "Hovering a timeline row highlights its result in the view and its lines in the code (goal 9). The code drawer is open here; it slides in from the right and is closed by default. Rows show the names the code uses (sk1, sk2); a purple dot marks a feature the agent changed.",
+    html: () => `<div class="app">${topbar(partTools())}${timeline({ hover: 6, agent: 7 })}
+      <div class="view"><div data-view="iso" data-mods="hov-hole"></div><div class="cube" data-icon="cube"></div>
+      <div class="status"><span><b>hub.py</b> · built</span><span>21 395 mm³</span><span>82 × 44 × 14 mm</span></div></div>${code()}</div>` },
+  { title: "2 · Editing a feature: the dialog docks beside the view", text: "Double-click (or Enter on) a feature: the view rolls back to it and the dialog docks on the right, never over the part. The preview is teal; values show next to expressions. Enter confirms, Esc cancels.",
+    html: () => `<div class="app">${topbar(partTools("Hole"))}${timeline({ active: 6, upto: 6 })}
+      <div class="view"><div data-view="iso" data-mods="pre-hole"></div><div class="cube" data-icon="cube"></div>
+      <div class="status"><span>Previewing <b>Counterbore holes</b></span></div></div>
+      <aside class="dock"><header><span data-icon="hole"></span><b>Counterbore holes</b><span>feature 7</span></header>
+        <div class="field"><label>Type</label><div class="seg"><span>Simple</span><span class="on">Counterbore</span><span>Countersink</span></div></div>
+        <div class="field"><label>At</label><div class="input">sk2 · 2 points<span class="v" data-icon="down"></span></div></div>
+        <div class="field"><label>Radius</label><div class="input focus">bolt_r<span class="v">= 2.5</span></div></div>
+        <div class="field"><label>Counterbore</label><div class="row2"><div class="input">Ø 10</div><div class="input">↧ 2</div></div></div>
+        <div class="field"><label>Depth</label><div class="input"><span style="color:var(--faint)">through all</span></div></div>
+        <div class="check"><span class="box"></span>Drill the other way</div>
+        <div class="check"><span class="box on" data-icon="check"></span>Start at the far side</div>
+        <footer><button class="btn">Cancel <kbd>Esc</kbd></button><button class="btn primary">OK <kbd>↵</kbd></button></footer></aside></div>` },
+  { title: "3 · The sketch editor", text: "Sketch mode is a mode of the same layout: the top bar's commands become the sketch tools (with their keys), Finish confirms. Dimensions read like Onshape's; points drawn on their own are rings; construction is dashed; the selected line is blue.",
+    html: () => `<div class="app">${topbar(sketchTools)}${timeline({ upto: 8, sketch: true })}
+      <div class="view"><div data-view="top" data-mods="faded" data-overlay="sketch" data-box="-40 -26 80 52" style="inset:30px 40px 40px"></div>
+      <div class="sketch-status"><b>sk3</b> on the top face <span class="dof">· 2 degrees of freedom</span></div><div class="cube" data-icon="cube"></div>
+      <div class="status"><span><kbd>D</kbd> dimension · click a line, then place it</span></div></div></div>` },
+  { title: "4 · Right-click: the context menu", text: "The menu offers what fits what is under the mouse, with the same commands, icons and keys as the toolbar (goal 7). The selection shows as a small chip only while something is selected. Deleting happens at once, with Undo in a message (goal 10).",
+    html: () => `<div class="app">${topbar(partTools())}${timeline()}
+      <div class="view"><div data-view="iso" data-mods="sel-top"></div><div class="cube" data-icon="cube"></div>
+      <div class="menu" style="left:470px;top:150px"><div class="h">Face · plane · 1 180 mm²</div>
+        <div class="it hot" data-icon="sketch">Sketch on face<kbd>S</kbd></div><div class="it" data-icon="extrude">Extrude face<kbd>E</kbd></div><div class="it" data-icon="hole">Hole<kbd>H</kbd></div>
+        <div class="it" data-icon="plane">Plane from face<kbd>P</kbd></div><hr><div class="it" data-icon="target">View normal to<kbd>N</kbd></div><div class="it" data-icon="copy">Copy selector</div></div>
+      <div class="chip"><b>1 face</b> selected &nbsp;<code>hub.faces().sort_by(Axis.Z)[-1]</code></div>
+      <div class="toast">Fillet r 4 deleted<button>Undo</button></div></div></div>` },
+];
+document.getElementById("scenes").innerHTML = SCENES.map((s) => `<section class="scene"><h2>${s.title}</h2><p>${s.text}</p><div class="screen">${s.html()}</div></section>`).join("");
+</script>
+</body>
+</html>

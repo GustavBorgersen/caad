@@ -6,6 +6,7 @@ import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import type { Mesh, PlaneOutline, SketchOutline } from "./kernel";
+import { onThemeChange, reduceMotion, token } from "./theme";
 
 export type SketchPlane = { origin: number[]; x: number[]; y: number[]; z: number[] };
 
@@ -22,19 +23,29 @@ export interface PointerTool {
 
 export type Pick = { kind: "face" | "edge"; index: number; type: string; point: [number, number, number] };
 
-const COLORS = {
-  face: new THREE.Color(0xc3ccd6),
-  faceHover: new THREE.Color(0xf2d38b),
-  faceSelected: new THREE.Color(0xf0a040),
-  faceAgent: new THREE.Color(0x7cc4f0),
-  edge: new THREE.Color(0x2a3038),
-  edgeHover: new THREE.Color(0xd08a00),
-  edgeSelected: new THREE.Color(0xe06000),
-  edgeAgent: new THREE.Color(0x1a7fd0),
-};
-const SKETCH_COLOR = 0x1f6feb; // outlines of sketches no feature uses yet
-const PLANE_COLOR = 0x8a63d2; // plane features no feature uses yet
-const AXIS_COLORS = { X: 0xd03a3a, Y: 0x2f9e44 }; // a plane's own X and Y, as in the sketch editor
+// Colours come from the theme's tokens (docs/10-visual-system.md), read again when the theme changes.
+const mix = (a: number, b: number, t: number) => new THREE.Color(a).lerp(new THREE.Color(b), t);
+function palette() {
+  return {
+    face: mix(token("--part-hi"), token("--part-lo"), 0.12),
+    faceHover: new THREE.Color(token("--hov-hi")),
+    faceSelected: new THREE.Color(token("--sel-hi")),
+    facePreview: new THREE.Color(token("--pre-hi")),
+    faceAgent: mix(token("--agent"), token("--part-hi"), 0.55),
+    faceFaded: mix(token("--part-hi"), token("--panel"), 0.55),
+    edge: new THREE.Color(token("--edge")),
+    edgeFaded: new THREE.Color(token("--cons")),
+    edgeHover: new THREE.Color(token("--hov-lo")),
+    edgeSelected: new THREE.Color(token("--accent")),
+    edgePreview: new THREE.Color(token("--pre-lo")),
+    edgeAgent: new THREE.Color(token("--agent")),
+    sketch: token("--sk"), // outlines of sketches no feature uses yet
+    plane: token("--plane"), // plane features
+    axisX: token("--axis-x"), axisY: token("--axis-y"), // a plane's own X and Y, as in the sketch editor
+    background: token("--view-bottom"),
+  };
+}
+let COLORS = palette();
 const EDGE_PICK_PX = 6;
 const MARKED_EDGE_PX = 3; // selected/hovered/highlighted edges are drawn this wide (WebGL lines are always 1 px)
 
@@ -56,19 +67,27 @@ export class Viewer {
   private markedMaterial = new LineMaterial({ linewidth: MARKED_EDGE_PX, vertexColors: true, depthTest: true });
   private hovered: Pick | null = null;
   private agent: Pick[] = [];
+  private faded = false;
+  private fresh = new Set<number>(); // faces a dialog's preview adds or changes (drawn in the preview colour)
+  private previewBase: Set<string> | null = null; // the faces before the edited feature, as keys (see faceKey)
   selection: Pick[] = [];
   onSelect: (selection: Pick[]) => void = () => {};
+  /** Right-click without dragging (a drag pans): what is under the pointer, for the context menu. */
+  onContext: (pick: Pick | null, ev: MouseEvent) => void = () => {};
   tool: PointerTool | null = null;
   onCameraChange: () => void = () => {};
+  /** Called on every camera change, besides onCameraChange (the view cube). */
+  private viewListeners = new Set<() => void>();
 
   constructor(private el: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // transparent: the view's gradient shows through
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setClearColor(0xeef1f4);
+    this.renderer.setClearColor(0x000000, 0);
     el.prepend(this.renderer.domElement);
     this.camera.up.set(0, 0, 1);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.addEventListener("change", () => { this.onCameraChange(); this.render(); });
+    this.controls.addEventListener("change", () => { this.onCameraChange(); for (const f of this.viewListeners) f(); this.render(); });
+    onThemeChange(() => this.retheme());
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8090a0, 1.6));
     const sun = this.sun;
     sun.position.set(1, -1, 2);
@@ -80,7 +99,7 @@ export class Viewer {
   }
 
   /** Show a new mesh. `fit` re-frames the camera (new part); otherwise the view stays put (rebuild). */
-  setMesh(mesh: Mesh | null, fit: boolean) {
+  setMesh(mesh: Mesh | null, fit: boolean, preview = false) {
     for (const obj of [this.faces, this.edges]) if (obj) { this.scene.remove(obj); obj.geometry.dispose(); obj.material.dispose(); }
     if (this.marked) { this.scene.remove(this.marked); this.marked.geometry.dispose(); this.marked = null; }
     this.faces = this.edges = null;
@@ -103,9 +122,12 @@ export class Viewer {
       return [lo, hi];
     });
     this.faces = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide,
+      vertexColors: true, roughness: 0.6, metalness: 0, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, // edges draw on top of faces
     }));
+    // A preview: the faces that weren't there before the edited feature are drawn in the preview colour.
+    this.fresh = new Set();
+    if (preview && this.previewBase) mesh.faces.forEach((_, f) => { if (!this.previewBase!.has(faceKey(mesh, f))) this.fresh.add(f); });
 
     const segs: number[] = [], edgeOfSeg: number[] = [];
     this.edgeVertices = mesh.edges.map((e, i) => {
@@ -123,9 +145,16 @@ export class Viewer {
     this.edges = new THREE.LineSegments(lgeo, new THREE.LineBasicMaterial({ vertexColors: true }));
 
     this.scene.add(this.faces, this.edges);
+    this.applyFade();
     this.recolor();
     if (fit) this.fit(mesh.bbox);
     this.render();
+  }
+
+  /** A dialog opened on the shown part: its later previews colour what they add or change. Null: no preview. */
+  setPreviewBase(mesh: Mesh | null) {
+    this.previewBase = mesh ? new Set(mesh.faces.map((_, f) => faceKey(mesh, f))) : null;
+    if (!mesh && this.fresh.size) { this.fresh.clear(); this.recolor(); this.render(); }
   }
 
   /** Set the selection from face/edge indices (e.g. restored after a rebuild) without firing onSelect. */
@@ -147,7 +176,11 @@ export class Viewer {
   private sketchPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
 
   /** Outlines of the sketches no feature uses yet. `fit` frames them (a part without a solid yet). */
+  private lastSketches: SketchOutline[] = [];
+  private lastPlanes: PlaneOutline[] | undefined;
+
   setSketches(sketches: SketchOutline[], fit: boolean) {
+    this.lastSketches = sketches;
     for (const obj of [this.sketchLines, this.sketchPoints]) {
       if (!obj) continue;
       this.scene.remove(obj);
@@ -158,7 +191,7 @@ export class Viewer {
     const dots = sketches.flatMap((s) => s.points ?? []);
     if (dots.length) { // drawn points (where holes can go)
       const geo = new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(dots, 3));
-      this.sketchPoints = new THREE.Points(geo, new THREE.PointsMaterial({ color: SKETCH_COLOR, size: 7, sizeAttenuation: false, depthTest: false }));
+      this.sketchPoints = new THREE.Points(geo, new THREE.PointsMaterial({ color: COLORS.sketch, size: 7, sizeAttenuation: false, depthTest: false }));
       this.sketchPoints.renderOrder = 3;
       this.scene.add(this.sketchPoints);
     }
@@ -168,7 +201,7 @@ export class Viewer {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(segs), 3));
       // Drawn on top of the part: a sketch often lies on or inside it.
-      this.sketchLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: SKETCH_COLOR, depthTest: false }));
+      this.sketchLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: COLORS.sketch, depthTest: false }));
       this.sketchLines.renderOrder = 3;
       this.scene.add(this.sketchLines);
       if (fit) {
@@ -187,6 +220,7 @@ export class Viewer {
 
   /** Plane features: a translucent square with an outline each, drawn on top like sketches. */
   setPlanes(planes: PlaneOutline[] | undefined) {
+    this.lastPlanes = planes;
     if (this.planes) {
       this.scene.remove(this.planes);
       this.planes.traverse((o) => {
@@ -209,15 +243,15 @@ export class Viewer {
           const tip = mid.clone().addScaledVector(d, 0.5), back = tip.clone().addScaledVector(d, -0.08);
           axes[axis].push(...mid.toArray(), ...tip.toArray());
           for (const side of [1, -1]) axes[axis].push(...tip.toArray(), ...back.clone().addScaledVector(n, 0.035 * side).toArray());
-          labels.push(axisLabel(axis, AXIS_COLORS[axis], tip.clone().addScaledVector(d, 0.12), hx.length() * 0.14));
+          labels.push(axisLabel(axis, axis === "X" ? COLORS.axisX : COLORS.axisY, tip.clone().addScaledVector(d, 0.12), hx.length() * 0.14));
         }
       }
       const fill = new THREE.Mesh(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(tris, 3)),
-        new THREE.MeshBasicMaterial({ color: PLANE_COLOR, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+        new THREE.MeshBasicMaterial({ color: COLORS.plane, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
       const outline = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(segs, 3)),
-        new THREE.LineBasicMaterial({ color: PLANE_COLOR, transparent: true, opacity: 0.7 }));
+        new THREE.LineBasicMaterial({ color: COLORS.plane, transparent: true, opacity: 0.7 }));
       const arrows = (["X", "Y"] as const).map((a) => new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(axes[a], 3)),
-        new THREE.LineBasicMaterial({ color: AXIS_COLORS[a] })));
+        new THREE.LineBasicMaterial({ color: a === "X" ? COLORS.axisX : COLORS.axisY })));
       fill.renderOrder = outline.renderOrder = 2;
       for (const o of [...arrows, ...labels]) o.renderOrder = 3;
       this.planes = new THREE.Group().add(fill, outline, ...arrows, ...labels);
@@ -226,19 +260,120 @@ export class Viewer {
     this.render();
   }
 
-  fit(bbox: number[]) {
+  /** Frame a box from the standard direction (a new part), or keeping the current direction (`keep`). */
+  fit(bbox: number[], opts: { keep?: boolean; animate?: boolean } = {}) {
     const [x0, y0, z0, x1, y1, z1] = bbox;
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     const radius = Math.max(1, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
     const vfov = THREE.MathUtils.degToRad(this.camera.fov);
     const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect);
     const dist = (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.05; // fits the narrower direction
-    this.camera.position.copy(center).add(new THREE.Vector3(1, -1.2, 0.9).normalize().multiplyScalar(dist));
-    this.camera.near = dist / 100;
-    this.camera.far = dist * 100;
-    this.camera.updateProjectionMatrix();
-    this.controls.target.copy(center);
-    this.controls.update();
+    const dir = opts.keep ? this.camera.position.clone().sub(this.controls.target).normalize() : new THREE.Vector3(1, -1.2, 0.9).normalize();
+    this.moveCamera(center, dir, opts.keep ? this.camera.up.clone() : new THREE.Vector3(0, 0, 1), dist, opts.animate ?? false);
+  }
+
+  /** The bounding box of what is shown (the part, else its sketches). */
+  get bbox(): number[] | null {
+    if (this.data) return this.data.bbox;
+    const g = this.sketchLines?.geometry ?? this.sketchPoints?.geometry;
+    if (!g) return null;
+    g.computeBoundingBox();
+    const { min, max } = g.boundingBox!;
+    return [min.x, min.y, min.z, max.x, max.y, max.z];
+  }
+
+  private anim = 0;
+  private animEnd = 0; // ends a move on time if animation frames stall (a busy or hidden page)
+
+  /** Put the camera at `dist` from `center` along `dir` with `up`; animated (250 ms) unless reduce motion is on. */
+  moveCamera(center: THREE.Vector3, dir: THREE.Vector3, up: THREE.Vector3, dist: number, animate = true) {
+    cancelAnimationFrame(this.anim);
+    clearTimeout(this.animEnd);
+    const end = { pos: center.clone().addScaledVector(dir.clone().normalize(), dist), target: center.clone(), up: up.clone().normalize() };
+    const finish = () => {
+      cancelAnimationFrame(this.anim);
+      clearTimeout(this.animEnd);
+      this.camera.position.copy(end.pos);
+      this.camera.up.copy(end.up);
+      this.camera.near = dist / 100;
+      this.camera.far = dist * 100;
+      this.camera.updateProjectionMatrix();
+      this.controls.target.copy(end.target);
+      this.controls.update();
+    };
+    if (!animate || reduceMotion()) { finish(); return; }
+    const start = { target: this.controls.target.clone(), up: this.camera.up.clone(), off: this.camera.position.clone().sub(this.controls.target) };
+    const endOff = end.pos.clone().sub(end.target);
+    const [r0, r1] = [start.off.length(), endOff.length()];
+    const q = new THREE.Quaternion().setFromUnitVectors(start.off.clone().normalize(), endOff.clone().normalize());
+    const t0 = performance.now(), ms = 250;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / ms), e = 1 - (1 - t) ** 3; // ease out
+      const off = start.off.clone().normalize().applyQuaternion(new THREE.Quaternion().slerp(q, e)).multiplyScalar(r0 + (r1 - r0) * e);
+      this.controls.target.lerpVectors(start.target, end.target, e);
+      this.camera.position.copy(this.controls.target).add(off);
+      this.camera.up.lerpVectors(start.up, end.up, e).normalize();
+      this.camera.near = Math.min(r0, r1) / 100;
+      this.camera.far = Math.max(r0, r1) * 100;
+      this.camera.updateProjectionMatrix();
+      this.controls.update();
+      if (t < 1) this.anim = requestAnimationFrame(step); else finish();
+    };
+    this.anim = requestAnimationFrame(step);
+    this.animEnd = window.setTimeout(finish, ms + 150);
+  }
+
+  /** Look from a direction (the view cube, standard views), keeping what is shown framed. */
+  viewFrom(dir: THREE.Vector3, up?: THREE.Vector3) {
+    const bb = this.bbox;
+    const target = this.controls.target.clone();
+    let dist = this.camera.position.distanceTo(target);
+    if (bb) {
+      const [x0, y0, z0, x1, y1, z1] = bb;
+      target.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+      const radius = Math.max(1, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
+      const vfov = THREE.MathUtils.degToRad(this.camera.fov);
+      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect);
+      dist = (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.05;
+    }
+    const d = dir.clone().normalize();
+    const u = up ?? (Math.abs(d.z) > 0.99 ? new THREE.Vector3(0, d.z > 0 ? 1 : -1, 0).multiplyScalar(d.z > 0 ? 1 : -1) : new THREE.Vector3(0, 0, 1));
+    this.moveCamera(target, d, u, dist);
+  }
+
+  /** Look straight at a face of the part (its outward normal towards the viewer). */
+  viewNormalToFace(index: number) {
+    const d = this.data;
+    if (!d) return;
+    const [start, count] = d.faces[index];
+    const n = new THREE.Vector3(), c = new THREE.Vector3(), [a, b, e] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+    let area = 0;
+    for (let i = start; i < start + count; i += 3) {
+      a.fromArray(d.positions, 3 * d.indices[i]); b.fromArray(d.positions, 3 * d.indices[i + 1]); e.fromArray(d.positions, 3 * d.indices[i + 2]);
+      const t = b.clone().sub(a).cross(e.clone().sub(a));
+      n.add(t);
+      area += t.length();
+      c.addScaledVector(a.clone().add(b).add(e), t.length() / 3);
+    }
+    if (n.lengthSq() < 1e-12) return;
+    n.normalize();
+    const up = Math.abs(n.z) > 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+    this.moveCamera(this.controls.target.clone().lerp(c.divideScalar(area || 1), 1), n, up, this.camera.position.distanceTo(this.controls.target));
+  }
+
+  /** The camera's direction and up, for the view cube. */
+  get orientation(): { quaternion: THREE.Quaternion } { return { quaternion: this.camera.quaternion }; }
+  onView(f: () => void) { this.viewListeners.add(f); }
+
+  /** Repaint with the theme's colours. */
+  private retheme() {
+    COLORS = palette();
+    this.applyFade();
+    this.recolor();
+    this.setSketches(this.lastSketches, false);
+    this.setPlanes(this.lastPlanes);
+    this.offscreen?.setClearColor(COLORS.background);
+    this.render();
   }
 
   private offscreen: THREE.WebGLRenderer | null = null;
@@ -250,7 +385,7 @@ export class Viewer {
   renderImage(view = "current", width = 800, height = 600): string {
     if (!this.offscreen) {
       this.offscreen = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-      this.offscreen.setClearColor(0xeef1f4);
+      this.offscreen.setClearColor(COLORS.background);
     }
     this.offscreen.setSize(width, height, false);
     const cam = this.camera.clone();
@@ -340,12 +475,20 @@ export class Viewer {
   /** Back to Z-up orbiting after sketching. */
   resetUp() { this.camera.up.set(0, 0, 1); this.controls.update(); this.render(); }
 
+  /** Sketch mode: the part fades back (lighter and see-through, its edges in the construction colour). */
   setFacesFaded(faded: boolean) {
-    if (!this.faces) return;
-    this.faces.material.transparent = faded;
-    this.faces.material.opacity = faded ? 0.45 : 1;
-    this.faces.material.needsUpdate = true;
+    this.faded = faded;
+    this.applyFade();
+    this.recolor();
     this.render();
+  }
+
+  private applyFade() {
+    if (!this.faces) return;
+    this.faces.material.transparent = this.faded;
+    this.faces.material.opacity = this.faded ? 0.5 : 1;
+    this.faces.material.depthWrite = !this.faded;
+    this.faces.material.needsUpdate = true;
   }
 
   private resize() {
@@ -415,7 +558,14 @@ export class Viewer {
         this.render();
       }
     });
+    let right: { x: number; y: number } | null = null;
+    canvas.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      if (right && Math.hypot(ev.clientX - right.x, ev.clientY - right.y) > 4) return; // a pan, not a click
+      this.onContext(this.tool ? null : this.pick(ev as PointerEvent), ev);
+    });
     canvas.addEventListener("pointerdown", (ev) => {
+      if (ev.button === 2) right = { x: ev.clientX, y: ev.clientY };
       down = { x: ev.clientX, y: ev.clientY };
       if (ev.button === 0 && this.tool?.down?.(ev)) {
         taken = true;
@@ -452,8 +602,8 @@ export class Viewer {
     const paint = (attr: THREE.BufferAttribute, [lo, hi]: [number, number], c: THREE.Color) => {
       for (let v = lo; v <= hi; v++) attr.setXYZ(v, c.r, c.g, c.b);
     };
-    this.faceVertices.forEach((r) => paint(fc, r, COLORS.face));
-    this.edgeVertices.forEach((r) => paint(ec, r, COLORS.edge));
+    this.faceVertices.forEach((r, f) => paint(fc, r, this.faded ? COLORS.faceFaded : this.fresh.has(f) ? COLORS.facePreview : COLORS.face));
+    this.edgeVertices.forEach((r) => paint(ec, r, this.faded ? COLORS.edgeFaded : COLORS.edge));
     const mark = (p: Pick, face: THREE.Color, edge: THREE.Color) =>
       p.kind === "face" ? paint(fc, this.faceVertices[p.index], face) : paint(ec, this.edgeVertices[p.index], edge);
     for (const p of this.agent) mark(p, COLORS.faceAgent, COLORS.edgeAgent);
@@ -488,6 +638,35 @@ export class Viewer {
     this.marked.renderOrder = 1;
     this.scene.add(this.marked);
   }
+}
+
+/**
+ * A face as a key that survives rebuilds when the face's surface stays: a flat face by its plane (so one that only
+ * grew or shrank, next to a new fillet, still matches), others by their centre and area.
+ */
+function faceKey(mesh: Mesh, f: number): string {
+  const [start, count] = mesh.faces[f];
+  const p = mesh.positions, ix = mesh.indices;
+  let area = 0, cx = 0, cy = 0, cz = 0, nx = 0, ny = 0, nz = 0;
+  for (let i = start; i < start + count; i += 3) {
+    const [a, b, c] = [3 * ix[i], 3 * ix[i + 1], 3 * ix[i + 2]];
+    const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+    const vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+    const [wx, wy, wz] = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+    const t = Math.hypot(wx, wy, wz) / 2;
+    area += t;
+    nx += wx; ny += wy; nz += wz;
+    cx += t * (p[a] + p[b] + p[c]) / 3; cy += t * (p[a + 1] + p[b + 1] + p[c + 1]) / 3; cz += t * (p[a + 2] + p[b + 2] + p[c + 2]) / 3;
+  }
+  if (!area) return `${mesh.face_types[f]}:${f}`;
+  const r = (v: number, step: number) => (Math.round(v / step) * step).toFixed(2);
+  [cx, cy, cz] = [cx / area, cy / area, cz / area];
+  if (mesh.face_types[f] === "PLANE") {
+    const l = Math.hypot(nx, ny, nz) || 1;
+    [nx, ny, nz] = [nx / l, ny / l, nz / l];
+    return `P:${r(nx, 0.01)},${r(ny, 0.01)},${r(nz, 0.01)}:${r(nx * cx + ny * cy + nz * cz, 0.01)}`;
+  }
+  return `${mesh.face_types[f]}:${r(area, 0.05)}:${r(cx, 0.05)},${r(cy, 0.05)},${r(cz, 0.05)}`;
 }
 
 /** A letter in the view, `size` across, always facing the camera. */

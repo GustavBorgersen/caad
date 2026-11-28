@@ -30,7 +30,8 @@ const type = async (name, text) => {
 const values = () => page.$$eval("#feature-panel .row", (rows) => Object.fromEntries(rows.map((r) => [r.dataset.field, r.querySelector(".value")?.textContent ?? ""])));
 const message = () => page.$eval("#feature-panel .message", (m) => (m.hidden ? "" : m.textContent));
 const ok = async () => { const g = await gen(); await page.click("#feature-panel .primary"); await panelClosed(); await waitBuild(g); };
-const addAtBar = (label) => page.evaluate((l) => [...document.querySelectorAll(".rollback-bar button")].find((b) => b.textContent === l).click(), label);
+// A new feature at the rollback bar: the top bar's command ("+ Fillet" → the Fillet command).
+const addAtBar = (label) => page.click(`#commands [data-command="${label.replace("+ ", "").toLowerCase()}"]`);
 /** Open a part (or write `applySrc` to it and open it) and wait for its build. */
 const open = async (path, applySrc) => {
   const g = await gen();
@@ -137,7 +138,7 @@ step("a call feature (Cylinder in the pump body): generic dialog, add an argumen
   // A code feature (with Locations(...): Cylinder(...)): no dialog, the code is shown.
   await dblclick(2);
   await sleep(300);
-  check(await page.$eval("#feature-panel", (p) => p.hidden) && /code/.test(await page.$eval("#status", (s) => s.textContent)), "a code feature points to the code panel");
+  check(await page.$eval("#feature-panel", (p) => p.hidden) && /code/.test(await app.message()), "a code feature points to the code panel");
 });
 
 step("named sketches: the extrude's sketch is a choice of the sketches before it", async () => {
@@ -161,10 +162,10 @@ with BuildPart() as part:
 });
 
 step("deleting: refused while a later feature uses it, else the lines go", async () => {
-  app.lastDialog = "";
   await (await page.$$("#timeline .feature .del"))[1].evaluate((b) => b.click());
   await sleep(500);
-  check(/^'sk2' is used by 3\. Extrude sk2/.test(app.lastDialog) && (await code()).includes("as sk2:"), "deleting a used sketch is refused", app.lastDialog);
+  const why = await app.message();
+  check(/^'sk2' is used by 3\. Extrude sk2/.test(why) && (await code()).includes("as sk2:"), "deleting a used sketch is refused, saying why", why);
   const g = await gen();
   await (await page.$$("#timeline .feature .del"))[0].evaluate((b) => b.click());
   await waitBuild(g);
@@ -306,18 +307,19 @@ step("+ Plane on the selected top face, offset; ✎ Sketch on it; it hides once 
   await ok();
   const src = await code();
   const planes = await page.evaluate(() => window.caad.state.result.planes);
-  check(/\n    pl1 = Plane\(block\.faces\(\)[^\n]+\)\.offset\(5\)\n$/.test(src) && /Plane pl1 on a face, offset 5 mm/.test(await page.$eval("#timeline", (t) => t.textContent)),
+  check(/\n    pl1 = Plane\(block\.faces\(\)[^\n]+\)\.offset\(5\)\n$/.test(src) && /pl1\s*Plane on a face, offset 5 mm/.test(await page.$eval("#timeline", (t) => t.innerText)),
     "pl1 = Plane(<top face>).offset(5)", src);
   check(planes.length === 1 && planes[0].corners.filter((v, i) => i % 3 === 2).every((z) => Math.abs(z - 10) < 1e-6), "the plane shows, 5 above the top", planes);
   await app.shot("feature-6-plane.png");
 
   check(await page.evaluate(() => window.caad.state.selection.length === 0), "nothing is selected");
-  await page.click("#sketch-button");
-  check((await page.$$eval("#plane-features button", (b) => b.map((x) => x.textContent))).join() === "pl1", "✎ Sketch offers the plane");
-  await page.click("#plane-features button");
+  await page.click('#commands [data-command="sketch"]');
+  const offered = await page.$$eval(".plane-menu button.it .l", (b) => b.map((x) => x.textContent));
+  check(offered.join() === "Top (XY),Front (XZ),Right (YZ),pl1,Or select a flat face first, then S", "Sketch offers the standard planes and pl1", offered);
+  await page.evaluate(() => [...document.querySelectorAll(".plane-menu button.it")].find((b) => b.querySelector(".l").textContent === "pl1").click());
   await page.waitForFunction(() => window.caad.sketcher.active, { timeout: 60_000 });
   check(await page.evaluate(() => Math.abs(window.caad.sketcher.plane.origin[2] - 10) < 1e-6), "the sketch is on pl1 (z = 10)");
-  await page.click('#sketch-panel [data-tool="circle"]');
+  await page.click('#commands [data-tool="circle"]');
   for (const [x, y] of [[0, 0], [3, 0]]) {
     const s = await page.evaluate(([a, b]) => window.caad.sketcher.screen([a, b]), [x, y]);
     await page.mouse.move(s.x, s.y);

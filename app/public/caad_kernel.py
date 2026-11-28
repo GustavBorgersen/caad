@@ -1959,8 +1959,51 @@ def run(src, filename="part.py", upto=None):
     globals()["_current"] = {"ns": ns, "shape": shape, "part": info["part"]}
     return {"ok": error is None, "timeline": info, "upto": last, "error": error, "mesh": mesh,
             "sketches": _sketch_outlines(ns, feats, last), "planes": _plane_outlines(ns, feats, last, shape),
-            "summary": _summary(shape) if mesh else None,
+            "summary": _summary(shape) if mesh else None, "params": _params(src, ns),
             "times": {"build": round(t1 - t0, 3), "mesh": round(t2 - t1, 3)}}
+
+
+def _param_nodes(src):
+    """The part's parameters: top-level `name = expression` lines before its BuildPart block."""
+    out = []
+    for n in ast.parse(src).body:
+        if isinstance(n, ast.With):
+            break
+        if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+            out.append(n)
+    return out
+
+
+def _params(src, ns):
+    """Parameters with a number value (the parameters panel): name, expression, value, line."""
+    out = []
+    for n in _param_nodes(src):
+        v = ns.get(n.targets[0].id)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out.append({"name": n.targets[0].id, "expr": ast.get_source_segment(src, n.value), "value": v, "line": n.lineno})
+    return out
+
+
+def patch_param(src, name, expr):
+    """Set parameter `name` to `expr`: only that expression changes in the source, the rest of the line stays."""
+    expr = expr.strip()
+    try:
+        value = ast.parse(expr, mode="eval").body
+    except SyntaxError as e:
+        raise ValueError(f"'{expr}' is not an expression: {e.msg}") from None
+    if isinstance(value, ast.NamedExpr) or "\n" in expr:
+        raise ValueError(f"'{expr}' is not a single expression.")
+    node = next((n for n in _param_nodes(src) if n.targets[0].id == name), None)
+    if node is None:
+        raise ValueError(f"There is no parameter '{name}'.")
+    lines = src.split("\n")
+    v = node.value
+    if v.lineno != v.end_lineno:  # several lines: keep the start of the first and the rest of the last
+        lines[v.lineno - 1:v.end_lineno] = [lines[v.lineno - 1][:v.col_offset] + expr + lines[v.end_lineno - 1][v.end_col_offset:]]
+    else:
+        line = lines[v.lineno - 1]
+        lines[v.lineno - 1] = line[:v.col_offset] + expr + line[v.end_col_offset:]
+    return "\n".join(lines)
 
 
 def export_part(src, filename, fmt):

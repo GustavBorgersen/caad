@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAAD mock-up C — Workshop</title>
+<link rel="stylesheet" href="assets/page.css">
+<style>
+/* ===== Direction C: Workshop — warm and playful; command dock on the left, the timeline as a strip along the bottom ===== */
+.app {
+  --paper: #f6f1e8; --dots: rgba(90,70,40,.13); --card: #fffdf9; --sunk: #efe8dc; --line: #e4dacb; --text: #2b241d; --muted: #7a6d5f; --faint: #a89a89;
+  --accent: #e0573a; --accent-soft: #fbe3da; --on-accent: #fff;
+  --sel-hi: #ffc3ae; --sel-lo: #c2401f; --hov-hi: #ffe2d6; --hov-lo: #d0714f; --pre-hi: #b5ecc8; --pre-lo: #1f7a4a;
+  --agent: #6f4ef2; --agent-soft: #ebe5ff; --ok: #2f9e5f;
+  --part-hi: #f4efe7; --part-lo: #6e6459; --edge: #3a3029;
+  --sk: #2b241d; --dim: #2b241d; --cons: #b3a594;
+  --shadow: 0 2px 0 rgba(80,60,30,.08), 0 8px 24px rgba(80,60,30,.12);
+  font: 13.5px/1.4 ui-rounded, "SF Pro Rounded", "Nunito", "Varela Round", system-ui, sans-serif; color: var(--text);
+}
+:root[data-theme="dark"] .app {
+  --paper: #1d1a17; --dots: rgba(255,235,210,.07); --card: #29251f; --sunk: #221f1a; --line: #3a342c; --text: #f2ebe1; --muted: #b0a392; --faint: #7d7264;
+  --accent: #ff7a5a; --accent-soft: #432820; --on-accent: #2a1208;
+  --sel-hi: #ffb39c; --sel-lo: #a8381c; --hov-hi: #b8654b; --hov-lo: #5a2a1c; --pre-hi: #8fe0ae; --pre-lo: #1a5c39;
+  --agent: #a58dff; --agent-soft: #2e2550;
+  --part-hi: #d8d0c4; --part-lo: #47403a; --edge: #120f0c;
+  --sk: #f2ebe1; --dim: #f2ebe1; --cons: #6f6559;
+  --shadow: 0 2px 0 rgba(0,0,0,.25), 0 10px 28px rgba(0,0,0,.4);
+}
+.app { position: absolute; inset: 0; display: grid; grid-template-columns: 76px 1fr auto; grid-template-rows: 1fr 104px;
+  background: radial-gradient(var(--dots) 1px, transparent 1.2px) 0 0 / 22px 22px, var(--paper); }
+.i { width: 20px; height: 20px; flex: none; }
+button { font: inherit; color: inherit; }
+kbd { font: 700 10px ui-monospace, monospace; padding: 1px 4px; border-radius: 5px; background: var(--sunk); color: var(--muted); border: 1px solid var(--line); border-bottom-width: 2px; }
+
+/* command dock */
+.dock { grid-row: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 0; background: var(--card); border-right: 1px solid var(--line); z-index: 2; }
+.logo { width: 42px; height: 42px; border-radius: 14px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-weight: 900; font-size: 18px; margin-bottom: 10px; transform: rotate(-4deg); box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 60%, #000); }
+.cmd { position: relative; width: 60px; padding: 7px 0 5px; border: 0; border-radius: 14px; background: none; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10.5px; font-weight: 650; color: var(--muted); }
+.cmd .i { width: 22px; height: 22px; color: var(--text); }
+.cmd kbd { position: absolute; top: 3px; right: 5px; font-size: 9px; padding: 0 3px; }
+.cmd.on { background: var(--accent); color: var(--on-accent); box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 60%, #000); }
+.cmd.on .i { color: var(--on-accent); } .cmd.on kbd { background: rgba(255,255,255,.25); color: inherit; border-color: transparent; }
+.dock hr { width: 36px; border: 0; border-top: 2px dotted var(--line); margin: 6px 0; }
+.dock .end { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.round { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--sunk); color: var(--muted); border: 0; }
+.round.agent { background: var(--agent-soft); color: var(--agent); position: relative; }
+.round.agent::after { content: ""; position: absolute; right: 1px; bottom: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); border: 2px solid var(--card); }
+.finish { width: 60px; padding: 9px 0 7px; border: 0; border-radius: 14px; background: var(--ok); color: #fff; font-weight: 750; font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 2px; box-shadow: 0 3px 0 color-mix(in srgb, var(--ok) 60%, #000); margin-top: 6px; }
+
+/* the view */
+.view { position: relative; grid-column: 2; min-width: 0; }
+.view [data-view] { position: absolute; }
+svg.part { width: 100%; height: 100%; overflow: visible; }
+.where { position: absolute; top: 16px; left: 20px; display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.where span { color: var(--faint); font-weight: 500; }
+.where .badge { font-size: 11px; font-weight: 750; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.corner { position: absolute; top: 12px; right: 14px; display: flex; gap: 6px; }
+.pill { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); font-weight: 650; font-size: 12px; color: var(--muted); }
+.pill .i { width: 17px; height: 17px; }
+.pill.on { background: var(--text); color: var(--paper); border-color: var(--text); }
+.cube { position: absolute; right: 18px; bottom: 16px; color: var(--faint); }
+.cube .i { width: 40px; height: 40px; }
+.note { position: absolute; left: 20px; bottom: 16px; color: var(--muted); font-size: 12.5px; display: flex; gap: 8px; align-items: center; }
+
+.part .t { fill: color-mix(in oklab, var(--part-hi) calc(var(--l) * 100%), var(--part-lo)); stroke: color-mix(in oklab, var(--part-hi) calc(var(--l) * 100%), var(--part-lo)); stroke-width: .25; }
+.part .e { fill: none; stroke: var(--edge); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+.part.sel-top .t[data-g="top"] { fill: color-mix(in oklab, var(--sel-hi) calc(var(--l) * 100%), var(--sel-lo)); stroke: color-mix(in oklab, var(--sel-hi) calc(var(--l) * 100%), var(--sel-lo)); }
+.part.hov-hole .t[data-g="hole"] { fill: color-mix(in oklab, var(--hov-hi) calc(var(--l) * 100%), var(--hov-lo)); stroke: color-mix(in oklab, var(--hov-hi) calc(var(--l) * 100%), var(--hov-lo)); }
+.part.pre-hole .t[data-g="hole"] { fill: color-mix(in oklab, var(--pre-hi) calc(var(--l) * 100%), var(--pre-lo)); stroke: color-mix(in oklab, var(--pre-hi) calc(var(--l) * 100%), var(--pre-lo)); }
+.part.faded { --part-hi: color-mix(in oklab, var(--paper) 78%, #cfc4b4); --part-lo: color-mix(in oklab, var(--paper) 60%, #8e8274); }
+.part.faded .e { stroke: var(--cons); stroke-width: 1.1; }
+
+/* the timeline strip */
+.strip { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; gap: 0; padding: 0 16px; background: var(--card); border-top: 1px solid var(--line); position: relative; }
+.params { display: flex; flex-direction: column; gap: 4px; padding-right: 16px; margin-right: 10px; border-right: 2px dotted var(--line); }
+.params label { font-size: 10.5px; font-weight: 750; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+.params div { display: flex; gap: 6px; }
+.params span { padding: 3px 8px; border-radius: 9px; background: var(--sunk); font: 12px ui-monospace, monospace; }
+.params span b { color: var(--accent); font-weight: 700; }
+.feats { display: flex; align-items: center; position: relative; }
+.feats::before { content: ""; position: absolute; left: 20px; right: 20px; top: 50%; border-top: 2px solid var(--line); }
+.fc { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 84px; padding: 8px 2px 6px; margin: 0 2px; border-radius: 14px; background: var(--card); text-align: center; font-size: 11px; font-weight: 650; color: var(--muted); line-height: 1.15; }
+.fc .ic { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; background: var(--sunk); color: var(--text); border: 1px solid var(--line); }
+.fc .ic .i { width: 19px; height: 19px; }
+.fc .n { font: 750 11px ui-monospace, monospace; color: var(--accent); }
+.fc.hover { background: var(--accent-soft); }
+.fc.active .ic { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 60%, #000); }
+.fc.active { color: var(--text); }
+.fc.off { opacity: .35; }
+.fc .ag { position: absolute; top: 3px; right: 16px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--agent); color: #fff; }
+.fc .ag .i { width: 10px; height: 10px; }
+.roll { align-self: stretch; width: 4px; margin: 12px 4px; border-radius: 2px; background: var(--accent); position: relative; }
+.roll::before { content: ""; position: absolute; top: -6px; left: -5px; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--card); }
+.strip .add { margin-left: 6px; width: 34px; height: 34px; border-radius: 11px; border: 2px dashed var(--line); display: grid; place-items: center; color: var(--faint); }
+
+/* code and dialog dock on the right */
+.side { grid-column: 3; grid-row: 1; width: 340px; margin: 12px 12px 12px 0; border-radius: 18px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.side.code { width: 390px; }
+.side header { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+.side header .ic { width: 36px; height: 36px; border-radius: 12px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; transform: rotate(-3deg); }
+.side header b { font-size: 15px; display: block; }
+.side header small { color: var(--muted); font-size: 12px; }
+.side header .x { margin-left: auto; color: var(--faint); }
+.side pre { margin: 0 8px 8px; padding: 10px 0; flex: 1; border-radius: 12px; background: var(--sunk); font: 12px/1.7 ui-monospace, monospace; overflow: hidden; }
+.ln { position: relative; padding: 0 10px 0 44px; white-space: pre; }
+.ln::before { content: attr(data-n); position: absolute; left: 0; width: 30px; text-align: right; color: var(--faint); }
+.ln.hl { background: var(--accent-soft); }
+.ln.hl::before { color: var(--accent); font-weight: 700; }
+.gap { height: 10px; margin: 0 14px; border-bottom: 1px dashed var(--line); margin-bottom: 4px; }
+.k { color: #b04a8c; } .num { color: #2b7f74; } .nm { color: var(--accent); font-weight: 700; }
+:root[data-theme="dark"] .app .k { color: #f0a0d4; } :root[data-theme="dark"] .app .num { color: #7fd8c9; }
+.q { padding: 6px 16px; }
+.q > label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.chips { display: flex; gap: 6px; }
+.chips span { flex: 1; text-align: center; padding: 8px 0 6px; border-radius: 12px; background: var(--sunk); border: 1px solid var(--line); font-size: 11.5px; font-weight: 650; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.chips span.on { background: var(--accent-soft); border: 2px solid var(--accent); color: var(--accent); padding: 7px 0 5px; }
+.num-in { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 12px; background: var(--sunk); border: 1px solid var(--line); font: 13px ui-monospace, monospace; }
+.num-in small { margin-left: auto; color: var(--faint); font-size: 11.5px; }
+.num-in.focus { border: 2px solid var(--accent); padding: 6px 9px; background: var(--card); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pair .num-in em { font-style: normal; color: var(--faint); font-family: inherit; font-size: 11px; }
+.tick { display: flex; align-items: center; gap: 10px; padding: 5px 16px; font-weight: 600; font-size: 12.5px; }
+.tick .b { width: 20px; height: 20px; border-radius: 7px; border: 2px solid var(--cons); display: grid; place-items: center; }
+.tick .b.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.tick .b .i { width: 13px; height: 13px; }
+.side footer { margin-top: auto; display: flex; gap: 8px; padding: 14px 16px 16px; }
+.big { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; border-radius: 14px; border: 1px solid var(--line); background: var(--sunk); font-weight: 750; font-size: 14px; }
+.big.go { background: var(--ok); color: #fff; border: 0; box-shadow: 0 3px 0 color-mix(in srgb, var(--ok) 60%, #000); }
+.big.go kbd { background: rgba(255,255,255,.25); color: inherit; border-color: transparent; }
+
+/* pie menu */
+.pie { position: absolute; width: 300px; height: 300px; border-radius: 50%; transform: translate(-50%, -50%); }
+.pie .ring { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(closest-side, transparent 30%, color-mix(in srgb, var(--card) 70%, transparent) 31%, color-mix(in srgb, var(--card) 70%, transparent) 99%, transparent 100%); backdrop-filter: blur(6px); }
+.pie .hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 78px; height: 78px; border-radius: 50%; background: var(--text); color: var(--paper); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-size: 12px; font-weight: 750; line-height: 1.2; box-shadow: var(--shadow); }
+.pie .hub small { display: block; font-weight: 500; opacity: .7; }
+.pie .sl { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 7px; padding: 7px 12px 7px 9px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); font-weight: 700; font-size: 12px; white-space: nowrap; }
+.pie .sl .i { width: 17px; height: 17px; }
+.pie .sl.hot { background: var(--accent); color: var(--on-accent); border-color: var(--accent); transform: translate(-50%, -50%) scale(1.06); }
+.pie .sl.hot kbd { background: rgba(255,255,255,.25); color: inherit; border-color: transparent; }
+.pie .sl.dim { color: var(--muted); font-weight: 600; }
+.toast { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; border-radius: 999px; background: var(--text); color: var(--paper); font-weight: 650; font-size: 12.5px; box-shadow: var(--shadow); }
+.toast button { border: 0; border-radius: 999px; padding: 5px 12px; background: var(--accent); color: var(--on-accent); font-weight: 750; }
+.selchip { position: absolute; left: 20px; bottom: 16px; display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 6px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 12px; font-weight: 650; }
+.selchip i { font-style: normal; padding: 2px 9px; border-radius: 999px; background: var(--accent); color: var(--on-accent); }
+.selchip code { font: 11px ui-monospace, monospace; color: var(--muted); padding-right: 6px; }
+
+/* sketch overlay */
+.overlay .sk { fill: none; stroke: var(--sk); stroke-width: 2.2; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.overlay .sel { stroke: var(--accent); stroke-width: 3.6; }
+.overlay .cons { fill: none; stroke: var(--cons); stroke-width: 1.4; stroke-dasharray: 7 5; vector-effect: non-scaling-stroke; }
+.overlay .ref { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 1 4; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.overlay .ring { fill: var(--card); stroke: var(--sk); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+.overlay .dot { fill: var(--accent); }
+.overlay .dl { fill: none; stroke: var(--dim); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+.overlay .dt { fill: var(--accent); font: 800 1.3px ui-rounded, "Nunito", system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--paper); stroke-width: .4px; stroke-linejoin: round; }
+.overlay .ax-x { stroke: #e5484d; stroke-width: 2.4; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.overlay .ax-y { stroke: #2f9e5f; stroke-width: 2.4; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.overlay .gl rect { fill: var(--text); stroke: none; }
+.overlay .gl text { fill: var(--paper); font: 800 1.05px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
+</style>
+</head>
+<body>
+<header class="mock-head">
+  <h1>C — Workshop</h1>
+  <span class="note">Warm and playful: paper and coral, chunky buttons with their keys on them. Commands in a dock on the left, the timeline as a strip along the bottom, a pie menu on right-click.</span>
+  <nav><button data-theme-choice="system">System</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button><a href="index.html" style="margin-left:10px">All directions</a></nav>
+</header>
+<main id="scenes"></main>
+
+<script src="assets/views.js"></script>
+<script src="assets/common.js"></script>
+<script>
+const PART_CMDS = [["sketch", "Sketch", "S"], ["extrude", "Extrude", "E"], ["revolve", "Revolve", "R"], ["hole", "Hole", "H"], "-", ["fillet", "Fillet", ""], ["chamfer", "Chamfer", ""], ["mirror", "Mirror", ""], ["plane", "Plane", "P"]];
+const SKETCH_CMDS = [["line", "Line", "L"], ["rect", "Rect", "R"], ["circle", "Circle", "C"], ["arc", "Arc", "A"], ["point", "Point", "P"], "-", ["dimension", "Dimension", "D"], ["trim", "Trim", "T"], ["construction", "Construct", "Q"]];
+const dock = ({ on = "", sketch = false } = {}) => `<nav class="dock"><span class="logo">c</span>
+  ${(sketch ? SKETCH_CMDS : PART_CMDS).map((c) => c === "-" ? "<hr>" : `<button class="cmd ${c[1] === on ? "on" : ""}" data-icon="${c[0]}">${c[1]}${c[2] ? `<kbd>${c[2]}</kbd>` : ""}</button>`).join("")}
+  ${sketch ? '<button class="finish" data-icon="check">Finish</button>' : ""}
+  <div class="end"><button class="round agent" data-icon="agent" title="Claude is connected"></button><button class="round" data-icon="gear"></button></div></nav>`;
+const SHORT = ["Profile", "Revolve", "Lug", "Mirror", "Bore Ø16", "Points", "Counterbore", "Fillet r3", "Fillet r4"];
+const strip = ({ hover = -1, active = -1, upto = 8, agent = -1, sketch = false } = {}) => `<footer class="strip">
+  <div class="params"><label>Parameters</label><div><span>radius <b>22</b></span><span>height <b>14</b></span></div><div><span>bolt_r <b>2.5</b></span></div></div>
+  <div class="feats">${FEATURES.map(([ic, n], i) => `<div class="fc ${i === hover ? "hover" : ""} ${i === active ? "active" : ""} ${i > upto ? "off" : ""}">
+      <span class="ic" data-icon="${ic}"></span>${n ? `<span class="n">${n}</span>` : ""}<span>${SHORT[i]}</span>${i === agent ? '<span class="ag" data-icon="agent"></span>' : ""}</div>${i === upto && !sketch ? '<span class="roll"></span>' : ""}`).join("")}
+    ${sketch ? '<div class="fc active"><span class="ic" data-icon="sketch"></span><span class="n">sk3</span><span>Key slot</span></div><span class="roll"></span>' : ""}</div>
+  <span class="add" data-icon="plus"></span></footer>`;
+const corner = (codeOn) => `<div class="corner"><span class="pill" data-icon="undo"></span><span class="pill" data-icon="redo"></span><span class="pill ${codeOn ? "on" : ""}" data-icon="code">Code</span></div>`;
+const where = (extra = "") => `<div class="where">minibrewery <span>/</span> hub.py ${extra}</div>`;
+const code = () => { let n = 0; return `<aside class="side code"><header><span class="ic" data-icon="code"></span><div><b>hub.py</b><small>31 lines · edits rebuild as you type</small></div><span class="x" data-icon="x"></span></header>
+  <pre>${CODE.map(([h, c]) => h === "gap" ? '<div class="gap"></div>' : `<div class="ln ${c ?? ""}" data-n="${++n}">${h || " "}</div>`).join("")}</pre></aside>`; };
+const pie = (x, y) => {
+  const items = [["sketch", "Sketch on face", "S", 1], ["extrude", "Extrude face", "E"], ["hole", "Hole", "H"], ["plane", "Plane from face", "P"], ["target", "View normal", "N"], ["copy", "Copy selector", "", 0, 1]];
+  return `<div class="pie" style="left:${x}px;top:${y}px"><div class="ring"></div><div class="hub">Face<small>plane</small></div>
+    ${items.map(([ic, l, k, hot, dim], i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / items.length, r = 118;
+      return `<span class="sl ${hot ? "hot" : ""} ${dim ? "dim" : ""}" data-icon="${ic}" style="left:${150 + r * Math.cos(a)}px;top:${150 + r * Math.sin(a)}px">${l}${k ? ` <kbd>${k}</kbd>` : ""}</span>`; }).join("")}</div>`;
+};
+
+const SCENES = [
+  { title: "1 · A part, its timeline and code", text: "The timeline reads left to right along the bottom like a story, with the parameters at its start and a coral rollback bar you drag. Every command in the dock wears its key. Hovering the counterbore card lights up the holes and their code; a violet badge marks the agent's change.",
+    html: () => `<div class="app">${dock()}<div class="view"><div data-view="iso" data-mods="hov-hole" style="left:40px;top:60px;right:20px;bottom:40px"></div>
+      ${where()}${corner(true)}<div class="note"><span style="color:var(--ok)">●</span> built · 21 395 mm³ · 82 × 44 × 14 mm</div></div>${code()}${strip({ hover: 6, agent: 7 })}</div>` },
+  { title: "2 · Editing a feature: the dialog docks on the right", text: "The rollback bar jumps to the feature being edited, the rest of the strip greys out, and the dialog docks where the code was. Choices are big picture-buttons; the preview is green, the selection coral, the agent violet. A chunky green OK.",
+    html: () => `<div class="app">${dock({ on: "Hole" })}<div class="view"><div data-view="iso" data-mods="pre-hole" style="left:40px;top:60px;right:20px;bottom:40px"></div>
+      ${where('<span class="badge">editing</span>')}${corner(false)}</div>
+      <aside class="side"><header><span class="ic" data-icon="hole"></span><div><b>Counterbore holes</b><small>Feature 7 of 9</small></div></header>
+        <div class="q"><label>What kind of hole?</label><div class="chips"><span data-icon="hole">Simple</span><span class="on" data-icon="target">Counterbore</span><span data-icon="chamfer">Countersink</span></div></div>
+        <div class="q"><label>Where</label><div class="num-in">sk2 · 2 points<small data-icon="down"></small></div></div>
+        <div class="q"><label>Radius</label><div class="num-in focus">bolt_r<small>= 2.5 mm</small></div></div>
+        <div class="q"><label>Counterbore</label><div class="pair"><div class="num-in"><em>Ø</em>10</div><div class="num-in"><em>deep</em>2</div></div></div>
+        <div class="q"><label>Depth</label><div class="num-in" style="color:var(--faint)">through all</div></div>
+        <div class="tick"><span class="b"></span>Drill the other way</div><div class="tick"><span class="b on" data-icon="check"></span>Start at the far side</div>
+        <footer><button class="big">Cancel</button><button class="big go" data-icon="check">OK <kbd>↵</kbd></button></footer></aside>
+      ${strip({ active: 6, upto: 6 })}</div>` },
+  { title: "3 · The sketch editor", text: "The dock swaps to the sketch tools and gets a green Finish; the strip shows the sketch being drawn after the last feature. Dimensions are coral numbers on the paper; constraint badges are small dark stamps; the part fades to a pencil outline.",
+    html: () => `<div class="app">${dock({ on: "Dimension", sketch: true })}<div class="view"><div data-view="top" data-mods="faded" data-overlay="sketch" data-box="-40 -26 80 52" style="left:20px;top:50px;right:20px;bottom:40px"></div>
+      ${where('<span class="badge">sketch sk3 · 2 free</span>')}${corner(false)}<div class="note"><kbd>D</kbd> click a line, then place the dimension · <kbd>Esc</kbd> stop</div></div>
+      ${strip({ sketch: true })}</div>` },
+  { title: "4 · Right-click: a pie menu", text: "Right-click opens a pie around the mouse: the commands for a face, each with its key, in fixed directions so the hand learns them (flick up = Sketch). The selection chip sits bottom-left; messages drop in from the top with Undo.",
+    html: () => `<div class="app">${dock()}<div class="view"><div data-view="iso" data-mods="sel-top" style="left:40px;top:60px;right:20px;bottom:40px"></div>
+      ${where()}${pie(560, 300)}<div class="selchip"><i>1 face</i><code>hub.faces().sort_by(Axis.Z)[-1]</code></div>
+      <div class="toast">Fillet r4 deleted<button>Undo</button></div><span class="cube" data-icon="cube"></span></div>${strip()}</div>` },
+];
+document.getElementById("scenes").innerHTML = SCENES.map((s) => `<section class="scene"><h2>${s.title}</h2><p>${s.text}</p><div class="screen">${s.html()}</div></section>`).join("");
+</script>
+</body>
+</html>

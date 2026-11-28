@@ -26,7 +26,7 @@ my-project/
 ├── pyproject.toml     [tool.caad]; dependencies = ["build123d==0.13.*"]
 ├── params.py          shared parameters: parts import them (`from params import wall`)
 ├── parts/             one part per file
-└── exports/           STEP / STL, written by ⇩ Export
+└── exports/           STEP / STL, written by Export
 ```
 
 ### Running parts outside CAAD (advanced)

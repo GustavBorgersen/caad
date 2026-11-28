@@ -94,6 +94,8 @@ export function setupAgentDialog(dialog: HTMLDialogElement, button: HTMLButtonEl
 
   const update = (links: AgentLink[]) => {
     button.classList.toggle("connected", links.length > 0);
+    const name = button.querySelector(".name");
+    if (name) name.textContent = links.length ? links[0].agent.replace(/[-_]?code$/i, "").replace(/^./, (c) => c.toUpperCase()) || "Agent" : "Agent";
     button.title = links.length ? `Connected: ${links.map((l) => l.agent).join(", ")}` : "No agent connected — click to set one up";
     if (dialog.open) render(links);
   };

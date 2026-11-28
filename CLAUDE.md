@@ -44,5 +44,6 @@ npm run test:bridge               # bridge protocol test
 - **Agent guidance goes in `app/public/agent/guide.md`** (served by the page, always current), not in `bridge/instructions.md`: that is built into the bridge users install and rarely update, so it stays short and stable.
 - Verify build123d assumptions in the real kernel (Node test or `run_snippet`) before relying on them; the page runs build123d 0.13 in Pyodide with some dependencies replaced by placeholders (see `kernel.worker.ts`).
 - Don't commit binaries (`bridge/dist`, `app/public/bridge`, `app/public/kernel`) or `node_modules`.
+- **UI** (docs/09, docs/10): colours only as tokens in `app/src/style.css` (the 3D view reads them via `theme.ts`); actions are commands in `app/src/commands.ts` (toolbar, keys, menus come from there); messages, menus and questions from `app/src/ui.ts`, never `prompt`/`confirm`/`alert` (the UI tests fail on native popups).
 - **No absolute paths**: the site may be hosted in a subfolder (`base: "./"`); build URLs of the site's files with `siteUrl()` from `app/src/site.ts`.
 - **The page loads everything from its own origin** (work networks filter CDNs and PyPI); the smoke test fails on any request to another origin.
