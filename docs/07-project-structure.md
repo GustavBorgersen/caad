@@ -1,7 +1,7 @@
 # CAAD — Project structure
 
 **Date:** 2026-11-25
-**Status:** Built (2026-11-25)
+**Status:** Built (2026-11-25). [08 — Parts and mates](08-parts-and-mates.md) changes it (not built yet): `parts/` becomes `designs/` (files with one or more parts), an `imports/` folder holds STEP files, and exports go per design and part
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1 ("Project structure and project browser"); follows [06 — Sketches](06-sketches.md)
 
 ## Problem
@@ -30,11 +30,11 @@ my-workspace/              the folder you open
 ├── minibrewery/           a project
 │   ├── pyproject.toml     the project file
 │   ├── params.py          shared code: parameters, helpers (any .py without a part in it)
-│   ├── parts/             part studios: one part per file (several per file: design doc 08)
+│   ├── designs/           designs: one or more parts and their mates (was parts/; design doc 08)
+│   ├── imports/           STEP files from outside CAAD, inserted into designs (design doc 08)
 │   │   ├── pump_body.py
 │   │   └── lid.py
-│   ├── assemblies/        phase 3 (design doc 08)
-│   ├── exports/           STEP / STL, written by Export, named after the part (exports/lid.step)
+│   ├── exports/           STEP / STL, written by Export: a design's assembly (exports/box.step), its parts (exports/box/lid.stl)
 │   └── print/             phase 4: profiles (printer, material, print) and G-code
 └── fermenter/             another project
     └── …
@@ -42,7 +42,7 @@ my-workspace/              the folder you open
 
 - **A project is a folder with a `pyproject.toml` that has a `[tool.caad]` table.** CAAD looks for them in the workspace (a few levels deep). Opening a folder that is itself a project works too: a workspace with one project.
 - **Folder names inside a project are fixed** (not settings): projects look alike, and the agent and the browser know where things go. Files elsewhere in a project still open; the folders are where CAAD *writes*.
-- **Each project's folder is its import root.** CAAD runs every file with the project's folder on `sys.path`, like `python -m`: a part imports shared code as `from params import wall`, an assembly a part as `from parts.lid import lid`. Shared code is shared within a project, not across projects.
+- **Each project's folder is its import root.** CAAD runs every file with the project's folder on `sys.path`, like `python -m`: a part imports shared code as `from params import wall`, a file a part of another file as `from parts.lid import lid`. Shared code is shared within a project, not across projects.
 - **Loose build123d files** (in the workspace but in no project) still open as today. CAAD offers *Make this a CAAD project* for their folder, which only adds a `pyproject.toml` (or the `[tool.caad]` table to an existing one) — it never moves files.
 - **Line endings**: files with Windows line endings (`\r\n`, e.g. from a git checkout with `core.autocrlf`) are read as `\n` (the code panel, the kernel and the agent's `edit_part` all see `\n`) and written back with `\r\n`, so saving never mixes the two.
 - **New project** (in the project browser's header, beside *+ Part*): a name → CAAD creates the project's folder in the workspace with `pyproject.toml` and `parts/part.py` (an empty part), and opens it.
@@ -99,6 +99,6 @@ STEP and STL from the page: *⇩ Export* writes `exports/<part>.step` / `.stl` i
 | :-- | :-- |
 | What you open | **A workspace**: any folder; projects are folders in it with a `pyproject.toml` (`[tool.caad]`), so a repository can hold several |
 | Project file | **`pyproject.toml` with `[tool.caad]`**, rather than a separate `caad.toml` |
-| Inside a project | **Fixed subfolders** (`parts/`, `assemblies/`, `exports/`, `print/`) with **the project's folder as the import root** |
+| Inside a project | **Fixed subfolders** (`designs/`, `imports/`, `exports/`, `print/`; no `assemblies/`: parts and mates share files, doc 08) with **the project's folder as the import root** |
 | Git | **Not CAAD's concern** for now: it reads and writes files; the user handles git |
 | `caad` outside CAAD | **No features**: advanced users download `caad.py` from the site or repository; a PyPI package is a future feature |

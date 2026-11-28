@@ -21,7 +21,8 @@ material = "profiles/petg.toml"
 quality  = "profiles/0.2mm-strong.toml"
 
 [[part]]
-file  = "parts/hub.py"
+file  = "designs/hub.py"
+part  = "hub"         # a part of that design (doc 08)
 count = 4
 down  = "hub.faces().sort_by(Axis.Z)[0]"   # the face on the bed: a selector, so it survives edits to the part
 

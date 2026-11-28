@@ -165,7 +165,7 @@ The agent keeps writing code with `write_part` / `edit_part`. The build123d guid
 | Question | Decision |
 | :-- | :-- |
 | **Sketch body format** | Design doc 06. Until then the sketch editor can create sketches but not reopen them; double-clicking a sketch shows its code |
-| **Several parts per studio** | Design doc 08. Features act on the block's part; the registry leaves room for a `target` parameter |
+| **Several parts per file** | [08](08-parts-and-mates.md): one block per part, `with <part>:` to add to an earlier one, a *Part* field in Extrude and Revolve |
 | **Suppressing features** | Not in phase 1. Constraint for later: a suppressed feature must stay a statement, so indices and references stay stable — which rules out commenting it out. Leading candidate: `if False:` around it, which extends to configurations (`if variant == "long":`) |
 | **Features inside loops/functions** | Code features |
 | **Top-level parameters** | Expression fields offer the parameter names; a parameter table (edited the same surgical way) is a separate, later item |
