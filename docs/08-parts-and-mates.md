@@ -41,6 +41,8 @@ The workflow we want, without changing view:
 
 ### The code
 
+The mate lines (`revolute(…)`, `fastened(…)`, `place(…)`) are placeholders until the mate syntax has its own brainstorm (see Open).
+
 ```python
 # designs/box.py
 from build123d import *
@@ -174,7 +176,7 @@ with BuildPart() as shaft1:                    # Import: shaft from gearbox
 - **An imported design's mates stay in that design.** `insert(shaft.part)` brings the part as drawn in its own design, and you mate it here. caad's helpers record each mate with the design it was written in, so importing a design never places parts in the importing one.
 - **Assembly STEP files** keep their parts as labelled children (verified: a box and lid exported as one STEP read back as `Compound` children `box` and `lid`). Inserting one asks: *one part*, or *one part per body*, the parts named from the STEP's labels.
 
-## The agent## The agent
+## The agent
 
 - **`get_timeline`** lists the parts, the mates (type, parts, values, ranges) and each feature's part.
 - **`edit_feature`** works on mates like any feature: `angle=60` is a parameter. This is also how the agent "drags".
