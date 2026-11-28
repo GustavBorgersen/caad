@@ -60,17 +60,17 @@ One kind of file with any number of parts and the mates between them: no separat
 
 | Item | What |
 | :-- | :-- |
-| **Several parts in one file** (08a) | One `with BuildPart()` block per part, `with <part>:` to add to it later; own colours and visibility; *New part* or add to a part in Extrude and Revolve |
-| **Mates** (08b) | Fastened, Revolute, Slider, Cylindrical, Ball as one-line `caad` helpers; placed after the run along the mate tree; a Fastened mate written when a part is drawn on another; the mate dialog (<kbd>M</kbd>); assembly STEP |
-| **Dragging** (08c) | Drag parts within their free directions, live in the view; the value written on release; fix and release parts |
-| **Agent** (08d) | Parts and mates in `get_timeline`, mates edited with `edit_feature`, the guide |
+| **Several parts in one file** (08a) | A *design*: one `with BuildPart() as <name>:` block per part, `with <part>:` to add to it later; the block's name is the part's name (asked for, renamed with <kbd>F2</kbd>); own colours and visibility; *New part* or add to a part in Extrude and Revolve; the `designs/` folder (was `parts/`); right-click a part to export it, a design to export everything |
+| **Import** (08b) | *Insert part*: parts of other designs (linked) and STEP files from outside CAAD (copied into `imports/`), used as is or built on |
+| **Mates** (08c) | Fastened, Revolute, Slider, Cylindrical, Ball as one-line `caad` helpers; placed after the run along the mate tree; a Fastened mate written when a part is drawn on another; the mate dialog (<kbd>M</kbd>); assembly STEP |
+| **Dragging** (08d) | Drag parts within their free directions, live in the view; the value written on release; fix and release parts |
+| **Agent** (08e) | Parts and mates in `get_timeline`, mates edited with `edit_feature`, `export_part` per part, the guide |
 | **Drawing for the agent** | A pen mode draws on the view (circle an area, sketch an arrow); a `get_annotation` tool gives the agent the picture *and* the faces/edges under the strokes with their selectors |
 
-### Phase 3 — Reuse and motion
+### Phase 3 — Motion
 
 | Item | What |
 | :-- | :-- |
-| **Insert parts from other files** | Bring a part from another file in (several instances), mated like any part |
 | **Motion and checks** | Interference check; exploded view; closed loops (four-bar linkages) with a solver |
 
 ### Phase 4 — Slicing

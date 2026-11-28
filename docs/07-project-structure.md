@@ -1,7 +1,7 @@
 # CAAD — Project structure
 
 **Date:** 2026-11-25
-**Status:** Built (2026-11-25)
+**Status:** Built (2026-11-25). [08 — Parts and mates](08-parts-and-mates.md) changes it (not built yet): `parts/` becomes `designs/` (files with one or more parts), an `imports/` folder holds STEP files, and exports go per design and part
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 1 ("Project structure and project browser"); follows [06 — Sketches](06-sketches.md)
 
 ## Problem
@@ -30,10 +30,11 @@ my-workspace/              the folder you open
 ├── minibrewery/           a project
 │   ├── pyproject.toml     the project file
 │   ├── params.py          shared code: parameters, helpers (any .py without a part in it)
-│   ├── parts/             part files: one or more parts and their mates (design doc 08)
+│   ├── designs/           designs: one or more parts and their mates (was parts/; design doc 08)
+│   ├── imports/           STEP files from outside CAAD, inserted into designs (design doc 08)
 │   │   ├── pump_body.py
 │   │   └── lid.py
-│   ├── exports/           STEP / STL, written by Export, named after the part (exports/lid.step)
+│   ├── exports/           STEP / STL, written by Export: a design's assembly (exports/box.step), its parts (exports/box/lid.stl)
 │   └── print/             phase 4: profiles (printer, material, print) and G-code
 └── fermenter/             another project
     └── …
@@ -98,6 +99,6 @@ STEP and STL from the page: *⇩ Export* writes `exports/<part>.step` / `.stl` i
 | :-- | :-- |
 | What you open | **A workspace**: any folder; projects are folders in it with a `pyproject.toml` (`[tool.caad]`), so a repository can hold several |
 | Project file | **`pyproject.toml` with `[tool.caad]`**, rather than a separate `caad.toml` |
-| Inside a project | **Fixed subfolders** (`parts/`, `exports/`, `print/`; no `assemblies/`: parts and mates share files, doc 08) with **the project's folder as the import root** |
+| Inside a project | **Fixed subfolders** (`designs/`, `imports/`, `exports/`, `print/`; no `assemblies/`: parts and mates share files, doc 08) with **the project's folder as the import root** |
 | Git | **Not CAAD's concern** for now: it reads and writes files; the user handles git |
 | `caad` outside CAAD | **No features**: advanced users download `caad.py` from the site or repository; a PyPI package is a future feature |

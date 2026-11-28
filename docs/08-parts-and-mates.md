@@ -1,7 +1,7 @@
 # CAAD — Parts and mates
 
 **Date:** 2026-11-28
-**Status:** Agreed in a discussion (the workflow first, then checked in the kernel); not built
+**Status:** Agreed in a discussion (the workflow first, then checked in the kernel); naming, the `designs/` folder, export and import added the same day; not built
 **Part of:** [04 — Roadmap](04-roadmap.md), phase 2 ("Parts and mates"), which replaces the separate *part studio* and *assembly* phases; builds on [05 — Feature model](05-feature-model.md) and [09 — Design goals](09-design-and-workflow.md)
 
 ## Problem
@@ -17,7 +17,7 @@ The workflow we want, without changing view:
 
 ## The model
 
-**There is one kind of file: it holds one or more parts and the mates between them.** A file with one part is simply the smallest case. Nothing "becomes an assembly", there is no assembly object, and there is no mode switch. Parts, mates and moves are timeline rows in the same file, made with the same select → command → dialog → confirm loop (doc 09).
+**There is one kind of file, a *design*: it holds one or more parts and the mates between them.** A design with one part is simply the smallest case. Designs live in the project's `designs/` folder (doc 07 called it `parts/`; the name no longer fits files with several parts). Nothing "becomes an assembly", there is no assembly object, and there is no mode switch. Parts, mates and moves are timeline rows in the same file, made with the same select → command → dialog → confirm loop (doc 09).
 
 ### Rules
 
@@ -42,6 +42,7 @@ The workflow we want, without changing view:
 ### The code
 
 ```python
+# designs/box.py
 from build123d import *
 from caad import fastened, revolute
 
@@ -71,6 +72,15 @@ m2 = fastened(lid, knob)
 - **A mate is one statement** (`mN = …`), so it is one timeline row (doc 05: one statement, one feature). build123d's own joints need three statements per mate (a joint on each part, then `connect_to`), and `connect_to` moves the part immediately. That would make later features see the moved part, which breaks rule 1. caad's helpers record the mate instead.
 - **Selectors are evaluated on the parts as drawn.** `lid.faces().sort_by(Axis.Z)[-1]` means the lid's top face as drawn, even while the lid is shown open. A face picked in the view maps to the same face of the part as drawn (placing is only a transform, so faces keep their identity).
 - **A free part that has been moved** gets one `place(part, Location(…))` row. Later drags patch that same row instead of adding new ones. Releasing a part is `place(box, fixed=False)`; fixing it somewhere else is `place(box, Location(…), fixed=True)`. The defaults (first part fixed, others free, both where drawn) need no code.
+
+### Names
+
+**A part's name is its block's name**: `with BuildPart() as lid:` is the part `lid`. It is the one name used everywhere: the timeline, the parts list, the Files tree, mates, exports and imports in other designs (goal 9). Nothing else stores a name.
+
+- **New parts are named when they are made.** *New part* in the Extrude or Revolve dialog has a name field, prefilled with the lowest free `partN`. Typing "Lid hinge" gives `lid_hinge`: names are Python names, so spaces become `_` and invalid characters are refused while you type.
+- **Rename** (<kbd>F2</kbd>, or the context menu on a part in the parts list, the Files tree or the view) renames the block and every reference to it in the design (selectors, mates, `with lid:`). It also renames the `from designs.box import lid` lines in the project's other designs. This is doc 09's rename, applied to parts.
+- **Names are unique within a design.** Two designs can both have a `lid`.
+- **The Files tree shows a design's parts under it**, so a part can be exported, inserted elsewhere or renamed from there.
 
 ### Mates
 
@@ -117,17 +127,58 @@ The kernel runs the file as today. Every part is built as drawn and the caad hel
 
 ## Outside CAAD
 
-Running the file with plain Python builds every part as drawn. `caad.assembly()` returns the placed parts as a build123d `Compound` (children labelled with the parts' names), for a STEP export or any viewer. This keeps doc 07's promise that part files build without CAAD.
+Running the file with plain Python builds every part as drawn. `caad.assembly()` returns the placed parts as a build123d `Compound` (children labelled with the parts' names), for a STEP export or any viewer. This keeps doc 07's promise that designs build without CAAD.
 
 ## Export
 
-- **STEP** of a file with several parts is an assembly: the placed parts as labelled children.
-- **STL** is per part, as drawn: it is for printing, and slicing lays the part down anyway (doc 11).
+Export is a context-menu command (plus the top bar's *Export*, which acts on the open design):
 
-## The agent
+| Right-click | *Export* gives | Into |
+| :-- | :-- | :-- |
+| **A part** (parts list, Files tree, view) | That part alone, as drawn, as STEP or STL | `exports/<design>/<part>.step` / `.stl` |
+| **A design** (Files tree; or the top bar) | Everything: **STEP** as one assembly file, the parts placed and labelled with their names; **STL** as one file per part, as drawn | `exports/<design>.step`; `exports/<design>/<part>.stl` |
+
+- **STL per part**, because STL can't keep parts apart or name them, and each part is printed on its own (slicing lays it down anyway, doc 11).
+- **A design with one part** exports the same either way: that part.
+- **Without a project folder** (downloads instead of `exports/`), a design's STLs come as one zip.
+- **Outside CAAD**, `caad.assembly()` returns the same placed and labelled `Compound` the design's STEP is made from.
+
+## Import
+
+**An imported part is a part like any other**: its own block, name, colour and mates. It is exported, mated and dragged the same way. Using it as is means the block holds only the import. Building on it means more features follow in the block, which work on its faces and edges as usual (verified: a hole cut into an imported STEP).
+
+```python
+from designs.gearbox import shaft              # with the other imports at the top
+
+with BuildPart() as motor:                     # Import: imports/nema17.step
+    insert(import_step("imports/nema17.step"))
+    with BuildSketch(motor.faces().sort_by(Axis.Z)[-1], mode=Mode.PRIVATE) as sk1:
+        Circle(2.5)
+    extrude(sk1.sketch, amount=-8, mode=Mode.SUBTRACT)   # built on it
+
+with BuildPart() as shaft1:                    # Import: shaft from gearbox
+    insert(shaft.part)
+```
+
+| From | How | Stays linked? |
+| :-- | :-- | :-- |
+| **A part of another design** in the project | `from designs.<design> import <part>` + `insert(<part>.part)` | **Yes**: the other design is imported on every build (doc 07), so its changes show up here |
+| **A STEP file** from outside CAAD | `insert(import_step("imports/<file>.step"))`; the file is copied into the project's `imports/` folder, so the project stays self-contained and versioned | With the copy in `imports/`; replacing that file updates every design using it |
+
+- **One command, *Insert part***, opens a list:
+  - the parts of the project's other designs;
+  - the STEP files in `imports/`;
+  - *From your computer…*, which copies a STEP file into `imports/`.
+
+  It adds a new part block at the rollback bar, named after the source (`shaft1`, `nema17`) and free (rule 4) until it is mated. The same command is in the context menu of a part or STEP file in the Files tree: *Insert into <open design>*. Several instances are several blocks.
+- **An imported design's mates stay in that design.** `insert(shaft.part)` brings the part as drawn in its own design, and you mate it here. caad's helpers record each mate with the design it was written in, so importing a design never places parts in the importing one.
+- **Assembly STEP files** keep their parts as labelled children (verified: a box and lid exported as one STEP read back as `Compound` children `box` and `lid`). Inserting one asks: *one part*, or *one part per body*, the parts named from the STEP's labels.
+
+## The agent## The agent
 
 - **`get_timeline`** lists the parts, the mates (type, parts, values, ranges) and each feature's part.
 - **`edit_feature`** works on mates like any feature: `angle=60` is a parameter. This is also how the agent "drags".
+- **`export_part`** takes an optional part name: without one it exports the whole design, as the context menu does.
 - **The guide** teaches one block per part, `with <part>:` for adding to a part later, and the mate helpers with the selectors they take.
 
 ## What we verified (2026-11-28)
@@ -142,6 +193,7 @@ In the page's kernel (build123d 0.13 in Node, as the tests boot it):
 | Is `connect_to` a live constraint? | **No**: it places once. Moving the arm of a chain afterwards left the tip where it was, so placements have to be recomputed in tree order. That is why CAAD places after the run |
 | Speed | 100 `connect_to` calls take 3 ms; placing is just matrices |
 | Mating faces | A plain face-to-face rigid joint turned the lid upside down into the box, because both normals point out of their parts. Face mates need one frame flipped, by default |
+| STEP import | `import_step` works in Pyodide. An imported STEP inserted into a `BuildPart` (`insert()`; `add()` is deprecated) can be built on (a hole cut: 24000 → 23215 mm³) and the source stays unchanged, so it can be inserted twice. An assembly STEP (`Compound(children=[box, lid])`) reads back as a `Compound` with children labelled `box` and `lid` |
 | Record, then place (a prototype of the helpers) | With box, lid (revolute on the rear edges) and knob (fastened to the lid): at angle 0 the lid stays exactly as drawn; at +60° it opens upwards; the knob follows with the same volume, still touching the lid. The parts as drawn are unchanged, so selectors keep working. Orienting B's frame from A's was needed: with each edge's own direction and start point, the lid jumped at angle 0 |
 
 ## Decided
@@ -156,24 +208,29 @@ In the page's kernel (build123d 0.13 in Node, as the tests boot it):
 | **Free parts** | Drag freely; the move is written as `place(…)` |
 | **Mate types** | Fastened, Revolute, Slider, Cylindrical, Ball |
 | **Closed loops** | Not supported yet: an error at the mate that closes one |
+| **Kind of file** | A *design*, in the project's `designs/` folder (was `parts/`) |
+| **Part names** | The block's name, the only name; asked for when a part is made; <kbd>F2</kbd> renames it everywhere, also in designs that import it |
+| **Export** | Right-click a part: that part, as drawn. Right-click a design: everything, STEP as one assembly, STL one per part |
+| **Import** | One *Insert part* command for parts of other designs (linked) and STEP files (copied into `imports/`); an imported part is a part like any other, used as is or built on |
 | **Our own placement maths** | caad computes placements itself rather than calling `connect_to`: it must record instead of moving, and the view needs the same formula for dragging |
 
 ## Open
 
 | Question | Options |
 | :-- | :-- |
-| **Mate syntax** | Positional `revolute(box, <edge>, lid, <edge>, …)` as above, or keywords (`a=box, on_a=…`) for readability; settle while building 08b |
-| **Reuse across files** | *Insert part* from another file (`from bolt import bolt` and a copy per instance), mated like any part; what a copy's name and colour are, and how its file is shown |
-| **The `parts/` folder** | Files now hold several parts: keep the name, or call the files *designs*; doc 11's print file then needs a part within a file (`file = "parts/box.py"`, `part = "lid"`) |
+| **Mate syntax** | Positional `revolute(box, <edge>, lid, <edge>, …)` as above, or keywords (`a=box, on_a=…`) for readability; settle while building 08c |
+| **Existing `parts/` folders** | Read `parts/` as `designs/` (simplest; new projects get `designs/`), or offer to rename the folder and fix the imports once |
+| **Imported part placed or as drawn** | As drawn (above, and mated here); maybe later an option to bring a whole sub-assembly in with its mates |
 | **Interference, exploded views, motion** | Phase 3 items; the mate tree and placements are what they need |
 
 ## Build order
 
 | Slice | Contents |
 | :-- | :-- |
-| **08a — Several parts** | `analyze`/`run` with several part blocks and `with <part>:`. Per-part meshes and colours, the parts list with visibility, part stripes in the timeline. *Part* field in Extrude/Revolve (*New part*, add to a part). Selection knows its part. STL per part. The Files tab's *Assemblies* group and `assemblies/` folder go (`project.ts`, `files.ts`) |
-| **08b — Mates** | caad's `fastened`, `revolute`, `slider`, `cylindrical`, `ball`, `place`, `assembly()`. Placing after the run, loops and ranges as errors. The Fastened mate written when drawing on a part. The mate dialog (<kbd>M</kbd>) with preview and *Flip*. Placed parts, sketches and planes in the view; sketching on a moved part. Assembly STEP |
-| **08c — Dragging** | The mate tree to the view, dragging within the free directions, writing on release; fix and release |
-| **08d — Agent** | `get_timeline` with parts and mates, the guide |
+| **08a — Several parts** | `analyze`/`run` with several part blocks and `with <part>:`. Per-part meshes and colours, the parts list with visibility, part stripes in the timeline. *Part* field in Extrude/Revolve (*New part* with its name, add to a part). Rename. Selection knows its part. Export of a part and of a design. The `designs/` folder (examples, guide, CLAUDE.md, doc 07, `project.ts`, `files.ts`; the Files tab's *Assemblies* group and `assemblies/` go); parts under their design in the Files tree |
+| **08b — Import** | *Insert part*: parts of other designs and STEP files (`imports/`, copied in; STEP files in the kernel's file system); assembly STEP as one part or one per body |
+| **08c — Mates** | caad's `fastened`, `revolute`, `slider`, `cylindrical`, `ball`, `place`, `assembly()`, recorded per design. Placing after the run, loops and ranges as errors. The Fastened mate written when drawing on a part. The mate dialog (<kbd>M</kbd>) with preview and *Flip*. Placed parts, sketches and planes in the view; sketching on a moved part. Assembly STEP |
+| **08d — Dragging** | The mate tree to the view, dragging within the free directions, writing on release; fix and release |
+| **08e — Agent** | `get_timeline` with parts and mates, `export_part` per part, the guide |
 
 Each slice comes with kernel tests (`app/tests/kernel/`) and a UI suite (`app/tests/full/`), like every feature.
