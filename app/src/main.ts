@@ -61,7 +61,8 @@ kernel.onStatus = (text) => { $("overlay").textContent = text; $("overlay").hidd
 kernel.onReady = (s) => {
   $("overlay").hidden = true;
   $("status").title = `CAD kernel ready in ${s.toFixed(0)} s`;
-  if (state.path) rebuild();
+  // No rebuild here: opening a part always builds it, and a build sent before the kernel is ready waits in the
+  // worker and runs once it is. Rebuilding here built the part twice at start-up (#3).
 };
 
 const fmt = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: n < 10 ? 2 : n < 100 ? 1 : 0 });

@@ -126,7 +126,7 @@ Constraints that hold for every direction: no UI framework (plain TypeScript and
 | **1.5d — Undo** (done) | The per-file history, undo/redo everywhere, agent edits marked |
 | **1.5e — Themes and layout** (done) | The tokens of doc 10, light and dark, the new layout |
 | **1.5f — The view** (done) | Shading, edges, selection colours, view cube and standard views, smooth camera moves |
-| **1.5g — Start-up** | Build once at start-up ([#3](https://github.com/GustavBorgersen/caad/issues/3)) |
+| **1.5g — Start-up** (done) | Build once at start-up ([#3](https://github.com/GustavBorgersen/caad/issues/3)) |
 
 1.5b, 1.5c and 1.5d don't depend on the style and can start while the mock-ups are discussed. Each slice comes with tests, like every feature (headless UI suites check keys, menus and that no native popup opens).
 
